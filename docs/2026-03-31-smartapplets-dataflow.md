@@ -74,14 +74,21 @@ Mapped shared `0x84` metadata layout:
 
 Confirmed bit extraction from the packed flags dword at `0x10..0x13`:
 
-- bit `0x10000000` is extracted into one UI boolean
-- bit `0x00010000` is extracted into a second UI boolean
-- bit `0x40000000` is extracted into a third UI boolean
+- bit `0x10000000` is extracted into the internal field at object offset `0x54`
+- bit `0x00010000` is extracted through `FUN_004066b0` into the internal field at object offset `0x60`
+- bit `0x40000000` is extracted into the internal field at object offset `0x5c`
 
-The exact user-facing names for those three booleans are still unresolved, but the extraction sites are now pinned:
+The exact user-facing meaning of those extracted values is still unresolved, and the middle field is not a simple stable boolean in later runtime code. The extraction sites are pinned:
 
 - on-disk path: `FUN_00476650`
 - in-memory metadata path: `FUN_00476a40`
+
+Important runtime distinction:
+
+- object offset `0x58` is not the parsed `0x00010000` flag bit
+- offset `0x58` is a separate runtime marker set by the remove path `FUN_0043b010`
+- `FUN_0042c190` checks that remove marker before deciding whether an applet still counts as present in the current session
+- offset `0x60`, which initially receives the parsed `0x00010000` bit, is later reused by workflows such as `FUN_004072c0` and `FUN_00407320` as a traversal cursor / current-device index
 
 Observed examples:
 
