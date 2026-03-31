@@ -42,6 +42,14 @@ class AsUSBCommGetMacOutcome:
     collected_payload_length: int
 
 
+@dataclass(frozen=True)
+class AsUSBHidInitStep:
+    kind: str
+    payload: bytes | None = None
+    code: int | None = None
+    value: int | None = None
+
+
 def classify_alpha_smart_presence(raw_descriptor: bytes) -> AsUSBCommPresenceResult:
     if len(raw_descriptor) != 18:
         raise ValueError("presence probe descriptor must be exactly 18 bytes")
@@ -193,3 +201,26 @@ def interpret_get_mac_address_transaction(
             return AsUSBCommGetMacOutcome(write_return_code, bytes(payload[-8:]), collected_length)
 
     return AsUSBCommGetMacOutcome(write_return_code, None, collected_length)
+
+
+def build_hid_fallback_init_plan(*, os_major_version: int) -> list[AsUSBHidInitStep]:
+    if os_major_version > 4:
+        return [
+            AsUSBHidInitStep(kind="device_io_control", code=0xB0040, payload=b"\x00\x00\x00\x00"),
+            AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=(5).to_bytes(4, "little")),
+            AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=(2).to_bytes(4, "little")),
+            AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=(4).to_bytes(4, "little")),
+            AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=(1).to_bytes(4, "little")),
+            AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=(6).to_bytes(4, "little")),
+            AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=(7).to_bytes(4, "little")),
+            AsUSBHidInitStep(kind="sleep_ms", value=2000),
+        ]
+
+    return [
+        AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe0"),
+        AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe1"),
+        AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe2"),
+        AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe3"),
+        AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe4"),
+        AsUSBHidInitStep(kind="sleep_ms", value=2000),
+    ]

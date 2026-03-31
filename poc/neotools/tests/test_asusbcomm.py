@@ -2,10 +2,12 @@ import unittest
 
 from neotools.asusbcomm import (
     AsUSBCommGetMacOutcome,
+    AsUSBHidInitStep,
     AsUSBCommPresenceResult,
     AsUSBCommReadOutcome,
     AsUSBCommReadState,
     AsUSBCommSwitchResult,
+    build_hid_fallback_init_plan,
     build_get_mac_address_packet,
     build_set_mac_address_packet,
     classify_alpha_smart_presence,
@@ -283,6 +285,36 @@ class AsUSBCommMacTests(unittest.TestCase):
         self.assertEqual(result.return_code, 0)
         self.assertIsNone(result.mac_bytes)
         self.assertEqual(result.collected_payload_length, 24)
+
+
+class AsUSBHidFallbackTests(unittest.TestCase):
+    def test_build_hid_fallback_init_plan_uses_deviceiocontrol_sequence_on_newer_windows(self) -> None:
+        self.assertEqual(
+            build_hid_fallback_init_plan(os_major_version=5),
+            [
+                AsUSBHidInitStep(kind="device_io_control", code=0xB0040, payload=b"\x00\x00\x00\x00"),
+                AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=b"\x05\x00\x00\x00"),
+                AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=b"\x02\x00\x00\x00"),
+                AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=b"\x04\x00\x00\x00"),
+                AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=b"\x01\x00\x00\x00"),
+                AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=b"\x06\x00\x00\x00"),
+                AsUSBHidInitStep(kind="device_io_control", code=0xB0008, payload=b"\x07\x00\x00\x00"),
+                AsUSBHidInitStep(kind="sleep_ms", value=2000),
+            ],
+        )
+
+    def test_build_hid_fallback_init_plan_uses_five_legacy_writefile_commands_on_older_windows(self) -> None:
+        self.assertEqual(
+            build_hid_fallback_init_plan(os_major_version=4),
+            [
+                AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe0"),
+                AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe1"),
+                AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe2"),
+                AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe3"),
+                AsUSBHidInitStep(kind="write_file", payload=b"\x00\xe4"),
+                AsUSBHidInitStep(kind="sleep_ms", value=2000),
+            ],
+        )
 
 
 if __name__ == "__main__":

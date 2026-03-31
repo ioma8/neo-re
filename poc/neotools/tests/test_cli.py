@@ -58,6 +58,30 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(stdout.getvalue(), "00 00 00 00 00 00 00 00\n")
 
+    def test_asusbcomm_hid_fallback_plan_command_prints_newer_windows_sequence(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["asusbcomm-hid-fallback-plan", "5"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "\n".join(
+                [
+                    "device_io_control code=0x000b0040 payload=00 00 00 00",
+                    "device_io_control code=0x000b0008 payload=05 00 00 00",
+                    "device_io_control code=0x000b0008 payload=02 00 00 00",
+                    "device_io_control code=0x000b0008 payload=04 00 00 00",
+                    "device_io_control code=0x000b0008 payload=01 00 00 00",
+                    "device_io_control code=0x000b0008 payload=06 00 00 00",
+                    "device_io_control code=0x000b0008 payload=07 00 00 00",
+                    "sleep_ms value=2000",
+                    "",
+                ]
+            ),
+        )
+
     def test_alphaword_plan_command_prints_retrieval_sequence(self) -> None:
         stdout = io.StringIO()
 

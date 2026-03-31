@@ -235,7 +235,21 @@ Interpretation:
 
 - `EnumerateAsUsbHidInterfacesFallback` uses `HidD_GetHidGuid` and `SetupDi*` enumeration first.
 - If that path exhausts, it retries with literal GUID `{884B96C3-56EF-11D1-BC8C-00A0C91405DD}`.
-- `ProbeAndInitializeAsUsbHidInterface` opens each HID path, validates vendor `0x081e` and product `0xbd04`, then performs either `DeviceIoControl`-based or tiny `WriteFile`-based initialization followed by `Sleep(2000)`.
+- `ProbeAndInitializeAsUsbHidInterface` opens each HID path, validates vendor `0x081e` and product `0xbd04`, then performs one of two exact init sequences followed by `Sleep(2000)`:
+  - newer Windows branch (`os_major_version > 4`):
+    - `DeviceIoControl(0x0b0040, in=NULL, in_len=0, out_len=4)`
+    - `DeviceIoControl(0x0b0008, payload=05 00 00 00)`
+    - `DeviceIoControl(0x0b0008, payload=02 00 00 00)`
+    - `DeviceIoControl(0x0b0008, payload=04 00 00 00)`
+    - `DeviceIoControl(0x0b0008, payload=01 00 00 00)`
+    - `DeviceIoControl(0x0b0008, payload=06 00 00 00)`
+    - `DeviceIoControl(0x0b0008, payload=07 00 00 00)`
+  - legacy branch (`os_major_version <= 4`):
+    - `WriteFile(00 e0)`
+    - `WriteFile(00 e1)`
+    - `WriteFile(00 e2)`
+    - `WriteFile(00 e3)`
+    - `WriteFile(00 e4)`
 
 Interpretation:
 

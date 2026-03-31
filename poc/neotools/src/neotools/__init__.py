@@ -1,6 +1,7 @@
 import argparse
 
 from neotools.asusbcomm import (
+    build_hid_fallback_init_plan,
     build_get_mac_address_packet,
     build_set_mac_address_packet,
     classify_alpha_smart_presence,
@@ -63,6 +64,9 @@ def main(argv: list[str] | None = None) -> int:
     asusbcomm_set_mac_parser.add_argument("source_hex")
 
     subparsers.add_parser("asusbcomm-get-mac-packet")
+
+    asusbcomm_hid_fallback_parser = subparsers.add_parser("asusbcomm-hid-fallback-plan")
+    asusbcomm_hid_fallback_parser.add_argument("os_major_version")
 
     updater_packet_parser = subparsers.add_parser("updater-packet")
     updater_packet_parser.add_argument("command_byte")
@@ -186,6 +190,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "asusbcomm-get-mac-packet":
         print(build_get_mac_address_packet().hex(" "))
+        return 0
+
+    if args.command == "asusbcomm-hid-fallback-plan":
+        plan = build_hid_fallback_init_plan(os_major_version=int(args.os_major_version, 0))
+        for step in plan:
+            if step.kind == "sleep_ms":
+                print(f"{step.kind} value={step.value}")
+            elif step.code is not None:
+                print(f"{step.kind} code=0x{step.code:08x} payload={step.payload.hex(' ')}")
+            else:
+                print(f"{step.kind} payload={step.payload.hex(' ')}")
         return 0
 
     if args.command == "updater-packet":
