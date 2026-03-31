@@ -146,6 +146,22 @@ Inference:
   - bytes `6..7`: applet ID in big-endian order
 - The reset preamble is distinct from the switch packet and should be modeled as a separate fixed 8-byte write.
 
+Relevant higher-level callers in `neomanager.exe`:
+
+- `FUN_00438200`
+- `FUN_00438290`
+
+Both do the same direct USB bootstrap pattern:
+
+1. `AsUSBCommResetConnection()`
+2. `AsUSBCommSwitchToApplet(0)`
+3. `AsUSBCommIsAlphaSmartPresent()`
+
+Interpretation:
+
+- NeoManager first switches the device into updater-side mode using applet id `0`.
+- Later AlphaWord retrieval happens through updater packets on top of that transport, rather than by switching directly to applet `0xa000` at the USB DLL boundary.
+
 ### `AsUSBCommIsAlphaSmartPresent`
 
 Observed behavior:
@@ -233,6 +249,16 @@ Small command transactions exist on top of this:
 
 - 8-byte `?Swtch` command
 - 8-byte textual response
+- 8-byte updater command frames built as `[cmd][arg32-be][arg16-be][sum]`
+
+For AlphaWord retrieval specifically, the reconstructed fresh direct USB sequence is now:
+
+1. `?\xff\x00reset`
+2. `?Swtch\x00\x00`
+3. updater command `0x04` to enumerate applets
+4. updater command `0x13` to get file attributes
+5. updater command `0x12` or `0x1c` to begin file retrieval
+6. repeated updater command `0x10` chunk pulls
 
 ## Working Hypothesis
 
@@ -243,6 +269,10 @@ The direct transport likely works like this:
 3. Use private IOCTLs to prepare transfers or expose driver-managed buffers.
 4. Use `WriteFile` and `ReadFile` for the main data exchange.
 5. Use small fixed-width command packets for mode changes such as applet switching.
+
+For the AlphaWord retrieval and print-side flow built on top of this transport, see:
+
+- [2026-03-31-alphaword-get-print-dataflow.md](/Users/jakubkolcar/customs/neo-re/docs/2026-03-31-alphaword-get-print-dataflow.md)
 
 ## High-Value Unknowns
 
