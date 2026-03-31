@@ -300,13 +300,47 @@ Current prototype table encoded in the PoC:
 
 - `0xa000` `clear_text_screen`: `stack_argument_count = 0`, no return value used
 - `0xa004` `set_text_row_column_width`: `stack_argument_count = 3`, no return value used
+- `0xa008` `get_text_row_col`: `stack_argument_count = 2`, no return value used; writes two byte-sized coordinate-like outputs
 - `0xa010` `draw_predefined_glyph`: `stack_argument_count = 1`, no return value used
 - `0xa014` `draw_c_string_at_current_position`: `stack_argument_count = 1`, no return value used
+- `0xa020` `prepare_text_row_span`: `stack_argument_count = 3`, no return value used; prepares a row/column/width text region before redraw work
 - `0xa094` `read_key_code`: `stack_argument_count = 0`, return value used as key code
 - `0xa09c` `is_key_ready`: `stack_argument_count = 0`, return value used as readiness flag
 - `0xa0a4` `pump_ui_events`: `stack_argument_count = 0`, no return value used
+- `0xa0d4` `delay_ticks`: `stack_argument_count = 1`, no return value used; argument behaves like a pacing or timeout value
+- `0xa190` `begin_output_builder`: `stack_argument_count = 3`, no return value used
+- `0xa198` `append_output_bytes`: `stack_argument_count = 4`, no return value used
+- `0xa1b4` `query_numeric_state`: `stack_argument_count = 1`, return value used as a scalar runtime value
+- `0xa1c8` `query_object_metric`: `stack_argument_count = 2`, return value used as a scalar property query on a previously resolved runtime object or token
+- `0xa1fc` `resolve_object_by_selector`: `stack_argument_count = 2`, return value used as an object/token lookup result
 - `0xa25c` `yield_until_event`: `stack_argument_count = 0`, no return value used
-- `0xa39c` `calculator_runtime_copy_input_string`: currently treated as an internal calculator workspace helper with no explicit stack arguments at its call site
+- `0xa378` `shared_runtime_a378`: shared across calculator and alphaquiz, but still unresolved beyond “common A3xx helper”
+- `0xa390` `shared_runtime_a390`: shared across calculator and alphaquiz, returns a scalar or pointer-like value from at least one explicit argument
+- `0xa39c` `shared_runtime_a39c`: shared across calculator and alphaquiz, side-effect helper likely related to copy/unpack behavior but not pinned further
+
+New concrete `alphaquiz` evidence for the `0xa190..0xa1fc` family:
+
+- `AppendCStringToAlphaQuizOutputBuffer` first computes the string length, then calls `0xa190`, then `0xa198`
+- the call shape is stable: `0xa190(id, 0, 2)` followed by `0xa198(id, src, len, 1)`
+- a second helper in `alphaquiz` uses `0xa190(0, 0, 2)` once, then repeatedly calls `0xa198(0, &byte, 1, 1)` for each character in a NUL-terminated string
+- `0xa1fc(0x0d, 0)` produces a handle-like value that is immediately consumed by `0xa1c8(handle, 1)`
+- `0xa1b4(key)` returns a scalar value that is compared numerically and also forwarded into nearby update/finalize traps
+- the safer current reading is “object/token resolution plus object metrics”, not literal OS-style handles
+
+These are still behavioral names, not fully proven SDK names, but they are now specific enough to help build higher-level tooling around text-output and handle/state queries.
+
+New cross-sample evidence for additional shared API surface:
+
+- `0xa008` is used by both `calculator` and `alphaquiz` with two byte-pointer out-parameters, and the resulting bytes feed later text-layout calls
+- `0xa020` is used by both applets with a stable 3-argument row/column/width-like shape immediately before redraw work
+- `0xa0d4` is used by both applets with one timing-like argument such as `0x32` or `0xc8`, strongly suggesting a pacing primitive
+- `0xa098` is also shared and appears after UI/text batches, but its semantics are still too ambiguous to promote beyond a provisional “commit/finalize current text frame” note
+- `0xa390` and `0xa39c` are no longer justified as calculator-only helpers because both are directly used by `alphaquiz` as well
+
+What is still not safe to treat as generic runtime API:
+
+- `0xa368`, `0xa36c`, and `0xa38c` do not yet have convincing cross-sample behavioral evidence beyond calculator-centric usage
+- `0xa390` and `0xa39c` are shared, but still only safe as neutral placeholders rather than semantic SDK names
 
 What this means for custom SmartApplet authoring:
 
@@ -314,6 +348,67 @@ What this means for custom SmartApplet authoring:
 - a functional UI-heavy SmartApplet almost certainly does
 - the trap words are embedded directly in the payload; there is no separate relocation/import table
 - the first practical custom applet target should therefore be a minimal lifecycle-only applet that uses no traps, then incrementally add specific runtime services once their semantics are pinned
+
+## AlphaQuiz Command ABI
+
+`alphaquiz.os3kapp` is now the clearest sample of a nontrivial applet-specific command ABI layered on top of the universal entry contract.
+
+Renamed handlers in Ghidra:
+
+- `AlphaQuizEntryPoint`
+- `LookupAlphaQuizString`
+- `HandleAlphaQuizNamespace4Commands`
+- `HandleAlphaQuizNamespace5Commands`
+- `HandleAlphaQuizNamespace6Commands`
+- `HandleAlphaQuizBytePayloadCommand`
+- `AppendCStringToAlphaQuizOutputBuffer`
+
+Validated entry dispatch:
+
+- lifecycle `0x18` initializes state and iterates through the applet's quiz/session slots
+- lifecycle `0x19` performs shutdown/cleanup and writes status `7`
+- lifecycle `0x1a` performs an extra cleanup path and also ends with status `7`
+- lifecycle `0x26` returns status `0xa001`
+- selector byte `((command & 0x00ff0000) >> 16)` dispatches namespaces `4`, `5`, and `6`
+
+Recovered applet-specific command families:
+
+- namespace `4`
+  - `0x40001`: returns status `0x11`, refreshes namespace-4 state, then redraws a three-line status block
+  - `0x40002`: routes to `HandleAlphaQuizBytePayloadCommand`
+  - `0x4000c`: side-effect-only cleanup/reset path
+- namespace `5`
+  - `0x50001`: returns status `0x11`, refreshes namespace-5 state, then redraws a two-line status block
+  - `0x50002`: routes to `HandleAlphaQuizBytePayloadCommand`
+  - `0x50005`: shares the same byte-payload helper as `0x50002`
+  - `0x5000c`: side-effect-only cleanup/reset path
+- namespace `6`
+  - `0x60001`: returns status `0x11`, copies up to `0x27` input bytes into an applet-global title buffer, then NUL-terminates it
+  - `0x6000d`: when two runtime selection values differ, returns status `4` and writes one 32-bit value to the output buffer
+  - `0x60010`: sets redraw mode `2` and redraws the common namespace-6 three-line status block; status remains `0`
+  - `0x60011`: sets redraw mode `1` and redraws the same three-line status block; status remains `0`
+  - `0x60020`: only when input begins with ASCII `H`, shows a one-line prompt, waits, and sets status `8`; otherwise status remains `0`
+
+`HandleAlphaQuizBytePayloadCommand` is especially useful because it shows a compact sub-protocol that operates on the first input byte and writes short response payloads:
+
+- input byte `0x0a` -> immediate status `0x0f`
+- input byte `0x1d` -> status `4`, clears the UI, and writes the fixed 2-byte reply `0x5d 0x02`
+- input byte `0x1e` -> status `4` and writes the fixed 2-byte reply `0x5e 0x02`
+- input byte `0x1a` -> delegates into a byte-decoder helper and only returns status `4` when the helper produced a nonzero reply length
+- input byte `0x1b` -> delegates into a second byte-decoder helper and has the same conditional status/length behavior
+- input byte `0x3f` -> immediate status `8`
+- any other byte -> status `4` and a 1-byte reply of `(input | 0x80)`
+
+This sub-protocol is shared by parent commands `0x40002`, `0x50002`, and `0x50005`. The only validated behavioral split so far is that the `0x1a` helper receives mode `0x3f` under the namespace-5 parent commands and mode `8` under the namespace-4 parent command.
+
+The PoC now exposes that recovered command contract directly:
+
+```bash
+uv run --project poc/neotools python -m neotools os3kapp-applet-command alphaquiz 0x60001
+uv run --project poc/neotools python -m neotools os3kapp-payload-subcommand alphaquiz 0x50002 0x1d
+```
+
+This does not yet solve the remaining ambiguous host trap semantics in the `0xa190..0xa1fc` family, but it does close an important part of the “complex applet” story: nontrivial applets can and do define private selector namespaces and byte-level payload contracts on top of the shared SmartApplet entry ABI.
 
 The PoC now exposes this import surface directly:
 

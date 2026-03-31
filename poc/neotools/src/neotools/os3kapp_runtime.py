@@ -53,20 +53,50 @@ class Os3kAppTrapPrototype:
     notes: str
 
 
+@dataclass(frozen=True)
+class Os3kAppCommandPrototype:
+    applet_name: str
+    raw_command: int
+    selector_byte: int
+    handler_name: str
+    status_code: int
+    response_word_count: int
+    notes: str
+
+
+@dataclass(frozen=True)
+class Os3kAppPayloadSubcommandPrototype:
+    applet_name: str
+    parent_command: int
+    first_input_byte: int
+    status_code: int | None
+    response_length: int
+    notes: str
+
+
 KNOWN_TRAP_NAMES: dict[int, str] = {
     0xA000: "clear_text_screen",
     0xA004: "set_text_row_column_width",
+    0xA008: "get_text_row_col",
     0xA010: "draw_predefined_glyph",
     0xA014: "draw_c_string_at_current_position",
+    0xA020: "prepare_text_row_span",
     0xA094: "read_key_code",
     0xA09C: "is_key_ready",
     0xA0A4: "pump_ui_events",
+    0xA0D4: "delay_ticks",
+    0xA190: "begin_output_builder",
+    0xA198: "append_output_bytes",
+    0xA1B4: "query_numeric_state",
+    0xA1C8: "query_object_metric",
+    0xA1FC: "resolve_object_by_selector",
     0xA25C: "yield_until_event",
     0xA368: "calculator_runtime_init_slot_a",
     0xA36C: "calculator_runtime_init_slot_b",
     0xA38C: "calculator_runtime_prepare_input_buffer",
-    0xA390: "calculator_runtime_store_result_string",
-    0xA39C: "calculator_runtime_copy_input_string",
+    0xA378: "shared_runtime_a378",
+    0xA390: "shared_runtime_a390",
+    0xA39C: "shared_runtime_a39c",
 }
 
 
@@ -85,6 +115,13 @@ KNOWN_TRAP_PROTOTYPES: dict[int, Os3kAppTrapPrototype] = {
         return_kind="none",
         notes="row/column/width layout primitive inferred from calculator menu loop",
     ),
+    0xA008: Os3kAppTrapPrototype(
+        opcode=0xA008,
+        name="get_text_row_col",
+        stack_argument_count=2,
+        return_kind="none",
+        notes="writes two byte-sized row/column-like outputs that are then reused by later text-layout traps",
+    ),
     0xA010: Os3kAppTrapPrototype(
         opcode=0xA010,
         name="draw_predefined_glyph",
@@ -98,6 +135,13 @@ KNOWN_TRAP_PROTOTYPES: dict[int, Os3kAppTrapPrototype] = {
         stack_argument_count=1,
         return_kind="none",
         notes="C-string pointer is passed on stack immediately after host string lookup",
+    ),
+    0xA020: Os3kAppTrapPrototype(
+        opcode=0xA020,
+        name="prepare_text_row_span",
+        stack_argument_count=3,
+        return_kind="none",
+        notes="prepares a text region using row/column/width-style arguments before redraw work",
     ),
     0xA094: Os3kAppTrapPrototype(
         opcode=0xA094,
@@ -120,6 +164,48 @@ KNOWN_TRAP_PROTOTYPES: dict[int, Os3kAppTrapPrototype] = {
         return_kind="none",
         notes="called while idling for input to keep UI state moving",
     ),
+    0xA0D4: Os3kAppTrapPrototype(
+        opcode=0xA0D4,
+        name="delay_ticks",
+        stack_argument_count=1,
+        return_kind="none",
+        notes="single timing-like argument used between visible UI transitions; may be pacing or timeout rather than a strict blocking sleep",
+    ),
+    0xA190: Os3kAppTrapPrototype(
+        opcode=0xA190,
+        name="begin_output_builder",
+        stack_argument_count=3,
+        return_kind="none",
+        notes="initializes or clears an output destination before text bytes are appended",
+    ),
+    0xA198: Os3kAppTrapPrototype(
+        opcode=0xA198,
+        name="append_output_bytes",
+        stack_argument_count=4,
+        return_kind="none",
+        notes="appends a byte span into the active output destination; commonly called with mode=1",
+    ),
+    0xA1B4: Os3kAppTrapPrototype(
+        opcode=0xA1B4,
+        name="query_numeric_state",
+        stack_argument_count=1,
+        return_kind="value",
+        notes="returns a scalar runtime value keyed by one argument; used in comparisons and follow-on updates",
+    ),
+    0xA1C8: Os3kAppTrapPrototype(
+        opcode=0xA1C8,
+        name="query_object_metric",
+        stack_argument_count=2,
+        return_kind="value",
+        notes="returns a measurable scalar property of a previously resolved runtime object or token",
+    ),
+    0xA1FC: Os3kAppTrapPrototype(
+        opcode=0xA1FC,
+        name="resolve_object_by_selector",
+        stack_argument_count=2,
+        return_kind="value",
+        notes="resolves a runtime object or token from selector inputs before later metric/state queries",
+    ),
     0xA25C: Os3kAppTrapPrototype(
         opcode=0xA25C,
         name="yield_until_event",
@@ -127,12 +213,214 @@ KNOWN_TRAP_PROTOTYPES: dict[int, Os3kAppTrapPrototype] = {
         return_kind="none",
         notes="paired with pump_ui_events in the calculator idle loop",
     ),
+    0xA378: Os3kAppTrapPrototype(
+        opcode=0xA378,
+        name="shared_runtime_a378",
+        stack_argument_count=0,
+        return_kind="unknown",
+        notes="shared A3xx runtime helper used by both calculator and alphaquiz, but semantics are still unresolved",
+    ),
+    0xA390: Os3kAppTrapPrototype(
+        opcode=0xA390,
+        name="shared_runtime_a390",
+        stack_argument_count=1,
+        return_kind="value",
+        notes="shared A3xx helper returning a scalar or pointer-like value from at least one explicit argument",
+    ),
     0xA39C: Os3kAppTrapPrototype(
         opcode=0xA39C,
-        name="calculator_runtime_copy_input_string",
+        name="shared_runtime_a39c",
         stack_argument_count=0,
-        return_kind="none",
-        notes="copies command input into the calculator scratch buffer before evaluation",
+        return_kind="unknown",
+        notes="shared A3xx side-effect helper observed in both calculator and alphaquiz, likely copy or unpack related but not pinned further",
+    ),
+}
+
+
+KNOWN_APPLET_COMMAND_PROTOTYPES: dict[tuple[str, int], Os3kAppCommandPrototype] = {
+    ("alphaquiz", 0x40001): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x40001,
+        selector_byte=0x04,
+        handler_name="HandleAlphaQuizNamespace4Commands",
+        status_code=0x11,
+        response_word_count=0,
+        notes="refreshes namespace-4 quiz state and then redraws the three-line status block",
+    ),
+    ("alphaquiz", 0x40002): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x40002,
+        selector_byte=0x04,
+        handler_name="HandleAlphaQuizNamespace4Commands",
+        status_code=0,
+        response_word_count=0,
+        notes="routes to the byte-oriented helper used for namespace-4 command payload decoding",
+    ),
+    ("alphaquiz", 0x4000C): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x4000C,
+        selector_byte=0x04,
+        handler_name="HandleAlphaQuizNamespace4Commands",
+        status_code=0,
+        response_word_count=0,
+        notes="runs the namespace-4 side-effect-only cleanup/reset helper",
+    ),
+    ("alphaquiz", 0x50001): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x50001,
+        selector_byte=0x05,
+        handler_name="HandleAlphaQuizNamespace5Commands",
+        status_code=0x11,
+        response_word_count=0,
+        notes="refreshes namespace-5 quiz state and redraws the two-line status block",
+    ),
+    ("alphaquiz", 0x50002): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x50002,
+        selector_byte=0x05,
+        handler_name="HandleAlphaQuizNamespace5Commands",
+        status_code=0,
+        response_word_count=0,
+        notes="routes to the byte-oriented helper for namespace-5 payload handling",
+    ),
+    ("alphaquiz", 0x50005): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x50005,
+        selector_byte=0x05,
+        handler_name="HandleAlphaQuizNamespace5Commands",
+        status_code=0,
+        response_word_count=0,
+        notes="shares the same byte-oriented helper as 0x50002",
+    ),
+    ("alphaquiz", 0x5000C): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x5000C,
+        selector_byte=0x05,
+        handler_name="HandleAlphaQuizNamespace5Commands",
+        status_code=0,
+        response_word_count=0,
+        notes="runs the namespace-5 side-effect-only cleanup/reset helper",
+    ),
+    ("alphaquiz", 0x60001): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x60001,
+        selector_byte=0x06,
+        handler_name="HandleAlphaQuizNamespace6Commands",
+        status_code=0x11,
+        response_word_count=0,
+        notes="copies up to 0x27 input bytes into the applet-global title buffer and NUL-terminates it",
+    ),
+    ("alphaquiz", 0x6000D): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x6000D,
+        selector_byte=0x06,
+        handler_name="HandleAlphaQuizNamespace6Commands",
+        status_code=4,
+        response_word_count=1,
+        notes="when the two runtime selection values differ, writes one 32-bit value into the output buffer",
+    ),
+    ("alphaquiz", 0x60010): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x60010,
+        selector_byte=0x06,
+        handler_name="HandleAlphaQuizNamespace6Commands",
+        status_code=0,
+        response_word_count=0,
+        notes="sets the redraw mode flag to 2 and redraws the common three-line namespace-6 status block",
+    ),
+    ("alphaquiz", 0x60011): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x60011,
+        selector_byte=0x06,
+        handler_name="HandleAlphaQuizNamespace6Commands",
+        status_code=0,
+        response_word_count=0,
+        notes="sets the redraw mode flag to 1 and redraws the common three-line namespace-6 status block",
+    ),
+    ("alphaquiz", 0x60020): Os3kAppCommandPrototype(
+        applet_name="alphaquiz",
+        raw_command=0x60020,
+        selector_byte=0x06,
+        handler_name="HandleAlphaQuizNamespace6Commands",
+        status_code=0,
+        response_word_count=0,
+        notes="only when the first input byte is ASCII 'H' does it draw the help prompt, wait, and then set status 8",
+    ),
+}
+
+
+KNOWN_APPLET_PAYLOAD_SUBCOMMAND_PROTOTYPES: dict[tuple[str, int, int], Os3kAppPayloadSubcommandPrototype] = {
+    ("alphaquiz", 0x40002, 0x0A): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x40002,
+        first_input_byte=0x0A,
+        status_code=0x0F,
+        response_length=0,
+        notes="immediate special case with status 0x0f and no response payload",
+    ),
+    ("alphaquiz", 0x40002, 0x1A): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x40002,
+        first_input_byte=0x1A,
+        status_code=None,
+        response_length=-1,
+        notes="copies input, then calls the namespace-4 helper with mode 8; status 4 only when the helper returns a nonzero output length",
+    ),
+    ("alphaquiz", 0x40002, 0x1B): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x40002,
+        first_input_byte=0x1B,
+        status_code=None,
+        response_length=-1,
+        notes="copies input, then calls the alternate namespace-4 helper; status 4 only when the helper returns a nonzero output length",
+    ),
+    ("alphaquiz", 0x40002, 0x1D): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x40002,
+        first_input_byte=0x1D,
+        status_code=4,
+        response_length=2,
+        notes="clears the UI and writes the fixed two-byte reply 0x5d 0x02",
+    ),
+    ("alphaquiz", 0x40002, 0x1E): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x40002,
+        first_input_byte=0x1E,
+        status_code=4,
+        response_length=2,
+        notes="writes the fixed two-byte reply 0x5e 0x02 and returns the helper flag to the caller",
+    ),
+    ("alphaquiz", 0x40002, 0x3F): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x40002,
+        first_input_byte=0x3F,
+        status_code=8,
+        response_length=0,
+        notes="immediate special case with status 8 and no response payload",
+    ),
+    ("alphaquiz", 0x50002, 0x1A): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x50002,
+        first_input_byte=0x1A,
+        status_code=None,
+        response_length=-1,
+        notes="copies input, then calls the namespace-5 helper with mode 0x3f; status 4 only when the helper returns a nonzero output length",
+    ),
+    ("alphaquiz", 0x50002, 0x1D): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x50002,
+        first_input_byte=0x1D,
+        status_code=4,
+        response_length=2,
+        notes="clears the UI and writes the fixed two-byte reply 0x5d 0x02",
+    ),
+    ("alphaquiz", 0x50005, 0x00): Os3kAppPayloadSubcommandPrototype(
+        applet_name="alphaquiz",
+        parent_command=0x50005,
+        first_input_byte=0x00,
+        status_code=4,
+        response_length=1,
+        notes="fallback path echoes the first input byte with | 0x80 into a one-byte response",
     ),
 }
 
@@ -228,6 +516,31 @@ def describe_known_trap_prototype(opcode: int) -> Os3kAppTrapPrototype:
     prototype = KNOWN_TRAP_PROTOTYPES.get(opcode)
     if prototype is None:
         raise ValueError(f"unknown SmartApplet trap prototype: 0x{opcode:04x}")
+    return prototype
+
+
+def describe_known_applet_command_prototype(applet_name: str, raw_command: int) -> Os3kAppCommandPrototype:
+    prototype = KNOWN_APPLET_COMMAND_PROTOTYPES.get((applet_name.lower(), raw_command))
+    if prototype is None:
+        raise ValueError(
+            f"unknown SmartApplet applet command prototype: {applet_name} 0x{raw_command:05x}"
+        )
+    return prototype
+
+
+def describe_known_applet_payload_subcommand_prototype(
+    applet_name: str,
+    parent_command: int,
+    first_input_byte: int,
+) -> Os3kAppPayloadSubcommandPrototype:
+    prototype = KNOWN_APPLET_PAYLOAD_SUBCOMMAND_PROTOTYPES.get(
+        (applet_name.lower(), parent_command, first_input_byte)
+    )
+    if prototype is None:
+        raise ValueError(
+            "unknown SmartApplet payload subcommand prototype: "
+            f"{applet_name} 0x{parent_command:05x} 0x{first_input_byte:02x}"
+        )
     return prototype
 
 

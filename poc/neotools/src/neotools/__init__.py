@@ -51,6 +51,8 @@ from neotools.smartapplets import (
 from neotools.os3kapp_format import parse_os3kapp_image
 from neotools.os3kapp_runtime import (
     build_os3kapp_entry_abi,
+    describe_known_applet_command_prototype,
+    describe_known_applet_payload_subcommand_prototype,
     describe_known_trap_prototype,
     decompose_os3kapp_command,
     scan_os3kapp_trap_blocks,
@@ -232,6 +234,15 @@ def main(argv: list[str] | None = None) -> int:
 
     os3kapp_trap_prototype_parser = subparsers.add_parser("os3kapp-trap-prototype")
     os3kapp_trap_prototype_parser.add_argument("opcode")
+
+    os3kapp_applet_command_parser = subparsers.add_parser("os3kapp-applet-command")
+    os3kapp_applet_command_parser.add_argument("applet_name")
+    os3kapp_applet_command_parser.add_argument("raw_command")
+
+    os3kapp_payload_subcommand_parser = subparsers.add_parser("os3kapp-payload-subcommand")
+    os3kapp_payload_subcommand_parser.add_argument("applet_name")
+    os3kapp_payload_subcommand_parser.add_argument("parent_command")
+    os3kapp_payload_subcommand_parser.add_argument("first_input_byte")
 
     smartapplet_string_parser = subparsers.add_parser("smartapplet-string")
     smartapplet_string_parser.add_argument("resource_id")
@@ -677,6 +688,39 @@ def main(argv: list[str] | None = None) -> int:
             f"name={prototype.name} "
             f"stack_argument_count={prototype.stack_argument_count} "
             f"return_kind={prototype.return_kind}"
+        )
+        print(f"notes={prototype.notes}")
+        return 0
+
+    if args.command == "os3kapp-applet-command":
+        prototype = describe_known_applet_command_prototype(
+            args.applet_name,
+            int(args.raw_command, 0),
+        )
+        print(
+            f"applet={prototype.applet_name} "
+            f"raw_command=0x{prototype.raw_command:05x} "
+            f"selector_byte=0x{prototype.selector_byte:02x} "
+            f"handler={prototype.handler_name} "
+            f"status_code=0x{prototype.status_code:08x} "
+            f"response_word_count={prototype.response_word_count}"
+        )
+        print(f"notes={prototype.notes}")
+        return 0
+
+    if args.command == "os3kapp-payload-subcommand":
+        prototype = describe_known_applet_payload_subcommand_prototype(
+            args.applet_name,
+            int(args.parent_command, 0),
+            int(args.first_input_byte, 0),
+        )
+        status_code = "conditional" if prototype.status_code is None else f"0x{prototype.status_code:08x}"
+        print(
+            f"applet={prototype.applet_name} "
+            f"parent_command=0x{prototype.parent_command:05x} "
+            f"first_input_byte=0x{prototype.first_input_byte:02x} "
+            f"status_code={status_code} "
+            f"response_length={prototype.response_length}"
         )
         print(f"notes={prototype.notes}")
         return 0

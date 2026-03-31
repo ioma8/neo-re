@@ -221,7 +221,7 @@ class SmartAppletCliTests(unittest.TestCase):
         lines = output.getvalue().splitlines()
         self.assertEqual(lines[0], "block=0x34ce-0x34ee count=16 first=0xa000 last=0xa03c")
         self.assertIn("offset=0x34ce opcode=0xa000 family=0xa0 selector=0x00 name=clear_text_screen", lines)
-        self.assertIn("offset=0x365e opcode=0xa368 family=0xa3 selector=0x68 name=calculator_runtime_init_slot_a", lines)
+        self.assertIn("offset=0x3666 opcode=0xa378 family=0xa3 selector=0x78 name=shared_runtime_a378", lines)
 
     def test_os3kapp_trap_prototype_prints_known_stack_signature(self) -> None:
         output = io.StringIO()
@@ -235,6 +235,36 @@ class SmartAppletCliTests(unittest.TestCase):
             [
                 "opcode=0xa004 name=set_text_row_column_width stack_argument_count=3 return_kind=none",
                 "notes=row/column/width layout primitive inferred from calculator menu loop",
+            ],
+        )
+
+    def test_os3kapp_applet_command_prints_known_alphaquiz_dispatch_contract(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = main(["os3kapp-applet-command", "alphaquiz", "0x60001"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "applet=alphaquiz raw_command=0x60001 selector_byte=0x06 handler=HandleAlphaQuizNamespace6Commands status_code=0x00000011 response_word_count=0",
+                "notes=copies up to 0x27 input bytes into the applet-global title buffer and NUL-terminates it",
+            ],
+        )
+
+    def test_os3kapp_payload_subcommand_prints_known_alphaquiz_byte_protocol_entry(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = main(["os3kapp-payload-subcommand", "alphaquiz", "0x50002", "0x1d"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "applet=alphaquiz parent_command=0x50002 first_input_byte=0x1d status_code=0x00000004 response_length=2",
+                "notes=clears the UI and writes the fixed two-byte reply 0x5d 0x02",
             ],
         )
 
