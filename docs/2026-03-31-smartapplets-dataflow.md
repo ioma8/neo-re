@@ -256,14 +256,14 @@ That makes two authoring patterns visible:
 
 Confirmed or strongly inferred trap meanings from named call sites in `calculator.os3kapp`:
 
-- `0xa000` `TrapA000`: calculator menu begin / clear menu area
-- `0xa004` `TrapA004`: calculator menu next row
-- `0xa010` `TrapA010`: calculator menu draw selection marker
-- `0xa014` `TrapA014`: calculator menu flush current string
+- `0xa000`: clear text screen
+- `0xa004`: set text row / column / width
+- `0xa010`: draw a predefined glyph or marker id
+- `0xa014`: draw a C-string at the current text position
 - `0xa094` `TrapA094`: read key code
-- `0xa09c` `TrapA09C`: poll key-ready / event-ready
-- `0xa0a4` `TrapA0A4`: yield or pump events
-- `0xa25c` `TrapA25C`: yield or sleep while waiting for events
+- `0xa09c`: test whether a key / event is ready
+- `0xa0a4`: pump pending UI events
+- `0xa25c`: yield while waiting for the next event
 - `0xa368` `TrapA368`: calculator runtime init slot A
 - `0xa38c` `TrapA38C`: calculator runtime init slot C
 - `0xa390` `TrapA390`: calculator runtime store result string
@@ -274,6 +274,39 @@ Evidence for those names:
 - `RunCalculatorFunctionMenu` uses `TrapA000`, `TrapA004`, `TrapA010`, `TrapA014`, `TrapA094`, `TrapA09C`, `TrapA0A4`, and `TrapA25C` in a menu redraw + key polling loop
 - `InitializeCalculatorAppletState` calls `TrapA368`, `TrapA368`, and `TrapA38C`
 - `DispatchCalculatorAppletCommand` calls `TrapA39C` before evaluating the copied input buffer and `TrapA378` after a successful evaluation path that returns a 4-byte result buffer
+
+Recovered call shapes from raw 68k in `RunCalculatorFunctionMenu`:
+
+- `0xa000`: no explicit stack arguments
+- `0xa004`: three pushed arguments, strongly inferred as `(row, column, width)`
+- `0xa010`: one pushed small integer argument, acting like a glyph or marker id
+- `0xa014`: one pushed pointer argument, acting like a C-string pointer
+- `0xa094`, `0xa09c`, `0xa0a4`, `0xa25c`: no explicit stack arguments in the observed calculator menu loop
+
+The `0xa004` call evidence is especially useful for custom applet work. The calculator menu loop emits calls equivalent to:
+
+- `set_text_row_column_width(2 + item_index, 1, 12)` before drawing menu rows
+- `set_text_row_column_width(2, 40, 12)` before drawing the selection marker column
+
+That makes `0xa004` the first concrete host layout primitive we can describe beyond a trap number.
+
+The PoC now carries those prototype fragments explicitly:
+
+```bash
+uv run --project poc/neotools python -m neotools os3kapp-trap-prototype 0xa004
+```
+
+Current prototype table encoded in the PoC:
+
+- `0xa000` `clear_text_screen`: `stack_argument_count = 0`, no return value used
+- `0xa004` `set_text_row_column_width`: `stack_argument_count = 3`, no return value used
+- `0xa010` `draw_predefined_glyph`: `stack_argument_count = 1`, no return value used
+- `0xa014` `draw_c_string_at_current_position`: `stack_argument_count = 1`, no return value used
+- `0xa094` `read_key_code`: `stack_argument_count = 0`, return value used as key code
+- `0xa09c` `is_key_ready`: `stack_argument_count = 0`, return value used as readiness flag
+- `0xa0a4` `pump_ui_events`: `stack_argument_count = 0`, no return value used
+- `0xa25c` `yield_until_event`: `stack_argument_count = 0`, no return value used
+- `0xa39c` `calculator_runtime_copy_input_string`: currently treated as an internal calculator workspace helper with no explicit stack arguments at its call site
 
 What this means for custom SmartApplet authoring:
 

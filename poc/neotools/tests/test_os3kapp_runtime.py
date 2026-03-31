@@ -6,6 +6,7 @@ from neotools.os3kapp_runtime import (
     build_minimal_smartapplet_image,
     build_os3kapp_entry_abi,
     decompose_os3kapp_command,
+    describe_known_trap_prototype,
     scan_os3kapp_trap_blocks,
 )
 
@@ -86,7 +87,7 @@ class Os3kAppRuntimeTests(unittest.TestCase):
 
         self.assertEqual(trap_blocks[0].start_file_offset, 0x34CE)
         self.assertEqual(trap_blocks[0].stubs[0].opcode, 0xA000)
-        self.assertEqual(trap_blocks[0].stubs[0].inferred_name, "calculator_menu_begin")
+        self.assertEqual(trap_blocks[0].stubs[0].inferred_name, "clear_text_screen")
         self.assertEqual(trap_blocks[-1].stubs[-1].opcode, 0xA3B0)
         a368_stub = next(stub for block in trap_blocks for stub in block.stubs if stub.opcode == 0xA368)
         self.assertEqual(a368_stub.file_offset, 0x365E)
@@ -108,6 +109,19 @@ class Os3kAppRuntimeTests(unittest.TestCase):
         self.assertEqual(spellcheck_blocks[1].stubs[-1].opcode, 0xA308)
         self.assertGreaterEqual(spellcheck_blocks[2].stubs[-1].opcode, 0xA3B0)
         self.assertEqual(scan_os3kapp_trap_blocks(neofont), ())
+
+    def test_known_trap_prototype_exposes_stack_arg_shape(self) -> None:
+        layout = describe_known_trap_prototype(0xA004)
+        text = describe_known_trap_prototype(0xA014)
+        key = describe_known_trap_prototype(0xA094)
+
+        self.assertEqual(layout.name, "set_text_row_column_width")
+        self.assertEqual(layout.stack_argument_count, 3)
+        self.assertEqual(layout.return_kind, "none")
+        self.assertEqual(text.stack_argument_count, 1)
+        self.assertEqual(text.return_kind, "none")
+        self.assertEqual(key.stack_argument_count, 0)
+        self.assertEqual(key.return_kind, "value")
 
 
 if __name__ == "__main__":

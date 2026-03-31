@@ -44,20 +44,96 @@ class Os3kAppTrapBlock:
     stubs: tuple[Os3kAppTrapStub, ...]
 
 
+@dataclass(frozen=True)
+class Os3kAppTrapPrototype:
+    opcode: int
+    name: str
+    stack_argument_count: int
+    return_kind: str
+    notes: str
+
+
 KNOWN_TRAP_NAMES: dict[int, str] = {
-    0xA000: "calculator_menu_begin",
-    0xA004: "calculator_menu_next_row",
-    0xA010: "calculator_menu_draw_selection_marker",
-    0xA014: "calculator_menu_flush_current_string",
+    0xA000: "clear_text_screen",
+    0xA004: "set_text_row_column_width",
+    0xA010: "draw_predefined_glyph",
+    0xA014: "draw_c_string_at_current_position",
     0xA094: "read_key_code",
-    0xA09C: "poll_key_ready",
-    0xA0A4: "yield_or_pump_events",
-    0xA25C: "yield_or_sleep",
+    0xA09C: "is_key_ready",
+    0xA0A4: "pump_ui_events",
+    0xA25C: "yield_until_event",
     0xA368: "calculator_runtime_init_slot_a",
     0xA36C: "calculator_runtime_init_slot_b",
     0xA38C: "calculator_runtime_prepare_input_buffer",
     0xA390: "calculator_runtime_store_result_string",
     0xA39C: "calculator_runtime_copy_input_string",
+}
+
+
+KNOWN_TRAP_PROTOTYPES: dict[int, Os3kAppTrapPrototype] = {
+    0xA000: Os3kAppTrapPrototype(
+        opcode=0xA000,
+        name="clear_text_screen",
+        stack_argument_count=0,
+        return_kind="none",
+        notes="screen clear / frame reset inferred from calculator menu redraw entry",
+    ),
+    0xA004: Os3kAppTrapPrototype(
+        opcode=0xA004,
+        name="set_text_row_column_width",
+        stack_argument_count=3,
+        return_kind="none",
+        notes="row/column/width layout primitive inferred from calculator menu loop",
+    ),
+    0xA010: Os3kAppTrapPrototype(
+        opcode=0xA010,
+        name="draw_predefined_glyph",
+        stack_argument_count=1,
+        return_kind="none",
+        notes="single small integer glyph id inferred from selection-marker call sites",
+    ),
+    0xA014: Os3kAppTrapPrototype(
+        opcode=0xA014,
+        name="draw_c_string_at_current_position",
+        stack_argument_count=1,
+        return_kind="none",
+        notes="C-string pointer is passed on stack immediately after host string lookup",
+    ),
+    0xA094: Os3kAppTrapPrototype(
+        opcode=0xA094,
+        name="read_key_code",
+        stack_argument_count=0,
+        return_kind="value",
+        notes="returns current key code after readiness has been observed",
+    ),
+    0xA09C: Os3kAppTrapPrototype(
+        opcode=0xA09C,
+        name="is_key_ready",
+        stack_argument_count=0,
+        return_kind="value",
+        notes="polled in a wait loop before calling read_key_code",
+    ),
+    0xA0A4: Os3kAppTrapPrototype(
+        opcode=0xA0A4,
+        name="pump_ui_events",
+        stack_argument_count=0,
+        return_kind="none",
+        notes="called while idling for input to keep UI state moving",
+    ),
+    0xA25C: Os3kAppTrapPrototype(
+        opcode=0xA25C,
+        name="yield_until_event",
+        stack_argument_count=0,
+        return_kind="none",
+        notes="paired with pump_ui_events in the calculator idle loop",
+    ),
+    0xA39C: Os3kAppTrapPrototype(
+        opcode=0xA39C,
+        name="calculator_runtime_copy_input_string",
+        stack_argument_count=0,
+        return_kind="none",
+        notes="copies command input into the calculator scratch buffer before evaluation",
+    ),
 }
 
 
@@ -146,6 +222,13 @@ def scan_os3kapp_trap_blocks(image: Os3kAppImage, *, minimum_stub_count: int = 4
             )
 
     return tuple(blocks)
+
+
+def describe_known_trap_prototype(opcode: int) -> Os3kAppTrapPrototype:
+    prototype = KNOWN_TRAP_PROTOTYPES.get(opcode)
+    if prototype is None:
+        raise ValueError(f"unknown SmartApplet trap prototype: 0x{opcode:04x}")
+    return prototype
 
 
 def build_minimal_smartapplet_image(

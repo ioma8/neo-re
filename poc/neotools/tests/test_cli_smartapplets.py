@@ -220,8 +220,23 @@ class SmartAppletCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         lines = output.getvalue().splitlines()
         self.assertEqual(lines[0], "block=0x34ce-0x34ee count=16 first=0xa000 last=0xa03c")
-        self.assertIn("offset=0x34ce opcode=0xa000 family=0xa0 selector=0x00 name=calculator_menu_begin", lines)
+        self.assertIn("offset=0x34ce opcode=0xa000 family=0xa0 selector=0x00 name=clear_text_screen", lines)
         self.assertIn("offset=0x365e opcode=0xa368 family=0xa3 selector=0x68 name=calculator_runtime_init_slot_a", lines)
+
+    def test_os3kapp_trap_prototype_prints_known_stack_signature(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = main(["os3kapp-trap-prototype", "0xa004"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "opcode=0xa004 name=set_text_row_column_width stack_argument_count=3 return_kind=none",
+                "notes=row/column/width layout primitive inferred from calculator menu loop",
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -51,6 +51,7 @@ from neotools.smartapplets import (
 from neotools.os3kapp_format import parse_os3kapp_image
 from neotools.os3kapp_runtime import (
     build_os3kapp_entry_abi,
+    describe_known_trap_prototype,
     decompose_os3kapp_command,
     scan_os3kapp_trap_blocks,
 )
@@ -228,6 +229,9 @@ def main(argv: list[str] | None = None) -> int:
 
     os3kapp_traps_parser = subparsers.add_parser("os3kapp-traps")
     os3kapp_traps_parser.add_argument("image_hex")
+
+    os3kapp_trap_prototype_parser = subparsers.add_parser("os3kapp-trap-prototype")
+    os3kapp_trap_prototype_parser.add_argument("opcode")
 
     smartapplet_string_parser = subparsers.add_parser("smartapplet-string")
     smartapplet_string_parser.add_argument("resource_id")
@@ -664,6 +668,17 @@ def main(argv: list[str] | None = None) -> int:
                     f"selector=0x{stub.selector_byte:02x} "
                     f"name={inferred_name}"
                 )
+        return 0
+
+    if args.command == "os3kapp-trap-prototype":
+        prototype = describe_known_trap_prototype(int(args.opcode, 0))
+        print(
+            f"opcode=0x{prototype.opcode:04x} "
+            f"name={prototype.name} "
+            f"stack_argument_count={prototype.stack_argument_count} "
+            f"return_kind={prototype.return_kind}"
+        )
+        print(f"notes={prototype.notes}")
         return 0
 
     if args.command == "smartapplet-string":
