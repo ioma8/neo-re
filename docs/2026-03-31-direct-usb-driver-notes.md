@@ -317,12 +317,12 @@ The 64-bit driver `FUN_000115a4` confirms the same four control codes and clarif
   - returns `STATUS_INVALID_DEVICE_STATE` if the cached block pointer is null
   - returns `STATUS_BUFFER_TOO_SMALL` if the caller output buffer is shorter than the cached block length
 - `0x220004`
-  - runs an internal lower-stack probe sequence through `FUN_000117c4`
+  - runs an internal lower-stack probe sequence through `GetPortStatusAndMaybeResetPort`
   - first sends internal IOCTL `0x220013`
   - if the returned flags word has bit `1` set, it then sends internal IOCTL `0x220007`
 - `0x220008`
   - requires a non-null file-context pointer chained through the IRP stack location
-  - uses that context to trigger `FUN_0001172c`, which builds a small `0x28` request object with function code `0x1e` and forwards it through internal IOCTL `0x220003`
+  - uses that context to trigger `SubmitResetPipeUrbForEndpoint`, which builds a small `0x28` request object with function code `0x1e` and forwards it through internal IOCTL `0x220003`
 - `0x80002000`
   - copies the cached 18-byte USB device descriptor from `device_extension + 0x58`
   - requires an output buffer of at least `0x12` bytes
@@ -351,7 +351,7 @@ Inference:
 - `0x220013` is likely an internal driver-to-lower-stack control path, not the user-mode API surface.
 - It probably participates in configuration or endpoint setup.
 
-In the 64-bit driver that helper is `FUN_000117c4`, and its exact sequence is:
+In the 64-bit driver that helper is `GetPortStatusAndMaybeResetPort`, and its exact sequence is:
 
 1. send internal IOCTL `0x220013`
 2. inspect a returned flags word written through the IRP stack location
@@ -359,14 +359,20 @@ In the 64-bit driver that helper is `FUN_000117c4`, and its exact sequence is:
 
 This makes `0x220004` a wrapper around a two-step lower-stack readiness or reset/probe sequence, not a direct data transfer.
 
+The observed probe-flag handling is:
+
+- if returned flags bit `0x1` is set, stop after `0x220013`
+- if bit `0x1` is clear and bit `0x2` is set, follow with `0x220007`
+- otherwise stop after `0x220013`
+
 The 64-bit setup path also clarifies the create/start flow:
 
-- `FUN_00011bf0` clears the cached descriptor/configuration pointers, forwards the start IRP down, then calls `FUN_00011d84`
-- `FUN_00011d84` sends a `0x220003` request with request type `1` and a `0x12`-byte buffer to fetch the USB device descriptor
-- `FUN_00011e78` sends another `0x220003` request with request type `2`:
+- `StartDeviceAndLoadUsbDescriptors` clears the cached descriptor/configuration pointers, forwards the start IRP down, then calls `FetchUsbDeviceDescriptor`
+- `FetchUsbDeviceDescriptor` sends a `0x220003` request with request type `1` and a `0x12`-byte buffer to fetch the USB device descriptor
+- `FetchUsbConfigurationDescriptor` sends another `0x220003` request with request type `2`:
   - first with a 9-byte buffer to fetch the configuration-descriptor header
   - then with the full configuration length from `wTotalLength`
-- `FUN_00011ff4` parses the returned configuration descriptor with:
+- `ConfigureDeviceInterfacesFromDescriptor` parses the returned configuration descriptor with:
   - `USBD_ParseConfigurationDescriptorEx`
   - `USBD_CreateConfigurationRequestEx`
 - It caches:
@@ -374,6 +380,43 @@ The 64-bit setup path also clarifies the create/start flow:
   - the full USB configuration descriptor at `device_extension + 0x60`
   - the generated URB/configuration request at `device_extension + 0x68`
   - a per-interface “busy” byte array at `device_extension + 0x70`
+
+The internal `0x220003` request objects now have a concrete partial layout:
+
+- descriptor/configuration fetch request (`0x88` bytes):
+  - offset `0x00`: size = `0x88`
+  - offset `0x02`: function = `0x0b`
+  - offset `0x28`: transfer buffer length
+  - offset `0x30`: response buffer pointer
+  - offset `0x38`: endpoint/pipe pointer placeholder = `0`
+  - offset `0x83`: request type
+    - `1` for USB device descriptor
+    - `2` for USB configuration descriptor
+- endpoint-trigger request used by `0x220008` (`0x28` bytes):
+  - offset `0x00`: size = `0x28`
+  - offset `0x02`: function = `0x1e`
+  - offset `0x18`: endpoint pointer copied from the file-bound endpoint descriptor
+- chunked data-transfer request used by `DispatchReadWrite` (`0x80` bytes):
+  - offset `0x00`: size = `0x80`
+  - offset `0x02`: function = `9`
+  - offset `0x20`: transfer code
+    - `3` for read
+    - `2` for write
+  - offset `0x24`: current chunk length
+  - offset `0x28`: MDL pointer for the current chunk
+  - offset `0x18`: endpoint pointer copied from the configured pipe entry
+- active-transfer cancel request used by `AbortActivePipeTransfers` (`0x28` bytes):
+  - offset `0x00`: size = `0x28`
+  - offset `0x02`: function = `2`
+  - offset `0x18`: endpoint pointer for the active configured pipe
+
+Interpretation:
+
+- internal `0x220003` is the generic lower transport submit path
+- function `0x0b` is the descriptor-fetch style request family
+- function `9` is the normal chunked data-transfer request family
+- function `2` is the active-transfer cancel request family
+- function `0x1e` is the endpoint-trigger style request family used by the public `0x220008` wrapper
 
 ## Create, Close, and Endpoint Binding
 
@@ -429,7 +472,7 @@ The 64-bit driver resolves the main transport path more precisely than the earli
 - limits each submitted chunk to `0x100` bytes
 - installs `ContinueChunkedReadTransfer` as the completion routine
 - holds an outstanding-I/O reference across the lower-driver call
-- if the immediate lower-driver status is a hard failure other than the two tolerated pending-style statuses, it tries `SendInternalTransferRequest` and, if that also fails, runs `RunInternalProbeSequence`
+- if the immediate lower-driver status is a hard failure other than the two tolerated pending-style statuses, it tries `SubmitResetPipeUrbForEndpoint` and, if that also fails, runs `GetPortStatusAndMaybeResetPort`
 
 `ContinueChunkedReadTransfer`:
 
@@ -442,6 +485,13 @@ Interpretation:
 
 - normal direct USB data movement in the 64-bit driver is a chunked lower-stack `0x220003` pipeline, not `0x220008`
 - user-mode `ReadFile` / `WriteFile` on `\\\\.\\AsUSBDrv%d` are the important operations to replicate, with the driver's own chunk size capped at `0x100`
+- the lower `0x80` transfer request block used by `DispatchReadWrite` is distinct from the `0x88` descriptor-fetch block and carries:
+  - function `9`
+  - transfer code `3` for read or `2` for write
+  - endpoint pointer from the configured pipe entry
+  - current chunk length
+  - MDL pointer for the current chunk
+- `AbortActivePipeTransfers` uses a separate `0x28` / function `2` request to tear down still-marked active pipe transfers during stop/remove-style paths
 
 ## PnP State Machine
 

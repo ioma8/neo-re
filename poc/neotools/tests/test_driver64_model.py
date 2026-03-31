@@ -4,10 +4,21 @@ from neotools.driver64_model import (
     Driver64CreateRoute,
     Driver64DeviceControlRoute,
     Driver64DispatchMap,
+    Driver64Internal220003Request,
     Driver64InternalIoctlPlan,
+    Driver64ProbeSequencePlan,
     Driver64PnpRoute,
     Driver64ReadWriteRoute,
+    build_driver64_cancel_active_transfer_request,
+    build_driver64_config_descriptor_full_request,
+    build_driver64_config_descriptor_header_request,
+    build_driver64_data_transfer_request,
+    build_driver64_device_descriptor_request,
+    build_driver64_endpoint_trigger_request,
     build_driver64_dispatch_map,
+    build_driver64_probe_sequence_plan,
+    describe_driver64_internal_ioctl,
+    describe_driver64_urb_function,
     classify_driver64_create,
     classify_driver64_device_control,
     classify_driver64_pnp_minor,
@@ -247,6 +258,141 @@ class Driver64PnpTests(unittest.TestCase):
         self.assertEqual(
             classify_driver64_pnp_minor(0x0A),
             Driver64PnpRoute(kind="pass_through", minor=0x0A, handler="IofCallDriver"),
+        )
+
+
+class Driver64InternalRequestTests(unittest.TestCase):
+    def test_build_device_descriptor_request_matches_fetch_path(self) -> None:
+        self.assertEqual(
+            build_driver64_device_descriptor_request(),
+            Driver64Internal220003Request(
+                size=0x88,
+                function=0x0B,
+                transfer_buffer_length=0x12,
+                request_type=1,
+                endpoint_pointer_offset=0x18,
+                response_buffer_pointer_offset=0x14,
+            ),
+        )
+
+    def test_build_config_descriptor_requests_match_header_then_full_fetch(self) -> None:
+        self.assertEqual(
+            build_driver64_config_descriptor_header_request(),
+            Driver64Internal220003Request(
+                size=0x88,
+                function=0x0B,
+                transfer_buffer_length=9,
+                request_type=2,
+                endpoint_pointer_offset=0x18,
+                response_buffer_pointer_offset=0x14,
+            ),
+        )
+        self.assertEqual(
+            build_driver64_config_descriptor_full_request(total_length=0x39),
+            Driver64Internal220003Request(
+                size=0x88,
+                function=0x0B,
+                transfer_buffer_length=0x39,
+                request_type=2,
+                endpoint_pointer_offset=0x18,
+                response_buffer_pointer_offset=0x14,
+            ),
+        )
+
+    def test_build_endpoint_trigger_request_matches_220008_helper(self) -> None:
+        self.assertEqual(
+            build_driver64_endpoint_trigger_request(),
+            Driver64Internal220003Request(
+                size=0x28,
+                function=0x1E,
+                transfer_buffer_length=0,
+                request_type=None,
+                endpoint_pointer_offset=0x18,
+                response_buffer_pointer_offset=None,
+            ),
+        )
+
+    def test_build_data_transfer_request_matches_dispatch_read_write_layout(self) -> None:
+        self.assertEqual(
+            build_driver64_data_transfer_request(chunk_length=0x100, direction="read"),
+            Driver64Internal220003Request(
+                size=0x80,
+                function=9,
+                transfer_buffer_length=0x100,
+                request_type=3,
+                endpoint_pointer_offset=0x18,
+                response_buffer_pointer_offset=None,
+            ),
+        )
+        self.assertEqual(
+            build_driver64_data_transfer_request(chunk_length=0x40, direction="write"),
+            Driver64Internal220003Request(
+                size=0x80,
+                function=9,
+                transfer_buffer_length=0x40,
+                request_type=2,
+                endpoint_pointer_offset=0x18,
+                response_buffer_pointer_offset=None,
+            ),
+        )
+
+    def test_build_cancel_active_transfer_request_matches_cancel_helper(self) -> None:
+        self.assertEqual(
+            build_driver64_cancel_active_transfer_request(),
+            Driver64Internal220003Request(
+                size=0x28,
+                function=2,
+                transfer_buffer_length=0,
+                request_type=None,
+                endpoint_pointer_offset=0x18,
+                response_buffer_pointer_offset=None,
+            ),
+        )
+
+    def test_build_probe_sequence_plan_models_220013_then_optional_220007(self) -> None:
+        self.assertEqual(
+            build_driver64_probe_sequence_plan(flags=0x00),
+            Driver64ProbeSequencePlan(first_ioctl=0x220013, second_ioctl=None, flags=0x00),
+        )
+        self.assertEqual(
+            build_driver64_probe_sequence_plan(flags=0x02),
+            Driver64ProbeSequencePlan(first_ioctl=0x220013, second_ioctl=0x220007, flags=0x02),
+        )
+        self.assertEqual(
+            build_driver64_probe_sequence_plan(flags=0x01),
+            Driver64ProbeSequencePlan(first_ioctl=0x220013, second_ioctl=None, flags=0x01),
+        )
+
+    def test_describe_internal_usb_ioctl_names(self) -> None:
+        self.assertEqual(
+            describe_driver64_internal_ioctl(0x220003),
+            "IOCTL_INTERNAL_USB_SUBMIT_URB",
+        )
+        self.assertEqual(
+            describe_driver64_internal_ioctl(0x220013),
+            "IOCTL_INTERNAL_USB_GET_PORT_STATUS",
+        )
+        self.assertEqual(
+            describe_driver64_internal_ioctl(0x220007),
+            "IOCTL_INTERNAL_USB_RESET_PORT",
+        )
+
+    def test_describe_urb_function_names(self) -> None:
+        self.assertEqual(
+            describe_driver64_urb_function(0x0B),
+            "URB_FUNCTION_GET_DESCRIPTOR_FROM_DEVICE",
+        )
+        self.assertEqual(
+            describe_driver64_urb_function(9),
+            "URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER",
+        )
+        self.assertEqual(
+            describe_driver64_urb_function(2),
+            "URB_FUNCTION_ABORT_PIPE",
+        )
+        self.assertEqual(
+            describe_driver64_urb_function(0x1E),
+            "URB_FUNCTION_SYNC_RESET_PIPE_AND_CLEAR_STALL (inference)",
         )
 
 

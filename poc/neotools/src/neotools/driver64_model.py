@@ -53,6 +53,23 @@ class Driver64PnpRoute:
     handler: str
 
 
+@dataclass(frozen=True)
+class Driver64Internal220003Request:
+    size: int
+    function: int
+    transfer_buffer_length: int
+    request_type: int | None
+    endpoint_pointer_offset: int
+    response_buffer_pointer_offset: int | None
+
+
+@dataclass(frozen=True)
+class Driver64ProbeSequencePlan:
+    first_ioctl: int
+    second_ioctl: int | None
+    flags: int
+
+
 def build_driver64_dispatch_map() -> Driver64DispatchMap:
     return Driver64DispatchMap(
         create=0x11400,
@@ -197,3 +214,107 @@ def classify_driver64_pnp_minor(minor: int) -> Driver64PnpRoute:
     if minor == 0x17:
         return Driver64PnpRoute(kind="surprise_removal", minor=minor, handler="HandleSurpriseRemoval")
     return Driver64PnpRoute(kind="pass_through", minor=minor, handler="IofCallDriver")
+
+
+def build_driver64_device_descriptor_request() -> Driver64Internal220003Request:
+    return Driver64Internal220003Request(
+        size=0x88,
+        function=0x0B,
+        transfer_buffer_length=0x12,
+        request_type=1,
+        endpoint_pointer_offset=0x18,
+        response_buffer_pointer_offset=0x14,
+    )
+
+
+def build_driver64_config_descriptor_header_request() -> Driver64Internal220003Request:
+    return Driver64Internal220003Request(
+        size=0x88,
+        function=0x0B,
+        transfer_buffer_length=9,
+        request_type=2,
+        endpoint_pointer_offset=0x18,
+        response_buffer_pointer_offset=0x14,
+    )
+
+
+def build_driver64_config_descriptor_full_request(total_length: int) -> Driver64Internal220003Request:
+    return Driver64Internal220003Request(
+        size=0x88,
+        function=0x0B,
+        transfer_buffer_length=total_length,
+        request_type=2,
+        endpoint_pointer_offset=0x18,
+        response_buffer_pointer_offset=0x14,
+    )
+
+
+def build_driver64_endpoint_trigger_request() -> Driver64Internal220003Request:
+    return Driver64Internal220003Request(
+        size=0x28,
+        function=0x1E,
+        transfer_buffer_length=0,
+        request_type=None,
+        endpoint_pointer_offset=0x18,
+        response_buffer_pointer_offset=None,
+    )
+
+
+def build_driver64_data_transfer_request(
+    *,
+    chunk_length: int,
+    direction: str,
+) -> Driver64Internal220003Request:
+    request_type = 3 if direction == "read" else 2
+    return Driver64Internal220003Request(
+        size=0x80,
+        function=9,
+        transfer_buffer_length=chunk_length,
+        request_type=request_type,
+        endpoint_pointer_offset=0x18,
+        response_buffer_pointer_offset=None,
+    )
+
+
+def build_driver64_cancel_active_transfer_request() -> Driver64Internal220003Request:
+    return Driver64Internal220003Request(
+        size=0x28,
+        function=2,
+        transfer_buffer_length=0,
+        request_type=None,
+        endpoint_pointer_offset=0x18,
+        response_buffer_pointer_offset=None,
+    )
+
+
+def build_driver64_probe_sequence_plan(flags: int) -> Driver64ProbeSequencePlan:
+    second_ioctl = None
+    if (flags & 1) == 0 and (flags & 2) != 0:
+        second_ioctl = 0x220007
+    return Driver64ProbeSequencePlan(
+        first_ioctl=0x220013,
+        second_ioctl=second_ioctl,
+        flags=flags,
+    )
+
+
+def describe_driver64_internal_ioctl(ioctl: int) -> str:
+    if ioctl == 0x220003:
+        return "IOCTL_INTERNAL_USB_SUBMIT_URB"
+    if ioctl == 0x220007:
+        return "IOCTL_INTERNAL_USB_RESET_PORT"
+    if ioctl == 0x220013:
+        return "IOCTL_INTERNAL_USB_GET_PORT_STATUS"
+    return "unknown"
+
+
+def describe_driver64_urb_function(function: int) -> str:
+    if function == 2:
+        return "URB_FUNCTION_ABORT_PIPE"
+    if function == 9:
+        return "URB_FUNCTION_BULK_OR_INTERRUPT_TRANSFER"
+    if function == 0x0B:
+        return "URB_FUNCTION_GET_DESCRIPTOR_FROM_DEVICE"
+    if function == 0x1E:
+        return "URB_FUNCTION_SYNC_RESET_PIPE_AND_CLEAR_STALL (inference)"
+    return "unknown"

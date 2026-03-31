@@ -7,7 +7,15 @@ from neotools.asusbcomm import (
     classify_alpha_smart_presence,
 )
 from neotools.driver64_model import (
+    build_driver64_cancel_active_transfer_request,
+    build_driver64_config_descriptor_full_request,
+    build_driver64_config_descriptor_header_request,
+    build_driver64_data_transfer_request,
+    build_driver64_device_descriptor_request,
     build_driver64_dispatch_map,
+    build_driver64_endpoint_trigger_request,
+    build_driver64_probe_sequence_plan,
+    describe_driver64_internal_ioctl,
     classify_driver64_create,
     classify_driver64_device_control,
     classify_driver64_pnp_minor,
@@ -103,6 +111,28 @@ def main(argv: list[str] | None = None) -> int:
 
     driver64_pnp_route_parser = subparsers.add_parser("driver64-pnp-route")
     driver64_pnp_route_parser.add_argument("minor")
+
+    driver64_internal_request_parser = subparsers.add_parser("driver64-internal-request")
+    driver64_internal_request_parser.add_argument(
+        "kind",
+        choices=[
+            "device-descriptor",
+            "config-header",
+            "config-full",
+            "endpoint-trigger",
+            "data-transfer",
+            "cancel-transfer",
+        ],
+    )
+    driver64_internal_request_parser.add_argument("--total-length")
+    driver64_internal_request_parser.add_argument("--direction")
+    driver64_internal_request_parser.add_argument("--chunk-length")
+
+    driver64_probe_sequence_parser = subparsers.add_parser("driver64-probe-sequence")
+    driver64_probe_sequence_parser.add_argument("flags")
+
+    driver64_internal_ioctl_name_parser = subparsers.add_parser("driver64-internal-ioctl-name")
+    driver64_internal_ioctl_name_parser.add_argument("ioctl")
 
     updater_packet_parser = subparsers.add_parser("updater-packet")
     updater_packet_parser.add_argument("command_byte")
@@ -297,6 +327,46 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "driver64-pnp-route":
         route = classify_driver64_pnp_minor(int(args.minor, 0))
         print(f"kind={route.kind} minor=0x{route.minor:02x} handler={route.handler}")
+        return 0
+
+    if args.command == "driver64-internal-request":
+        if args.kind == "device-descriptor":
+            request = build_driver64_device_descriptor_request()
+        elif args.kind == "config-header":
+            request = build_driver64_config_descriptor_header_request()
+        elif args.kind == "config-full":
+            request = build_driver64_config_descriptor_full_request(int(args.total_length, 0))
+        elif args.kind == "data-transfer":
+            request = build_driver64_data_transfer_request(
+                chunk_length=int(args.chunk_length, 0),
+                direction=args.direction,
+            )
+        elif args.kind == "cancel-transfer":
+            request = build_driver64_cancel_active_transfer_request()
+        else:
+            request = build_driver64_endpoint_trigger_request()
+        request_type = "none" if request.request_type is None else str(request.request_type)
+        response_offset = (
+            "none"
+            if request.response_buffer_pointer_offset is None
+            else f"0x{request.response_buffer_pointer_offset:02x}"
+        )
+        print(
+            f"size=0x{request.size:x} function=0x{request.function:02x} "
+            f"buffer_length=0x{request.transfer_buffer_length:x} request_type={request_type} "
+            f"endpoint_offset=0x{request.endpoint_pointer_offset:02x} "
+            f"response_buffer_offset={response_offset}"
+        )
+        return 0
+
+    if args.command == "driver64-probe-sequence":
+        plan = build_driver64_probe_sequence_plan(int(args.flags, 0))
+        second = "none" if plan.second_ioctl is None else f"0x{plan.second_ioctl:08x}"
+        print(f"first=0x{plan.first_ioctl:08x} second={second} flags=0x{plan.flags:08x}")
+        return 0
+
+    if args.command == "driver64-internal-ioctl-name":
+        print(describe_driver64_internal_ioctl(int(args.ioctl, 0)))
         return 0
 
     if args.command == "updater-packet":

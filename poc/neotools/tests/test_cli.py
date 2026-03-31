@@ -178,6 +178,68 @@ class CLITests(unittest.TestCase):
             "kind=remove_device minor=0x02 handler=HandleRemoveDevice\n",
         )
 
+    def test_driver64_internal_request_command_prints_device_descriptor_layout(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["driver64-internal-request", "device-descriptor"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "size=0x88 function=0x0b buffer_length=0x12 request_type=1 "
+            "endpoint_offset=0x18 response_buffer_offset=0x14\n",
+        )
+
+    def test_driver64_probe_sequence_command_prints_optional_second_ioctl(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["driver64-probe-sequence", "0x02"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "first=0x00220013 second=0x00220007 flags=0x00000002\n",
+        )
+
+    def test_driver64_internal_request_command_prints_data_transfer_layout(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                ["driver64-internal-request", "data-transfer", "--direction", "read", "--chunk-length", "0x100"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "size=0x80 function=0x09 buffer_length=0x100 request_type=3 "
+            "endpoint_offset=0x18 response_buffer_offset=none\n",
+        )
+
+    def test_driver64_internal_request_command_prints_cancel_transfer_layout(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["driver64-internal-request", "cancel-transfer"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "size=0x28 function=0x02 buffer_length=0x0 request_type=none "
+            "endpoint_offset=0x18 response_buffer_offset=none\n",
+        )
+
+    def test_driver64_internal_ioctl_name_command_prints_usb_name(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["driver64-internal-ioctl-name", "0x220013"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "IOCTL_INTERNAL_USB_GET_PORT_STATUS\n")
+
     def test_alphaword_plan_command_prints_retrieval_sequence(self) -> None:
         stdout = io.StringIO()
 
