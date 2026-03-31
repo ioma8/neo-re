@@ -48,6 +48,12 @@ from neotools.smartapplets import (
     parse_smartapplet_header,
     resolve_known_smartapplet_string,
 )
+from neotools.os3kapp_format import parse_os3kapp_image
+from neotools.os3kapp_runtime import (
+    build_os3kapp_entry_abi,
+    decompose_os3kapp_command,
+    scan_os3kapp_trap_blocks,
+)
 from neotools.switch_packets import build_switch_packet
 from neotools.updater_packets import build_updater_command
 from neotools.updater_responses import parse_updater_response
@@ -210,6 +216,18 @@ def main(argv: list[str] | None = None) -> int:
 
     smartapplet_metadata_parser = subparsers.add_parser("smartapplet-metadata")
     smartapplet_metadata_parser.add_argument("header_hex")
+
+    os3kapp_image_parser = subparsers.add_parser("os3kapp-image")
+    os3kapp_image_parser.add_argument("image_hex")
+
+    os3kapp_entry_abi_parser = subparsers.add_parser("os3kapp-entry-abi")
+    os3kapp_entry_abi_parser.add_argument("image_hex")
+
+    os3kapp_command_parser = subparsers.add_parser("os3kapp-command")
+    os3kapp_command_parser.add_argument("raw_command")
+
+    os3kapp_traps_parser = subparsers.add_parser("os3kapp-traps")
+    os3kapp_traps_parser.add_argument("image_hex")
 
     smartapplet_string_parser = subparsers.add_parser("smartapplet-string")
     smartapplet_string_parser.add_argument("resource_id")
@@ -578,6 +596,74 @@ def main(argv: list[str] | None = None) -> int:
             f"applet_class=0x{metadata.applet_class:02x} "
             f"extra_memory_size=0x{metadata.extra_memory_size:08x}"
         )
+        return 0
+
+    if args.command == "os3kapp-image":
+        image = parse_os3kapp_image(_parse_hex_bytes(args.image_hex))
+        print(
+            f"file_size=0x{image.metadata.header.file_size:08x} "
+            f"applet_id=0x{image.metadata.applet_id:04x} "
+            f"applet_class=0x{image.metadata.applet_class:02x} "
+            f"body_size=0x{image.metadata.header.file_size - image.header_size:x} "
+            f"info_table_offset=0x{image.info_table_offset:08x}"
+        )
+        print(
+            "body_prefix_words="
+            + ",".join(f"0x{word:08x}" for word in image.body_prefix_words)
+        )
+        print(f"info_records={len(image.info_records)}")
+        return 0
+
+    if args.command == "os3kapp-entry-abi":
+        abi = build_os3kapp_entry_abi(parse_os3kapp_image(_parse_hex_bytes(args.image_hex)))
+        print(
+            f"entry_offset=0x{abi.entry_offset:08x} "
+            f"loader_stub_length=0x{abi.loader_stub_length:x} "
+            f"init_opcode=0x{abi.init_opcode:02x} "
+            f"shutdown_opcode=0x{abi.shutdown_opcode:02x} "
+            f"shutdown_status=0x{abi.shutdown_status:08x}"
+        )
+        print(
+            f"call_block_words={abi.call_block_words} "
+            f"input_length_index={abi.input_length_index} "
+            f"input_pointer_index={abi.input_pointer_index} "
+            f"output_capacity_index={abi.output_capacity_index} "
+            f"output_length_index={abi.output_length_index} "
+            f"output_buffer_pointer_index={abi.output_buffer_pointer_index}"
+        )
+        return 0
+
+    if args.command == "os3kapp-command":
+        command = decompose_os3kapp_command(int(args.raw_command, 0))
+        lifecycle_name = "none" if command.lifecycle_name is None else command.lifecycle_name
+        print(
+            f"raw=0x{command.raw:08x} "
+            f"namespace_byte=0x{command.namespace_byte:02x} "
+            f"selector_byte=0x{command.selector_byte:02x} "
+            f"low_word=0x{command.low_word:04x} "
+            f"custom_dispatch={command.uses_custom_dispatch} "
+            f"lifecycle={lifecycle_name}"
+        )
+        return 0
+
+    if args.command == "os3kapp-traps":
+        image = parse_os3kapp_image(_parse_hex_bytes(args.image_hex))
+        for block in scan_os3kapp_trap_blocks(image):
+            print(
+                f"block=0x{block.start_file_offset:04x}-0x{block.end_file_offset:04x} "
+                f"count={len(block.stubs)} "
+                f"first=0x{block.stubs[0].opcode:04x} "
+                f"last=0x{block.stubs[-1].opcode:04x}"
+            )
+            for stub in block.stubs:
+                inferred_name = "unknown" if stub.inferred_name is None else stub.inferred_name
+                print(
+                    f"offset=0x{stub.file_offset:04x} "
+                    f"opcode=0x{stub.opcode:04x} "
+                    f"family=0x{stub.family_byte:02x} "
+                    f"selector=0x{stub.selector_byte:02x} "
+                    f"name={inferred_name}"
+                )
         return 0
 
     if args.command == "smartapplet-string":

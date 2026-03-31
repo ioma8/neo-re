@@ -94,7 +94,239 @@ Observed examples:
 
 - `alphawordplus.os3kapp`: applet id `0xa000`, version `3.4`, class `0x01`
 - `calculator.os3kapp`: applet id `0xa002`, version `3.0`, class `0x01`
-- `keywordswireless.os3kapp`: applet id `0xa004`, version `4.0`, class `0x04`
+- `keywordswireless.os3kapp`: applet id `0xa004`, version `4.0`, class `0x01`
+
+## On-Disk `.OS3KApp` Container Layout
+
+Cross-checking all shipped `.os3kapp` samples shows a consistent outer container:
+
+1. first `0x84` bytes: SmartApplet metadata header
+2. remaining bytes: raw big-endian Motorola 68k payload
+3. optional trailing SmartApplet info table starting at header offset `0x0c`
+
+The app streams the full file to the device during `UpdaterAddApplet`. It does not strip the info table off before sending. The info-table offset is therefore a pointer inside the uploaded image, not a separate host-only sidecar.
+
+Confirmed layout:
+
+- `0x0000..0x0083`: shared SmartApplet metadata header
+- `0x0084..EOF`: payload bytes uploaded verbatim
+- `0x0084..0x0093`: four big-endian payload prefix dwords
+- `header[0x0c:0x10] != 0`: optional appended info table starts at that absolute file offset
+
+Observed payload prefix dwords across all shipped samples:
+
+- dword 0: variable offset inside the image, always within the file, always disassembles as plausible 68k code
+- dword 1: always `0`
+- dword 2: always `1`
+- dword 3: always `2`
+
+Strong current interpretation:
+
+- dword 0 is the primary applet entry offset
+- dwords 1..3 are fixed ABI/version markers for the embedded runtime image
+
+That entry-offset interpretation is supported by the samples:
+
+- when dword 0 is `0x94`, the image entry starts immediately after the 16-byte payload prefix
+- when dword 0 is larger than `0x94`, the bytes from `0x94` up to the entry offset form a loader/helper stub region, and the pointed-to offset still begins with a normal 68k function prologue
+
+Examples:
+
+- `neofontmedium.os3kapp`: payload prefix `(0x94, 0, 1, 2)`
+- `calculator.os3kapp`: payload prefix `(0x168, 0, 1, 2)`
+- `alphaquiz.os3kapp`: payload prefix `(0x0e20, 0, 1, 2)`
+- `spellcheck_small_usa.os3kapp`: payload prefix `(0x33b2, 0, 1, 2)`
+
+Practical container split for tooling:
+
+- `payload_total_size = file_size - 0x84`
+- `loader_stub = file[0x94:entry_offset]` when `entry_offset > 0x94`
+- `code_before_info_table = file[0x84:info_table_offset]` when `info_table_offset != 0`
+- `info_table_bytes = file[info_table_offset:]` when `info_table_offset != 0`
+
+This is enough to decode and extract shipped `.os3kapp` files structurally:
+
+- header fields
+- total uploaded payload
+- inferred primary entry offset
+- optional loader stub before that entry
+- optional appended info table
+
+What is not closed yet is the full calling convention of the 68k entry function. That is an inner SmartApplet runtime ABI question, not an outer `.os3kapp` container question.
+
+## Inner SmartApplet ABI
+
+The payload prefix dword at file offset `0x84` is not just a generic code pointer. In the raw `calculator.os3kapp` and `alphaquiz.os3kapp` images, it points to the top-level SmartApplet dispatcher function.
+
+Confirmed entry signature from the `calculator.os3kapp` raw decompile:
+
+```c
+void SmartAppletEntryPoint(uint command, uint *call_block, uint *status_out)
+```
+
+Recovered top-level behavior:
+
+- `*status_out` is cleared to `0` on entry
+- lifecycle command `0x18` initializes applet state
+- lifecycle command `0x19` shuts the applet down
+- shutdown writes final status `7`
+- other zero-valued lifecycle-range commands fall through as no-ops
+- non-lifecycle commands are forwarded into the applet-specific command dispatcher
+
+The current `calculator.os3kapp` decompile is now readable enough to treat that as proven rather than guessed:
+
+- `SmartAppletEntryPoint`
+- `InitializeCalculatorAppletState`
+- `DispatchCalculatorAppletCommand`
+- `ShutdownCalculatorAppletState`
+
+Recovered call-block layout from the raw 68k stack setup used by the entry stub:
+
+- `call_block[0]`: input length / input element count
+- `call_block[1]`: input pointer
+- `call_block[2]`: output capacity / minimum required output space
+- `call_block[3]`: output length written back by the applet
+- `call_block[4]`: output buffer pointer
+
+That layout is visible directly in the 68k call sequence:
+
+- `move.l 0x10(a4), -(a7)` pushes `call_block[4]`
+- `pea 0x0c(a4)` pushes `&call_block[3]`
+- `move.l 0x08(a4), -(a7)` pushes `call_block[2]`
+- `move.l a3, -(a7)` pushes `status_out`
+- `move.l 0x04(a4), -(a7)` pushes `call_block[1]`
+- `move.l (a4), -(a7)` pushes `call_block[0]`
+- `move.l d7, -(a7)` pushes the 32-bit command word
+
+That layout is now modeled in the PoC runtime helper:
+
+- [os3kapp_runtime.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/os3kapp_runtime.py)
+
+Useful commands:
+
+```bash
+uv run --project poc/neotools python -m neotools os3kapp-entry-abi "<full .OS3KApp hex>"
+uv run --project poc/neotools python -m neotools os3kapp-command 0x12040000
+```
+
+### Custom Command Encoding
+
+The lifecycle commands are plain low-valued integers (`0x18`, `0x19`), but the applet-specific commands use additional namespace bytes inside the 32-bit command word.
+
+Cross-checking the `alphaquiz.os3kapp` raw dispatcher shows:
+
+- top byte `0x00`: lifecycle path
+- top byte nonzero: custom-dispatch path
+- inside the custom path, `alphaquiz` extracts selector byte `((command & 0x00ff0000) >> 16)` and branches on values `4`, `5`, and `6`
+
+The `calculator.os3kapp` custom dispatcher decompiles as if it compares command values `1` and `2` directly. That does not line up cleanly with the outer top-byte gate, so the safest current interpretation is:
+
+- lifecycle dispatch is universal and proven
+- the exact custom-command selector extraction is applet-specific
+- at least one applet (`alphaquiz`) uses the second-highest command byte as the selector namespace
+- `calculator` really does compare literal low command values `1` and `2` after the entry stub hands off into `DispatchCalculatorAppletCommand`
+
+This means the safe authoring rule for a custom SmartApplet is:
+
+- the universal part of the ABI is the entry signature plus lifecycle opcodes `0x18` and `0x19`
+- custom command numbers are private to the applet payload and may be encoded however that payload expects
+- a minimal custom SmartApplet can therefore start with only lifecycle handling and no custom commands at all
+
+## Runtime Trap ABI
+
+The raw 68k payloads import host/runtime services by embedding Motorola A-line trap opcodes directly into the image. For `calculator.os3kapp`, the PoC now scans those imports and reports the real dense trap blocks:
+
+- `0x34ce..0x34ee`: `0xa000..0xa03c`
+- `0x34f0..0x3640`: `0xa06c..0xa308`
+- `0x3640..0x3684`: `0xa32c..0xa3b0`
+
+So the imported runtime surface is not a small hand-written jump table. It is a large contiguous family of host services spanning at least A-line families `0xa0`, `0xa1`, `0xa2`, and `0xa3`.
+
+Cross-sample check:
+
+- `calculator.os3kapp` has three dense blocks ending at `0xa03c`, `0xa308`, and `0xa3b0`
+- `alphaquiz.os3kapp` has the same three-block pattern with the same first/last trap opcodes
+- `spellcheck_small_usa.os3kapp` again starts with the same `0xa000..0xa03c` and `0xa06c..0xa308` ranges, then extends the final block past `0xa3b0`
+- `neofontmedium.os3kapp` has no dense imported trap blocks and also uses `entry_offset = 0x94`
+
+That makes two authoring patterns visible:
+
+- UI-heavy / logic-heavy SmartApplets import a substantial shared runtime through dense A-line trap tables
+- very small payloads can be self-contained and omit those imports entirely
+
+Confirmed or strongly inferred trap meanings from named call sites in `calculator.os3kapp`:
+
+- `0xa000` `TrapA000`: calculator menu begin / clear menu area
+- `0xa004` `TrapA004`: calculator menu next row
+- `0xa010` `TrapA010`: calculator menu draw selection marker
+- `0xa014` `TrapA014`: calculator menu flush current string
+- `0xa094` `TrapA094`: read key code
+- `0xa09c` `TrapA09C`: poll key-ready / event-ready
+- `0xa0a4` `TrapA0A4`: yield or pump events
+- `0xa25c` `TrapA25C`: yield or sleep while waiting for events
+- `0xa368` `TrapA368`: calculator runtime init slot A
+- `0xa38c` `TrapA38C`: calculator runtime init slot C
+- `0xa390` `TrapA390`: calculator runtime store result string
+- `0xa39c` `TrapA39C`: calculator runtime copy input string
+
+Evidence for those names:
+
+- `RunCalculatorFunctionMenu` uses `TrapA000`, `TrapA004`, `TrapA010`, `TrapA014`, `TrapA094`, `TrapA09C`, `TrapA0A4`, and `TrapA25C` in a menu redraw + key polling loop
+- `InitializeCalculatorAppletState` calls `TrapA368`, `TrapA368`, and `TrapA38C`
+- `DispatchCalculatorAppletCommand` calls `TrapA39C` before evaluating the copied input buffer and `TrapA378` after a successful evaluation path that returns a 4-byte result buffer
+
+What this means for custom SmartApplet authoring:
+
+- a structurally valid `.os3kapp` does not need any trap imports at all
+- a functional UI-heavy SmartApplet almost certainly does
+- the trap words are embedded directly in the payload; there is no separate relocation/import table
+- the first practical custom applet target should therefore be a minimal lifecycle-only applet that uses no traps, then incrementally add specific runtime services once their semantics are pinned
+
+The PoC now exposes this import surface directly:
+
+```bash
+uv run --project poc/neotools python -m neotools os3kapp-traps "<full .OS3KApp hex>"
+```
+
+That command prints the dense A-line trap blocks plus any currently known inferred names.
+
+## Minimum Viable Custom SmartApplet
+
+The current PoC can already synthesize a minimal custom `.os3kapp` image from scratch:
+
+- valid `0xc0ffeead` SmartApplet header
+- correct `file_size`
+- correct base/extra memory fields
+- payload prefix words `(entry_offset, 0, 1, 2)`
+- a minimal 68k entry stub
+- universal lifecycle handling for `0x18` and `0x19`
+- no runtime trap imports
+
+The generated minimal entry stub does exactly this:
+
+1. load `status_out`
+2. write `0` to `*status_out`
+3. compare `command` with `0x19`
+4. if equal, write `7` to `*status_out`
+5. return
+
+That is enough to produce a parseable, structurally valid SmartApplet image and proves that custom authoring is not blocked on the outer container format anymore. The remaining blocker for sophisticated custom applets is semantic coverage of the runtime trap services, not the container or entry ABI.
+
+### Host Runtime Boundary
+
+The applet payloads are not fully self-contained binaries. They call out to the NEO SmartApplet runtime through embedded Motorola 68k A-line trap opcodes.
+
+Concrete evidence from `calculator.os3kapp`:
+
+- file offset `0x365e..0x3682` contains a dense run of trap words:
+  - `0xa368`, `0xa36c`, `0xa370`, `0xa374`, `0xa378`, `0xa37c`, `0xa380`, `0xa384`, `0xa388`, `0xa38c`, `0xa390`, `0xa394`, `0xa398`, `0xa39c`, `0xa3a0`, `0xa3a4`, `0xa3a8`, `0xa3ac`, `0xa3b0`
+- callers branch or `jsr` through those trap stubs as if they were imported runtime services
+
+Practical implication:
+
+- we can now build structurally valid `.os3kapp` containers and the outer dispatcher ABI correctly
+- a truly functional custom SmartApplet still requires mapping the semantics of the runtime trap services it uses
+- a deliberately minimal applet may be possible with only a small subset of those services, but that subset is not fully named yet
 
 ## Retrieve Applet From Device
 
@@ -385,6 +617,7 @@ Covered operations:
 - retrieve-applet command construction
 - direct USB retrieve session planning
 - SmartApplet header parsing
+- full `.os3kapp` container parsing and rebuilding
 - shared SmartApplet list-entry / header metadata parsing
 - embedded SmartApplet info-table parsing
 - typed info-table record-family classification
@@ -408,6 +641,7 @@ uv run --project poc/neotools python -m neotools smartapplet-retrieve-plan 0xa12
 uv run --project poc/neotools python -m neotools smartapplet-add-plan 0x12345678 0x9abc "41 42 43 44 45"
 uv run --project poc/neotools python -m neotools smartapplet-header "<0x84-byte header hex>"
 uv run --project poc/neotools python -m neotools smartapplet-metadata "<0x84-byte header hex>"
+uv run --project poc/neotools python -m neotools os3kapp-image "<full .OS3KApp hex>"
 uv run --project poc/neotools python -m neotools smartapplet-string 0xf138
 uv run --project poc/neotools python -m neotools smartapplet-menu 163
 uv run --project poc/neotools python -m neotools smartapplet-add-plan-from-image "<full .OS3KApp hex>"

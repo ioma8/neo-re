@@ -1,8 +1,12 @@
 import io
+from pathlib import Path
 import unittest
 from contextlib import redirect_stdout
 
 from neotools import main
+
+
+FIXTURE_DIR = Path("/Users/jakubkolcar/customs/neo-re/analysis/cab")
 
 
 class SmartAppletCliTests(unittest.TestCase):
@@ -140,6 +144,84 @@ class SmartAppletCliTests(unittest.TestCase):
                 "finalize_applet_update: 07 00 00 00 00 00 00 07",
             ],
         )
+
+    def test_os3kapp_image_prints_full_container_breakdown(self) -> None:
+        output = io.StringIO()
+        image_hex = (
+            "c0 ff ee ad 00 00 00 a0 00 00 00 10 00 00 00 94"
+            " ff 00 00 31 a0 02 01 00"
+            + " 00" * (0x3F - 0x18)
+            + " 01"
+            + " 00" * (0x80 - 0x40)
+            + " 00 00 00 00"
+            + " 00 00 00 94 00 00 00 00 00 00 00 01 00 00 00 02"
+            + " aa" * 0x0c
+        )
+
+        with redirect_stdout(output):
+            exit_code = main(["os3kapp-image", image_hex])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "file_size=0x000000a0 applet_id=0xa002 applet_class=0x01 body_size=0x1c info_table_offset=0x00000094",
+                "body_prefix_words=0x00000094,0x00000000,0x00000001,0x00000002",
+                "info_records=0",
+            ],
+        )
+
+    def test_os3kapp_entry_abi_prints_recovered_runtime_contract(self) -> None:
+        output = io.StringIO()
+        image_hex = (
+            "c0 ff ee ad 00 00 00 a0 00 00 00 10 00 00 00 94"
+            " ff 00 00 31 a0 02 01 00"
+            + " 00" * (0x3F - 0x18)
+            + " 01"
+            + " 00" * (0x80 - 0x40)
+            + " 00 00 00 00"
+            + " 00 00 00 a0 00 00 00 00 00 00 00 01 00 00 00 02"
+            + " aa" * 0x0c
+        )
+
+        with redirect_stdout(output):
+            exit_code = main(["os3kapp-entry-abi", image_hex])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "entry_offset=0x000000a0 loader_stub_length=0xc init_opcode=0x18 shutdown_opcode=0x19 shutdown_status=0x00000007",
+                "call_block_words=5 input_length_index=0 input_pointer_index=1 output_capacity_index=2 output_length_index=3 output_buffer_pointer_index=4",
+            ],
+        )
+
+    def test_os3kapp_command_prints_namespace_and_selector_bytes(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = main(["os3kapp-command", "0x12040000"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "raw=0x12040000 namespace_byte=0x12 selector_byte=0x04 low_word=0x0000 custom_dispatch=True lifecycle=none",
+            ],
+        )
+
+    def test_os3kapp_traps_prints_dense_import_blocks(self) -> None:
+        output = io.StringIO()
+        image_hex = (FIXTURE_DIR / "calculator.os3kapp").read_bytes().hex(" ")
+
+        with redirect_stdout(output):
+            exit_code = main(["os3kapp-traps", image_hex])
+
+        self.assertEqual(exit_code, 0)
+        lines = output.getvalue().splitlines()
+        self.assertEqual(lines[0], "block=0x34ce-0x34ee count=16 first=0xa000 last=0xa03c")
+        self.assertIn("offset=0x34ce opcode=0xa000 family=0xa0 selector=0x00 name=calculator_menu_begin", lines)
+        self.assertIn("offset=0x365e opcode=0xa368 family=0xa3 selector=0x68 name=calculator_runtime_init_slot_a", lines)
 
 
 if __name__ == "__main__":
