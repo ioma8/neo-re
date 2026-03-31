@@ -92,11 +92,12 @@ class CLIAlphaWordGetPrintFlowTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         lines = stdout.getvalue().splitlines()
-        self.assertEqual(lines[0], "controller: RefreshAlphaWordPreviewCacheForTreeItem")
-        self.assertEqual(lines[1], "reset_connection: 3f ff 00 72 65 73 65 74")
-        self.assertEqual(lines[2], "switch_to_updater: 3f 53 77 74 63 68 00 00")
-        self.assertEqual(lines[3], "list_applets slot=1: 04 00 00 00 00 00 07 0b")
-        self.assertEqual(lines[7], "cache_preview_text slot=1 status=1")
+        self.assertEqual(lines[0], "controller: HandleAlphaWordTreeExpandStateChange")
+        self.assertEqual(lines[1], "controller: RefreshAlphaWordPreviewCacheForTreeItem")
+        self.assertEqual(lines[2], "reset_connection: 3f ff 00 72 65 73 65 74")
+        self.assertEqual(lines[3], "switch_to_updater: 3f 53 77 74 63 68 00 00")
+        self.assertEqual(lines[4], "list_applets slot=1: 04 00 00 00 00 00 07 0b")
+        self.assertEqual(lines[8], "cache_preview_text slot=1 status=1")
         self.assertEqual(lines[-1], "cache_preview_size slot=2 status=1")
 
     def test_get_print_full_selected_flow_command_prints_selected_controller(self) -> None:

@@ -95,8 +95,22 @@ Behavior confirmed by Ghidra:
 - reads the returned attribute bytes with `read_data1`
 - verifies the returned 16-bit checksum against the byte sum of the attribute payload
 - caller-provided receive storage is `0x28` bytes
+- `CopyAppletFileNameFromRawAttributes` copies a NUL-terminated string directly from the first `0x18` bytes
 - `NormalizeAlphaWordAttributeWords` endian-swaps two 32-bit words from offsets `0x18` and `0x1c`
 - `UpdaterSaveAppletFileData` treats the big-endian word at offset `0x1c` as the file content length
+
+Current best layout of the `0x28`-byte record, validated against both retrieve and restore/save callers:
+
+- `0x00..0x17`: file name field
+  - copied as a NUL-terminated byte string by `CopyAppletFileNameFromRawAttributes`
+  - effectively a fixed `0x18`-byte name slot
+- `0x18..0x1b`: big-endian reserved length / storage-footprint field
+  - this is a strong inference from `FUN_00485950` and its callers, which use this word as a size-planning metric distinct from the real payload byte count
+- `0x1c..0x1f`: big-endian file payload length
+  - this is explicitly consumed by both `UpdaterSaveAppletFileData` and `UpdaterRestoreAppletFileData` to delimit the following payload bytes
+- `0x20..0x27`: trailing opaque bytes
+  - preserved when NeoManager round-trips raw records through save/restore
+  - no validated semantic decoding of these final 8 bytes was found in the main AlphaWord path
 
 The most concrete attribute command packet currently confirmed is:
 
@@ -423,7 +437,7 @@ Interpretation:
 
 ## Confirmed UI-Side Callers
 
-The exact resource-to-handler binding for the literal UI string is still unresolved, but the higher-level AlphaWord callers are now visible.
+The tree-control message-map binding for the `Get/Print AlphaWord Files` page is now pinned even though the literal resource string itself still lives only in `.rsrc`.
 
 `RefreshAlphaWordPreviewCacheForTreeItem`:
 
@@ -464,24 +478,44 @@ The PoC now models this app behavior as a session-level 8-slot scan at:
 
 Fresh Ghidra decompilation of the renamed controller functions shows the main app-side execution chain is:
 
-1. `HandleAlphaWordTreeSelectionChange`
-2. `RefreshAlphaWordPreviewCacheForTreeItem`
-3. `ExecuteGetPrintAlphaWordFlow`
-4. one of:
+1. `HandleAlphaWordTreeNotifications`
+2. one of:
+   - `HandleAlphaWordTreeExpandStateChange`
+   - `UpdateAlphaWordButtonsForTreeSelection`
+   - `HandleAlphaWordTreeDoubleClick`
+3. `RefreshAlphaWordPreviewCacheForTreeItem` for preview fills
+4. `ExecuteGetPrintAlphaWordFlow` for full retrieval
+5. one of:
    - `RetrieveAllAlphaWordSlotsForDevice`
    - `RetrieveSelectedAlphaWordSlotsForDevice`
    - `RetrieveSingleAlphaWordSlotForDevice`
-5. `RetrieveFullAlphaWordText`
-6. `GetAppletFileNameForSlot`
+6. `RetrieveFullAlphaWordText`
+7. `GetAppletFileNameForSlot`
 
 What each layer does:
 
-`HandleAlphaWordTreeSelectionChange`
+`HandleAlphaWordTreeNotifications`
 
-- responds to tree-selection changes in the AlphaWord view
-- clears cached slot-selection bits on the affected tree/device items
-- calls `RefreshAlphaWordPreviewCacheForTreeItem`
-- refreshes the visible list/tree state afterward
+- is the exact tree notification dispatcher bound to control id `0x8a8a`
+- routes:
+  - notification `-2` to `ToggleAlphaWordTreeCheckByMouse`
+  - notification `-3` to `HandleAlphaWordTreeDoubleClick`
+  - notification `-0x19c` to `ToggleAlphaWordTreeCheckByKeyboard`
+  - notification `-0x192` to `UpdateAlphaWordButtonsForTreeSelection`
+  - notification `-0x195` to `HandleAlphaWordTreeExpandStateChange`
+
+`HandleAlphaWordTreeExpandStateChange`
+
+- handles tree expand/collapse state changes for the AlphaWord tree
+- when the tree action field is `2`, it calls `RefreshAlphaWordPreviewCacheForTreeItem`
+- when the tree action field is `1`, it clears cached slot-selection/check state under the affected item instead of fetching preview text
+- refreshes visible list/tree state after the preview/cache work
+
+`UpdateAlphaWordButtonsForTreeSelection`
+
+- is the separate plain-selection-state helper
+- updates enabled/disabled button state based on whether the current tree selection resolves to a device item plus slot item
+- does not fetch preview text
 
 `RefreshAlphaWordPreviewCacheForTreeItem`
 
@@ -490,6 +524,12 @@ What each layer does:
 - stores preview text and preview byte count into the local per-slot cache
 - does not call `GetAppletFileNameForSlot`
 - does not populate the full-text cache used by later retrieval/print flows
+
+`HandleAlphaWordTreeDoubleClick`
+
+- dispatches to `OpenSelectedAlphaWordSlotDialog`
+- ensures the selected slot has been fully retrieved first when its cache status is not already `2`
+- then opens the per-slot modal viewer dialog using the cached full text
 
 `ExecuteGetPrintAlphaWordFlow`
 
@@ -632,8 +672,11 @@ That means they are not the core `Get/Print AlphaWord Files` path documented her
   - `0x90`
   - `0x5a`
 - raw attribute record length is `0x28`
+- raw attribute offsets `0x00..0x17` are the fixed name field copied by `CopyAppletFileNameFromRawAttributes`
 - raw attribute offsets `0x18` and `0x1c` are big-endian 32-bit values used by NeoManager
+- raw attribute offset `0x18` is best understood as a reserved length / storage-footprint field distinct from payload byte count
 - raw attribute offset `0x1c` is the file content length
+- raw attribute offsets `0x20..0x27` are preserved trailing bytes with no validated higher-level semantics yet
 - applet list command is `0x04` with page size `7`
 - applet list entry size is `0x84`
 
@@ -644,9 +687,10 @@ The PoC now covers both the updater protocol and the controller-level `Get/Print
 - [alphaword_flow.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_flow.py): raw AlphaWord updater packets for preview and full retrieval
 - [alphaword_transfer.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_transfer.py): start/chunk reconstruction with checksum checks
 - [alphaword_session.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_session.py): 8-slot preview and full direct-USB sessions
-- [alphaword_get_print.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_get_print.py): controller-level preview refresh and full get/print retrieval flows, including cache and filename update steps
+- [alphaword_get_print.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_get_print.py): controller-level preview refresh and full get/print retrieval flows, including the exact tree notification dispatch for control `0x8a8a`
 - [alphaword_get_print.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_get_print.py): also includes an exact branch-level model of `RetrieveAllAlphaWordSlotsForDevice`, including skip-on-status-2, restore-on-error, and cancel handling
 - [alphaword_get_print.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_get_print.py): also includes an exact helper-level model of `RetrieveFullAlphaWordText`, including temp-sink setup, transport dispatch, temp-file load, and workspace finalization
+- [alphaword_attributes.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_attributes.py): exact `0x28` raw-attribute parsing for the name field, reserved-length word, payload-length word, and trailing opaque bytes
 
 Example commands:
 
@@ -661,7 +705,8 @@ uv run --project poc/neotools python -m neotools updater-retrieve-applet-file-da
 
 ## Still Unresolved
 
-- the exact semantics of the attribute word at offset `0x18`
-- the remaining internal layout of the raw AlphaWord attribute block returned by opcode `0x13`
-- the exact UI function that binds the literal `Get/Print AlphaWord Files` label to these retrieval helpers
+- the final semantic name of the size word at offset `0x18`
+  - current best reading is reserved length / storage footprint, but NeoManager does not label it explicitly
+- the exact semantic meaning of the trailing raw-attribute bytes at offsets `0x20..0x27`
+- the exact tree-population helper that inserts the literal `Get/Print AlphaWord Files` resource string into the UI hierarchy
 - the exact downstream print formatter function that consumes the fully cached `0xa000` text after `ExecuteGetPrintAlphaWordFlow`

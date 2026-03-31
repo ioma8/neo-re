@@ -389,8 +389,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "parse-alphaword-attributes":
         attributes = parse_file_attributes_record(_parse_hex_bytes(args.raw_hex))
         print(
-            f"value_0x18=0x{attributes.value_0x18:08x} "
-            f"file_length=0x{attributes.file_length:08x}"
+            f"name={attributes.name} "
+            f"reserved_length=0x{attributes.reserved_length:08x} "
+            f"file_length=0x{attributes.file_length:08x} "
+            f"trailing={attributes.trailing_bytes.hex(' ')}"
         )
         return 0
 

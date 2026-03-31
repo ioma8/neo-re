@@ -3,6 +3,7 @@ import unittest
 from neotools.alphaword_get_print import (
     GetPrintFlowStep,
     UpdaterErrorLogEntry,
+    build_alpha_word_tree_notification_flow,
     build_retrieve_all_alpha_word_slots_for_device_flow,
     build_direct_usb_full_get_print_flow,
     build_direct_usb_preview_refresh_flow,
@@ -15,6 +16,16 @@ from neotools.alphaword_get_print import (
 
 
 class AlphaWordGetPrintFlowTests(unittest.TestCase):
+    def test_alpha_word_tree_notification_flow_maps_control_id_and_notification_dispatch(self) -> None:
+        flow = build_alpha_word_tree_notification_flow(notification_code=-0x195, tree_action=2)
+
+        self.assertEqual(flow[0], GetPrintFlowStep(kind="controller", detail="HandleAlphaWordTreeNotifications"))
+        self.assertEqual(flow[1], GetPrintFlowStep(kind="tree_control_id", status=0x8A8A))
+        self.assertEqual(flow[2], GetPrintFlowStep(kind="tree_notification_code", status=-0x195))
+        self.assertEqual(flow[3], GetPrintFlowStep(kind="dispatch", detail="HandleAlphaWordTreeExpandStateChange"))
+        self.assertEqual(flow[4], GetPrintFlowStep(kind="tree_action", status=2))
+        self.assertEqual(flow[5], GetPrintFlowStep(kind="dispatch", detail="RefreshAlphaWordPreviewCacheForTreeItem"))
+
     def test_classify_retrieve_opcode_distinguishes_interactive_and_save_archive_variants(self) -> None:
         self.assertEqual(classify_retrieve_opcode(0x12), "interactive_retrieve")
         self.assertEqual(classify_retrieve_opcode(0x1C), "save_archive_retrieve")
@@ -245,17 +256,18 @@ class AlphaWordGetPrintFlowTests(unittest.TestCase):
     def test_preview_refresh_flow_bootstraps_once_and_marks_preview_cache_updates(self) -> None:
         flow = build_direct_usb_preview_refresh_flow(applet_id=0xA000, file_slots=[1, 2])
 
-        self.assertEqual(flow[0], GetPrintFlowStep(kind="controller", detail="RefreshAlphaWordPreviewCacheForTreeItem"))
-        self.assertEqual(flow[1].kind, "reset_connection")
-        self.assertEqual(flow[1].packet, bytes.fromhex("3f ff 00 72 65 73 65 74"))
-        self.assertEqual(flow[2].kind, "switch_to_updater")
-        self.assertEqual(flow[3].kind, "list_applets")
-        self.assertEqual(flow[3].file_slot, 1)
-        self.assertEqual(flow[4].kind, "raw_file_attributes")
-        self.assertEqual(flow[5].kind, "retrieve_file")
-        self.assertEqual(flow[5].packet, bytes.fromhex("12 00 00 b4 01 a0 00 67"))
-        self.assertEqual(flow[7], GetPrintFlowStep(kind="cache_preview_text", file_slot=1, status=1))
-        self.assertEqual(flow[8], GetPrintFlowStep(kind="cache_preview_size", file_slot=1, status=1))
+        self.assertEqual(flow[0], GetPrintFlowStep(kind="controller", detail="HandleAlphaWordTreeExpandStateChange"))
+        self.assertEqual(flow[1], GetPrintFlowStep(kind="controller", detail="RefreshAlphaWordPreviewCacheForTreeItem"))
+        self.assertEqual(flow[2].kind, "reset_connection")
+        self.assertEqual(flow[2].packet, bytes.fromhex("3f ff 00 72 65 73 65 74"))
+        self.assertEqual(flow[3].kind, "switch_to_updater")
+        self.assertEqual(flow[4].kind, "list_applets")
+        self.assertEqual(flow[4].file_slot, 1)
+        self.assertEqual(flow[5].kind, "raw_file_attributes")
+        self.assertEqual(flow[6].kind, "retrieve_file")
+        self.assertEqual(flow[6].packet, bytes.fromhex("12 00 00 b4 01 a0 00 67"))
+        self.assertEqual(flow[8], GetPrintFlowStep(kind="cache_preview_text", file_slot=1, status=1))
+        self.assertEqual(flow[9], GetPrintFlowStep(kind="cache_preview_size", file_slot=1, status=1))
         self.assertEqual(flow[-2], GetPrintFlowStep(kind="cache_preview_text", file_slot=2, status=1))
         self.assertEqual(flow[-1], GetPrintFlowStep(kind="cache_preview_size", file_slot=2, status=1))
 

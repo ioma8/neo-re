@@ -85,10 +85,46 @@ def _bootstrap_steps() -> list[GetPrintFlowStep]:
     ]
 
 
+def build_alpha_word_tree_notification_flow(
+    *, notification_code: int, tree_action: int | None = None
+) -> list[GetPrintFlowStep]:
+    flow = [
+        GetPrintFlowStep(kind="controller", detail="HandleAlphaWordTreeNotifications"),
+        GetPrintFlowStep(kind="tree_control_id", status=0x8A8A),
+        GetPrintFlowStep(kind="tree_notification_code", status=notification_code),
+    ]
+
+    if notification_code == -2:
+        flow.append(GetPrintFlowStep(kind="dispatch", detail="ToggleAlphaWordTreeCheckByMouse"))
+        return flow
+    if notification_code == -3:
+        flow.append(GetPrintFlowStep(kind="dispatch", detail="HandleAlphaWordTreeDoubleClick"))
+        flow.append(GetPrintFlowStep(kind="dispatch", detail="OpenSelectedAlphaWordSlotDialog"))
+        return flow
+    if notification_code == -0x19C:
+        flow.append(GetPrintFlowStep(kind="dispatch", detail="ToggleAlphaWordTreeCheckByKeyboard"))
+        return flow
+    if notification_code == -0x192:
+        flow.append(GetPrintFlowStep(kind="dispatch", detail="UpdateAlphaWordButtonsForTreeSelection"))
+        return flow
+    if notification_code == -0x195:
+        flow.append(GetPrintFlowStep(kind="dispatch", detail="HandleAlphaWordTreeExpandStateChange"))
+        if tree_action is not None:
+            flow.append(GetPrintFlowStep(kind="tree_action", status=tree_action))
+            if tree_action == 2:
+                flow.append(GetPrintFlowStep(kind="dispatch", detail="RefreshAlphaWordPreviewCacheForTreeItem"))
+        return flow
+
+    raise ValueError(f"unsupported AlphaWord tree notification code: {notification_code}")
+
+
 def build_direct_usb_preview_refresh_flow(
     *, applet_id: int, file_slots: Iterable[int] = range(1, 9)
 ) -> list[GetPrintFlowStep]:
-    flow = [GetPrintFlowStep(kind="controller", detail="RefreshAlphaWordPreviewCacheForTreeItem")]
+    flow = [
+        GetPrintFlowStep(kind="controller", detail="HandleAlphaWordTreeExpandStateChange"),
+        GetPrintFlowStep(kind="controller", detail="RefreshAlphaWordPreviewCacheForTreeItem"),
+    ]
     flow.extend(_bootstrap_steps())
     for file_slot in file_slots:
         for step in build_preview_retrieval_plan(applet_id=applet_id, file_slot=file_slot):
