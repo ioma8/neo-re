@@ -115,9 +115,12 @@ Inference:
 
 Observed behavior:
 
+- Sends an 8-byte reset preamble before the switch command:
+  - `3f ff 00 72 65 73 65 74`
+  - ASCII form: `?\xff\x00reset`
 - Writes an 8-byte command block via `WriteFile`.
 - The command starts with the string prefix `"?Swtch"`.
-- The remaining bytes include a 16-bit value derived from the target applet ID.
+- The remaining bytes are the target applet ID encoded as a big-endian 16-bit value.
 - It then reads back an 8-byte response via `ReadFile`.
 - Response strings checked in the DLL:
   - `Switched`
@@ -136,6 +139,10 @@ Inference:
 
 - Applet switching is a very small command/response protocol.
 - The command and response framing is fixed-width at 8 bytes.
+- The on-wire switch packet format is:
+  - bytes `0..5`: ASCII `?Swtch`
+  - bytes `6..7`: applet ID in big-endian order
+- The reset preamble is distinct from the switch packet and should be modeled as a separate fixed 8-byte write.
 
 ### `AsUSBCommIsAlphaSmartPresent`
 
@@ -152,6 +159,9 @@ Inference:
 - `0x80002000` is probably not a private `AsUsbDrv` IOCTL.
 - It likely targets a lower USB/HID stack request that the filter/function driver passes through.
 - The 18-byte buffer length matches a USB device descriptor size, which is a strong hint that this call is retrieving a device descriptor for identification.
+- The practical user-mode discriminator for the direct NEO path is therefore the USB device descriptor VID/PID pair:
+  - vendor `0x081e`
+  - product `0xbd01`
 
 ## Private Driver IOCTL Surface
 
@@ -176,6 +186,7 @@ What each code appears to do:
 - `0x80002000`
   - Copies 18 bytes from a device-resident descriptor pointer into the caller output buffer.
   - This matches the user-mode presence check.
+  - The copied layout is consistent with a standard USB device descriptor (`bLength == 0x12`, `bDescriptorType == 0x01`).
 - `0x220008`
   - Looks up a pointer chain and copies a variable-length data block to the caller output buffer.
   - This is a strong candidate for the `AsUSBCommReadData` control stage.
@@ -268,4 +279,7 @@ What is already firm enough to rely on:
 - The driver exposes a named DOS device path consumed from user mode.
 - User-mode writes are stream writes in `0x40` byte chunks.
 - Applet switching is an 8-byte request and 8-byte response exchange.
+- Applet switching is preceded by a fixed 8-byte reset preamble `?\xff\x00reset`.
+- The `?Swtch` applet ID field is big-endian.
+- The presence-check path can be modeled offline as a standard 18-byte USB device descriptor parse plus VID/PID classification.
 - The driver has at least three private user-visible IOCTLs and one descriptor-oriented pass-through request.

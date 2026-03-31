@@ -1,0 +1,16 @@
+[project]
+name = "neotools"
+version = "0.1.0"
+description = "Add your description here"
+authors = [
+    { name = "Jakub Kolcar", email = "j.kolcar@raynet.cz" }
+]
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+neotools = "neotools:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
