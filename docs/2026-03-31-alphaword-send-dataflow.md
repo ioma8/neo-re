@@ -100,6 +100,68 @@ This confirms that the send flow is record-oriented, not just “send arbitrary 
 - mode `2` and `5` call `FUN_00435d60`, which wraps `UpdaterRestoreAppletFileData` for direct USB
 - mode `3` calls `FUN_00435d90`, which wraps the same logic for the alternate port-aware context
 
+## Confirmed UI-Side Call Chain
+
+The top-level send-side controller chain is now visible:
+
+1. `FUN_00428500`
+2. `FUN_00428130`
+3. `FUN_00428257`
+4. `FUN_0042836a`
+5. `FUN_00486220`
+6. `FUN_00435dc0`
+7. `FUN_00436670` then `FUN_00434810`
+
+What each layer does:
+
+### `FUN_00428500`
+
+- initializes the send UI state
+- displays progress text from `s_Sending_retrieved_AW_files_004bd61c`
+- iterates a table at `param_1 + 0x33f4`
+- checks each entry with `FUN_00482a80`
+- for active entries, calls `FUN_00428130(param_1, device_index)`
+
+Interpretation:
+
+- this is the controller-level action that sends retrieved AlphaWord files to selected connected targets
+- the loop bound is transport-dependent and derived from the current device mode
+
+### `FUN_00428130`
+
+- resolves the AlphaWord file collection for the selected target/device slot
+- gets a count with `FUN_00401330`
+- if more than one candidate is present, delegates to `FUN_00428257`
+- otherwise iterates file records directly and calls `FUN_0042836a`
+
+Interpretation:
+
+- this function is the per-target sender for the `AlphaWord Files to Send` workflow
+- it decides whether to walk one record directly or use the helper that searches for the next sendable record
+
+### `FUN_00428257`
+
+- scans file records until it finds one marked sendable
+- builds the per-file path and label strings
+- calls `FUN_0042836a`
+
+Interpretation:
+
+- this is the per-target file-selection helper used when multiple AlphaWord file entries exist
+
+### `FUN_0042836a`
+
+- checks that the host-side file path exists
+- opens the file and rejects zero-length content
+- calls `FUN_004280a0(...)` to obtain a handle/stream for the local file
+- calls `FUN_00486220(..., file_slot, local_file_id)`
+- marks the record as sent on success through `FUN_00482a70`
+
+Interpretation:
+
+- this is the concrete per-file send worker
+- it is the boundary where the UI/controller layer hands control to the updater/transport layer
+
 ## Direct USB Bootstrap
 
 As with retrieval, the direct USB path still depends on the DLL-level reset and updater switch path:
@@ -151,5 +213,5 @@ It can build:
 ## Remaining Unknowns
 
 - the exact semantic role of `param_5` and `param_6` in `UpdaterPutFile`
-- the exact top-level UI/dialog function that binds the literal `AlphaWord Files to Send` resource string to these send helpers
+- the exact resource id used by the `AlphaWord Files to Send` page/tab title at runtime
 - whether there is an AlphaWord-specific prevalidation pass that modifies the `0x28` attribute record before transmit
