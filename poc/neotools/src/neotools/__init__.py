@@ -4,8 +4,10 @@ from neotools.alphaword_flow import (
     build_direct_usb_full_text_retrieval_plan,
     build_full_text_retrieval_plan,
 )
+from neotools.alphaword_attributes import parse_file_attributes_record
 from neotools.switch_packets import build_switch_packet
 from neotools.updater_packets import build_updater_command
+from neotools.updater_responses import parse_updater_response
 from neotools.usb_descriptor import (
     is_direct_neo_descriptor,
     parse_usb_device_descriptor,
@@ -39,6 +41,12 @@ def main(argv: list[str] | None = None) -> int:
     direct_usb_plan_parser = subparsers.add_parser("direct-usb-alphaword-plan")
     direct_usb_plan_parser.add_argument("applet_id")
     direct_usb_plan_parser.add_argument("file_slot")
+
+    decode_response_parser = subparsers.add_parser("decode-updater-response")
+    decode_response_parser.add_argument("raw_hex")
+
+    parse_attributes_parser = subparsers.add_parser("parse-alphaword-attributes")
+    parse_attributes_parser.add_argument("raw_hex")
 
     args = parser.parse_args(argv)
 
@@ -82,6 +90,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         for step in plan:
             print(f"{step.kind}: {step.packet.hex(' ')}")
+        return 0
+
+    if args.command == "decode-updater-response":
+        response = parse_updater_response(_parse_hex_bytes(args.raw_hex))
+        print(
+            f"status=0x{response.status:02x} "
+            f"argument=0x{response.argument:08x} "
+            f"trailing=0x{response.trailing:04x}"
+        )
+        return 0
+
+    if args.command == "parse-alphaword-attributes":
+        attributes = parse_file_attributes_record(_parse_hex_bytes(args.raw_hex))
+        print(
+            f"value_0x18=0x{attributes.value_0x18:08x} "
+            f"file_length=0x{attributes.file_length:08x}"
+        )
         return 0
 
     raise AssertionError(f"unhandled command: {args.command}")
