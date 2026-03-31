@@ -29,12 +29,16 @@ class SmartAppletMetadata:
     applet_class: int
     extra_memory_size: int
     has_info_table: bool
+    flag_high_0x10: bool
+    flag_word_0x00010000: bool
+    flag_high_0x40: bool
 
 
 @dataclass(frozen=True)
 class SmartAppletInfoRecord:
     group: int
     key: int
+    record_type: int
     payload: bytes
     text: str | None
 
@@ -84,6 +88,9 @@ def parse_smartapplet_metadata(raw: bytes) -> SmartAppletMetadata:
         applet_class=raw[0x3F],
         extra_memory_size=header.extra_memory_size,
         has_info_table=header.payload_or_code_size != 0,
+        flag_high_0x10=(header.flags_and_version & 0x10000000) != 0,
+        flag_word_0x00010000=(header.flags_and_version & 0x00010000) != 0,
+        flag_high_0x40=(header.flags_and_version & 0x40000000) != 0,
     )
 
 
@@ -108,7 +115,15 @@ def parse_smartapplet_info_table(raw: bytes) -> list[SmartAppletInfoRecord]:
             text = payload.rstrip(b"\x00").decode("ascii")
         except UnicodeDecodeError:
             text = None
-        records.append(SmartAppletInfoRecord(group=group, key=key, payload=payload, text=text))
+        records.append(
+            SmartAppletInfoRecord(
+                group=group,
+                key=key,
+                record_type=group,
+                payload=payload,
+                text=text,
+            )
+        )
         offset = payload_end + (payload_length & 1)
 
     return records

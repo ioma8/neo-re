@@ -45,6 +45,9 @@ class SmartAppletTests(unittest.TestCase):
         self.assertEqual(metadata.applet_class, 0x01)
         self.assertEqual(metadata.extra_memory_size, 0x00002000)
         self.assertTrue(metadata.has_info_table)
+        self.assertTrue(metadata.flag_high_0x10)
+        self.assertFalse(metadata.flag_word_0x00010000)
+        self.assertTrue(metadata.flag_high_0x40)
 
     def test_parse_smartapplet_info_table_decodes_variable_length_string_records(self) -> None:
         records = parse_smartapplet_info_table(
@@ -58,9 +61,26 @@ class SmartAppletTests(unittest.TestCase):
         self.assertEqual(
             records,
             [
-                SmartAppletInfoRecord(group=0x0001, key=0x8002, payload=b"Passwords Enabled\x00", text="Passwords Enabled"),
-                SmartAppletInfoRecord(group=0x0001, key=0x8003, payload=b"Delete all files\x00", text="Delete all files"),
+                SmartAppletInfoRecord(group=0x0001, key=0x8002, record_type=0x0001, payload=b"Passwords Enabled\x00", text="Passwords Enabled"),
+                SmartAppletInfoRecord(group=0x0001, key=0x8003, record_type=0x0001, payload=b"Delete all files\x00", text="Delete all files"),
             ],
+        )
+
+    def test_parse_smartapplet_info_table_classifies_record_types(self) -> None:
+        records = parse_smartapplet_info_table(
+            bytes.fromhex(
+                "01 01 80 02 00 04 00 00 00 64"
+                " 01 02 80 03 00 0c 00 00 00 0a 00 00 00 14 00 00 00 1e"
+                " 01 03 80 04 00 06 00 11 00 12 00 13"
+                " 01 04 80 05 00 06 77 72 69 74 65 00"
+                " 01 05 80 06 00 06 72 65 61 64 00 00"
+                " 00 00"
+            )
+        )
+
+        self.assertEqual(
+            [record.record_type for record in records],
+            [0x0101, 0x0102, 0x0103, 0x0104, 0x0105],
         )
 
     def test_parse_smartapplet_header_extracts_big_endian_fields(self) -> None:

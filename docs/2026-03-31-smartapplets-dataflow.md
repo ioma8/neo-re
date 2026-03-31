@@ -72,6 +72,17 @@ Mapped shared `0x84` metadata layout:
 - `0x40..0x7f`: NUL-terminated copyright string
 - `0x80..0x83`: extra memory requirement
 
+Confirmed bit extraction from the packed flags dword at `0x10..0x13`:
+
+- bit `0x10000000` is extracted into one UI boolean
+- bit `0x00010000` is extracted into a second UI boolean
+- bit `0x40000000` is extracted into a third UI boolean
+
+The exact user-facing names for those three booleans are still unresolved, but the extraction sites are now pinned:
+
+- on-disk path: `FUN_00476650`
+- in-memory metadata path: `FUN_00476a40`
+
 Observed examples:
 
 - `alphawordplus.os3kapp`: applet id `0xa000`, version `3.4`, class `0x01`
@@ -219,6 +230,17 @@ The record format is:
 
 The table terminates when the next `group` field is `0`.
 
+The app also treats `group` as a typed record family when building the settings/file-info UI:
+
+- `0x0101`: single 32-bit value record
+- `0x0102`: three 32-bit values
+- `0x0103`: list of 16-bit references to string records
+- `0x0104`: inline text record
+- `0x0105`: inline text record with alternate handling flag
+- `0x0106`: inline text record used as a display-only string
+
+Those are instantiated by `FUN_004774b0` / `FUN_00477ac0` after `FUN_00477020` walks the info table.
+
 Concrete AlphaWord Plus records at file offset `0x19fa4`:
 
 - `(0x0001, 0x8002)` -> `Passwords Enabled`
@@ -264,6 +286,7 @@ Meaning:
 - `FUN_00430970` is the direct USB wrapper into `UpdaterAddApplet`
 - `FUN_004309a0` is the alternate mode `4` wrapper into `UpdaterAddApplet`
 - `FUN_00484160` and `FUN_00485690` open the host SmartApplet file and dispatch it to those wrappers
+- `FUN_0041afd0` is now pinned as the top-level send/install workflow controller that eventually reaches `FUN_0041eb80` and the SmartApplet install helpers
 - the higher-level controller entry points above are the install-side callers currently confirmed by xrefs
 
 ### Retrieve SmartApplet To Host
@@ -287,6 +310,20 @@ Meaning:
 - `FUN_004286c0` retrieves one selected SmartApplet entry through that helper
 - `FUN_00423df0` iterates the SmartApplet send-list entries and retrieves missing applets to the host workspace
 - `FUN_004191d0` is another controller path that can retrieve selected applets to host storage
+- `FUN_00417d30` is the higher-level retrieval controller that sets up the progress dialog, iterates selected devices, then calls `FUN_004191d0`
+
+### Refresh SmartApplet Info / Details View
+
+- `FUN_004662a0`
+- `FUN_004665f0`
+- `FUN_00467980`
+- `FUN_00484e40`
+
+Meaning:
+
+- `FUN_004662a0` is the controller that clears and rebuilds the SmartApplet info/details pane
+- it calls `FUN_004665f0`, which refreshes the applet inventory and injects AlphaWord-specific preview text when applet id `0xa000` is present
+- `FUN_00467980` and `FUN_00484e40` provide the normalized `0x84` SmartApplet records that feed that view
 
 ## Minimal PoC Coverage
 
@@ -302,6 +339,8 @@ Covered operations:
 - SmartApplet header parsing
 - shared SmartApplet list-entry / header metadata parsing
 - embedded SmartApplet info-table parsing
+- typed info-table record-family classification
+- extraction of the three currently proven `0x10` flag bits
 - `0x06` add-begin field derivation from a real `.OS3KApp` header
 - add-applet begin command construction
 - direct USB add session planning directly from a full SmartApplet image
@@ -325,5 +364,5 @@ uv run --project poc/neotools python -m neotools smartapplet-add-plan-from-image
 ## Remaining Unknowns
 
 - the exact top-level resource binding from the SmartApplets tab strings to the controller functions above
-- the exact semantic names of every bit in the flags dword at offset `0x10`
+- the exact semantic names of the three proven flag bits in the flags dword at offset `0x10`
 - the exact human-readable mapping behind every `applet_class` byte value at offset `0x3f`
