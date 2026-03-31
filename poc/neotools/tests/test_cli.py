@@ -29,6 +29,35 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(stdout.getvalue(), "3f 53 77 74 63 68 12 34\n")
 
+    def test_asusbcomm_presence_command_prints_cached_mode_and_return_code(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                ["asusbcomm-presence", "12 01 00 02 00 00 00 40 1e 08 01 bd 02 00 01 02 03 01"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "descriptor_valid=True cached_mode=3 return_code=3\n")
+
+    def test_asusbcomm_set_mac_packet_command_prints_hex_bytes(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["asusbcomm-set-mac-packet", "00 00 aa bb cc dd ee ff"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "20 aa bb cc dd ee ff 1b\n")
+
+    def test_asusbcomm_get_mac_packet_command_prints_hex_bytes(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["asusbcomm-get-mac-packet"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "00 00 00 00 00 00 00 00\n")
+
     def test_alphaword_plan_command_prints_retrieval_sequence(self) -> None:
         stdout = io.StringIO()
 

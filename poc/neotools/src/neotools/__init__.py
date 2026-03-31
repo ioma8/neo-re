@@ -1,5 +1,10 @@
 import argparse
 
+from neotools.asusbcomm import (
+    build_get_mac_address_packet,
+    build_set_mac_address_packet,
+    classify_alpha_smart_presence,
+)
 from neotools.alphaword_flow import (
     build_direct_usb_full_text_retrieval_plan,
     build_full_text_retrieval_plan,
@@ -50,6 +55,14 @@ def main(argv: list[str] | None = None) -> int:
 
     switch_packet_parser = subparsers.add_parser("switch-packet")
     switch_packet_parser.add_argument("applet_id")
+
+    asusbcomm_presence_parser = subparsers.add_parser("asusbcomm-presence")
+    asusbcomm_presence_parser.add_argument("raw_hex")
+
+    asusbcomm_set_mac_parser = subparsers.add_parser("asusbcomm-set-mac-packet")
+    asusbcomm_set_mac_parser.add_argument("source_hex")
+
+    subparsers.add_parser("asusbcomm-get-mac-packet")
 
     updater_packet_parser = subparsers.add_parser("updater-packet")
     updater_packet_parser.add_argument("command_byte")
@@ -155,6 +168,24 @@ def main(argv: list[str] | None = None) -> int:
         applet_id = int(args.applet_id, 0)
         packet = build_switch_packet(applet_id)
         print(packet.hex(" "))
+        return 0
+
+    if args.command == "asusbcomm-presence":
+        result = classify_alpha_smart_presence(_parse_hex_bytes(args.raw_hex))
+        print(
+            f"descriptor_valid={result.descriptor_valid} "
+            f"cached_mode={result.cached_mode} "
+            f"return_code={result.return_code}"
+        )
+        return 0
+
+    if args.command == "asusbcomm-set-mac-packet":
+        packet = build_set_mac_address_packet(_parse_hex_bytes(args.source_hex))
+        print(packet.hex(" "))
+        return 0
+
+    if args.command == "asusbcomm-get-mac-packet":
+        print(build_get_mac_address_packet().hex(" "))
         return 0
 
     if args.command == "updater-packet":
