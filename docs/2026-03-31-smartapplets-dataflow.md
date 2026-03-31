@@ -334,13 +334,19 @@ New cross-sample evidence for additional shared API surface:
 - `0xa008` is used by both `calculator` and `alphaquiz` with two byte-pointer out-parameters, and the resulting bytes feed later text-layout calls
 - `0xa020` is used by both applets with a stable 3-argument row/column/width-like shape immediately before redraw work
 - `0xa0d4` is used by both applets with one timing-like argument such as `0x32` or `0xc8`, strongly suggesting a pacing primitive
-- `0xa098` is also shared and appears after UI/text batches, but its semantics are still too ambiguous to promote beyond a provisional “commit/finalize current text frame” note
+- `0xa098` is shared across calculator, alphaquiz, and spellcheck, and consistently appears after UI/text batches with no explicit arguments; the safest current name is `flush_text_frame`
+- raw-opcode scans across `calculator`, `alphaquiz`, and `spellcheck_large_usa` show that `0xa0f0` and `0xa0f4` are not applet-local oddities; they are part of the shared runtime and are heavily exercised by the spellcheck UI paths
+- `0xa0f0` is still best described as `render_wrapped_text_block`: the observed call shape remains “text/source plus row/column/height/width-like layout arguments”
+- `0xa0f4` remains a setup companion to `0xa0f0`; the safest current name is `define_text_layout_slot`
+- `0xa0f8` is only exercised in the smaller calculator/alphaquiz UI loops, but the stable one-argument call shape still supports the provisional name `register_allowed_key`
 - `0xa390` and `0xa39c` are no longer justified as calculator-only helpers because both are directly used by `alphaquiz` as well
+- `spellcheck_large_usa` gives the clearest transaction pattern for `0xa1cc`: after a begin/edit phase exposes mutable buffer storage, `0xa1cc` closes that edit session and makes the changes visible again; the PoC now models it as `commit_editable_buffer`
 
 What is still not safe to treat as generic runtime API:
 
 - `0xa368`, `0xa36c`, and `0xa38c` do not yet have convincing cross-sample behavioral evidence beyond calculator-centric usage
 - `0xa390` and `0xa39c` are shared, but still only safe as neutral placeholders rather than semantic SDK names
+- `0xa200` and `0xa208` still do not have a defensible semantic name; raw opcode hits exist in the shipped images, but the recovered callsites are too sparse or poorly bounded to name them without overclaiming
 
 What this means for custom SmartApplet authoring:
 
