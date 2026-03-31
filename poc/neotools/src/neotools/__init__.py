@@ -5,6 +5,10 @@ from neotools.alphaword_flow import (
     build_full_text_retrieval_plan,
 )
 from neotools.alphaword_attributes import parse_file_attributes_record
+from neotools.alphaword_session import (
+    build_direct_usb_full_text_session,
+    build_direct_usb_preview_session,
+)
 from neotools.switch_packets import build_switch_packet
 from neotools.updater_packets import build_updater_command
 from neotools.updater_responses import parse_updater_response
@@ -41,6 +45,10 @@ def main(argv: list[str] | None = None) -> int:
     direct_usb_plan_parser = subparsers.add_parser("direct-usb-alphaword-plan")
     direct_usb_plan_parser.add_argument("applet_id")
     direct_usb_plan_parser.add_argument("file_slot")
+
+    direct_usb_session_parser = subparsers.add_parser("direct-usb-alphaword-session")
+    direct_usb_session_parser.add_argument("mode", choices=["preview", "full"])
+    direct_usb_session_parser.add_argument("applet_id")
 
     decode_response_parser = subparsers.add_parser("decode-updater-response")
     decode_response_parser.add_argument("raw_hex")
@@ -89,6 +97,15 @@ def main(argv: list[str] | None = None) -> int:
             file_slot=int(args.file_slot, 0),
         )
         for step in plan:
+            print(f"{step.kind}: {step.packet.hex(' ')}")
+        return 0
+
+    if args.command == "direct-usb-alphaword-session":
+        if args.mode == "preview":
+            session = build_direct_usb_preview_session(applet_id=int(args.applet_id, 0))
+        else:
+            session = build_direct_usb_full_text_session(applet_id=int(args.applet_id, 0))
+        for step in session:
             print(f"{step.kind}: {step.packet.hex(' ')}")
         return 0
 

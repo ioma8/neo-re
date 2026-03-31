@@ -261,6 +261,17 @@ This is enough to say the app path above the transport is not a single monolithi
 2. full slot retrieval using `FUN_00483bf0`
 3. cache/status updates for each of the 8 AlphaWord slots
 
+`FUN_004674b0` adds one more confirmed layer above the single-slot preview helper:
+
+- calls `FUN_00483eb0(..., applet_id=0xa000, file_slot=1..8, ...)` in a loop
+- scans all 8 AlphaWord slots for preview content
+- treats preview text longer than `0x32` bytes specially for UI formatting
+- is consistent with the higher-level dialog/page that assembles the printable selection summary
+
+The PoC now models this app behavior as a session-level 8-slot scan at:
+
+- [alphaword_session.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_session.py)
+
 ## Text Formatting and Print-Side Handoff
 
 `FUN_00485c50` is the local formatter / file-backed text loader that runs after retrieval.
@@ -296,6 +307,9 @@ For the direct USB case, the current best reconstruction is:
 11. The UI uses:
    - `FUN_00483eb0` for short preview text capped at `0xb4`
    - `FUN_00483bf0` for full retrieval capped at `0x80000`
+12. Higher-level UI code loops over all 8 AlphaWord slots:
+   - preview/session scan callers include `FUN_00406920` and `FUN_004674b0`
+   - full retrieval callers include `FUN_00407e20` and `FUN_00408160`
 
 ## Protocol Facts Confirmed So Far
 
