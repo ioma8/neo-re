@@ -126,6 +126,89 @@ Behavior confirmed by Ghidra:
 - chunk bytes are written to the destination sink with `WriteRetrievedBytesToSink`
 - the byte-sum checksum of each chunk must equal that chunk response’s 16-bit trailing field
 
+### Exact `UpdaterRetrieveAppletFileData` Flow
+
+Fresh decompilation of `UpdaterRetrieveAppletFileData` now pins the exact root retrieval loop:
+
+1. clear local accumulators and set `DAT_004c2b28 = 0`
+2. if `param_9 == 0`:
+   - format a progress caption string using `file_slot`
+   - call the progress UI percentage helper with `0`
+3. else:
+   - compute aggregate progress as `(param_8 * 100) / param_9`
+   - call the progress UI percentage helper with that value
+4. choose the start command byte:
+   - `0x12` when `param_7 == 0`
+   - `0x1c` when `param_7 != 0`
+5. send the start command through `UpdaterSendCommandAndGetResponse` with:
+   - timeout `10000`
+   - `arg32 = (requested_length << 8) | (file_slot & 0xff)`
+   - `trailing = applet_id`
+6. require response status byte `0x53`
+7. if the caller provided `param_6`, write the reported total length into `*param_6`
+8. cap the remaining transfer length to `min(reported_total_length, requested_length)`
+9. loop while remaining length is nonzero:
+   - update progress
+   - send chunk command `0x10` with timeout `600`
+   - require response status byte `0x4d`
+   - take response `arg32` as the chunk length
+   - repeatedly call `TransportReadExact(...)` until that many bytes are read
+   - call `WriteRetrievedBytesToSink(...)` for each returned slice
+   - sum every payload byte into a 16-bit running checksum
+   - compare the final checksum against the chunk response trailing field
+10. on success:
+   - if `param_9 == 0`, set progress to `100` and close the standalone progress scope
+   - else set aggregate progress to `((param_8 + capped_total_length) * 100) / param_9`
+   - return `0`
+11. on failure:
+   - record a structured updater error entry
+   - call `SetLastUpdaterErrorCode(...)`
+   - if `param_9 == 0`, close the standalone progress scope
+   - return `-1`
+
+The exact error cases that are explicitly distinguished in the function are:
+
+- start command transport failure
+- start response byte not equal to `0x53`
+- chunk command transport failure
+- chunk response byte not equal to `0x4d`
+- transport read failure while draining a chunk payload
+- sink write failure while writing the retrieved bytes
+- payload checksum mismatch
+
+Important exact details from the root function:
+
+- the root function itself enforces the `0x53` then `0x4d` response sequence
+- the root function, not `RetrieveFullAlphaWordText`, caps the transfer length to the caller-requested maximum
+- the root function accepts both standalone progress mode and aggregate nested-progress mode
+- the root function returns `0` on success and `-1` on failure
+- `command 0x12` vs `0x1c` is selected solely by `param_7`
+
+### Meaning of `0x12` vs `0x1c`
+
+Fresh caller analysis closes most of this distinction:
+
+- `0x12` is the normal interactive retrieval opcode used by:
+  - `RetrieveFullAlphaWordText`
+  - `RetrieveAlphaWordPreviewText`
+  - the `Get/Print AlphaWord Files` UI flows
+- `0x1c` is the save/export retrieval opcode used by `UpdaterSaveAppletFileData`
+
+Concrete evidence:
+
+- `UpdaterSaveAppletFileData` calls `UpdaterRetrieveAppletFileData(..., param_7 = 1, ...)`
+- `UpdaterRetrieveAppletFileData` converts `param_7 != 0` into opcode `0x1c`
+- the symmetric send-side restore path already has the paired alternate opcode split:
+  - normal put: `0x14`
+  - restore/import put: `0x1f`
+
+Best current interpretation:
+
+- `0x12` = retrieve file content for normal interactive consumption
+- `0x1c` = retrieve file content in the archive/save format used when exporting a complete applet-file bundle to a host file
+
+This is still an inference from caller behavior and send/retrieve symmetry, but it is now a strong one.
+
 The primary retrieve command packet is therefore:
 
 ```text
@@ -164,6 +247,7 @@ The PoC also models the 8-byte response headers and chunk reconstruction at:
 
 - [updater_responses.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/updater_responses.py)
 - [alphaword_transfer.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_transfer.py)
+- [alphaword_get_print.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_get_print.py) for the exact branch-level `UpdaterRetrieveAppletFileData` control flow
 
 ## Applet Discovery Layer
 
@@ -208,16 +292,116 @@ Two UI-facing helpers sit on top of the raw retrieval routines.
 
 Behavior:
 
-- opens a temporary output sink through `OpenTemporaryRetrievedTextFile`
-- for direct USB mode, calls `DirectUsbRetrieveAppletFileData(..., max_len=0x80000, ...)`
-- for alternate transport mode, calls `AlternateTransportRetrieveAppletFileData(..., max_len=0x80000, ...)`
-- then passes the resulting sink to `LoadRetrievedTextFileAsCString`
-- returns a `CString` built from the retrieved content
+- dispatches the current MFC thread hook once if a thread object is present
+- calls `ResetRetrievedTextWorkspace`
+- opens a temporary retrieved-text sink through `OpenTemporaryRetrievedTextFile`
+- for direct USB mode `2` and mode `5`, calls `DirectUsbRetrieveAppletFileData(..., max_len=0x80000, ...)`
+- for alternate transport mode `3`, calls `AlternateTransportRetrieveAppletFileData(..., max_len=0x80000, ...)`
+- closes the file descriptor after the transport returns
+- calls `LoadRetrievedTextFileAsCString`
+- assigns the returned text into the caller-provided `CString`
+- calls `FinalizeRetrievedTextWorkspace(0)` before returning
 
 Interpretation:
 
 - this path requests a large cap of `0x80000` bytes
 - it is the "full retrieval" path for AlphaWord data that can later be printed or saved
+- the helper always uses the temporary file workspace, even for direct USB
+
+### Exact `RetrieveFullAlphaWordText` Subfunction Chain
+
+Fresh decompilation now pins the exact helper chain for the full `0xa000` retrieval path:
+
+1. `RetrieveFullAlphaWordText`
+2. `ResetRetrievedTextWorkspace`
+3. `OpenTemporaryRetrievedTextFile`
+4. inside `OpenTemporaryRetrievedTextFile`:
+   - `BuildRetrievedTextTempPathBase`
+   - `OpenRetrievedTextSinkForWrite`
+   - `WriteRetrievedBytesToSink`
+   - `ReopenRetrievedTextSinkForRead`
+5. one transport wrapper:
+   - `DirectUsbRetrieveAppletFileData`
+   - or `AlternateTransportRetrieveAppletFileData`
+6. `UpdaterRetrieveAppletFileData`
+7. `CloseFileDescriptor`
+8. `LoadRetrievedTextFileAsCString`
+9. `FinalizeRetrievedTextWorkspace`
+
+Verified exact branch behavior:
+
+- if the temp sink open fails, the function skips transport entirely and returns the current default result
+- transport modes `2` and `5` share the direct-USB branch
+- transport mode `3` uses the alternate-transport branch with the per-device selector byte from `this + param_1 * 4 + 0x10`
+- other transport modes skip the transport call
+- the full path does not apply the preview-only truncation logic
+
+## Updater Error Log Table
+
+The repeated writes to `DAT_004c31e0` inside `UpdaterRetrieveAppletFileData`, `UpdaterPutFileData`, `UpdaterPutRawFileAttributes`, and related helpers now make the global error table layout clear.
+
+Each error record is a 7-field structure, 0x1c bytes wide:
+
+1. `message` pointer
+2. `operation` pointer
+3. `source_file` pointer
+4. `reserved` / context dword, currently written as `0` in these flows
+5. `source_line` dword
+6. `error_code` u16 plus `response_byte` u8 packed into the next slots
+7. `detail` pointer or `0`
+
+For the retrieve path, the most common concrete values are:
+
+- `message`
+  - `"Error retrieving file."`
+  - `"Invalid response"`
+  - `"Bad checksum."`
+  - `"Error writing file."`
+- `operation`
+  - `"UpdaterRetrieveFile"`
+- `source_file`
+  - `"C:\\AS Software\\OS3000\\Tool\\HostU..."`
+- `error_code`
+  - `0x12a` generic retrieve failure
+  - `0x102` invalid response
+  - `0x105` bad checksum
+  - `0x129` sink write failure
+- `response_byte`
+  - set for invalid-response cases
+- `detail`
+  - either `0`
+  - or a decoded response-detail string from the `"Number of Device(s) compacted = %d."` table when the response byte is in the documented `0x80..0x92` range
+
+The PoC now models this record shape as `UpdaterErrorLogEntry`.
+
+### Exact `LoadRetrievedTextFileAsCString` Behavior
+
+Fresh decompilation of `LoadRetrievedTextFileAsCString` supports these concrete claims:
+
+- it rebuilds the same temporary path using string resource `0xf1a8` and `BuildRetrievedTextTempPathBase`
+- it opens the temp file through MSVCP60 `basic_filebuf` / `basic_istream` types
+- it reads exactly the byte count passed by the caller
+- it rewrites embedded `0x00` bytes to ASCII space (`0x20`)
+- when a caller-supplied flag is set, it also remaps some space bytes to `0xff`
+- it converts the final byte buffer into a `CString`
+- it deletes the temporary file before returning
+
+That means the previously assumed generic "newline normalization" should not be treated as a proven property of the full retrieval path. The validated full-path behavior is byte cleanup plus temp-file-to-`CString` conversion.
+
+### Exact Helper Replacement Strings
+
+The data items used by the temp-file helpers are now concrete enough to name:
+
+- `param_1_004bd0a0` = carriage return (`"\r"`, byte `0x0d`)
+- `_Str2_004bd0a4` = CRLF (`"\r\n"`, bytes `0x0d 0x0a`)
+- `param_2_004bd0a8` = space (`" "`, byte `0x20`)
+- `_Format_004bd32c` = decimal slot formatter (`"%d"`)
+
+What that means in code:
+
+- `OpenTemporaryRetrievedTextFile` conditionally replaces `"\r\n"` with `"\r"` before seeding the temp sink
+- `RetrieveAlphaWordPreviewText` later replaces `"\r\n"` with `" "` in the preview `CString`
+- `LoadRetrievedTextFileAsCString` itself does not prove a CR-to-CRLF conversion step in the full retrieval path
 
 ### Preview / short printable text helper
 
@@ -229,7 +413,7 @@ Behavior:
 - for direct USB mode, calls `DirectUsbRetrieveAppletFileData(..., max_len=0xb4, ...)`
 - for alternate transport mode, calls `AlternateTransportRetrieveAppletFileData(..., max_len=0xb4, ...)`
 - then converts the retrieved data through `LoadRetrievedTextFileAsCString`
-- replaces CRLF with spaces
+- applies one final `CString::Replace(...)` post-processing step
 - truncates the resulting string to `0xb3` bytes if needed
 
 Interpretation:
@@ -241,19 +425,23 @@ Interpretation:
 
 The exact resource-to-handler binding for the literal UI string is still unresolved, but the higher-level AlphaWord callers are now visible.
 
-`FUN_00406920`:
+`RefreshAlphaWordPreviewCacheForTreeItem`:
 
 - repeatedly calls `RetrieveAlphaWordPreviewText(..., applet_id=0xa000, ...)`
 - iterates through AlphaWord file slots
 - stores the returned short text and size back into local cache objects
 - is consistent with preview/list population for the `Get/Print AlphaWord Files` view
 
-`FUN_00407e20` and `FUN_00408160`:
+`RetrieveAllAlphaWordSlotsForDevice` and `RetrieveSelectedAlphaWordSlotsForDevice`:
 
 - iterate through 8 AlphaWord file slots
 - call `RetrieveFullAlphaWordText(..., applet_id=0xa000, ...)` for full retrieval
-- then call `GetAppletFileNameForSlot(..., applet_id=0xa000, ...)` to obtain associated metadata/text used by the local cache
-- update per-slot status in local storage after each retrieval
+- then call `GetAppletFileNameForSlot(..., applet_id=0xa000, ...)` to obtain the human-facing per-slot file name used by the local cache
+- update per-slot local storage with:
+  - full retrieved text
+  - retrieved byte count
+  - file name
+  - status `2`
 
 This is enough to say the app path above the transport is not a single monolithic call. It is:
 
@@ -272,22 +460,127 @@ The PoC now models this app behavior as a session-level 8-slot scan at:
 
 - [alphaword_session.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_session.py)
 
+## Top-Level Controller Chain
+
+Fresh Ghidra decompilation of the renamed controller functions shows the main app-side execution chain is:
+
+1. `HandleAlphaWordTreeSelectionChange`
+2. `RefreshAlphaWordPreviewCacheForTreeItem`
+3. `ExecuteGetPrintAlphaWordFlow`
+4. one of:
+   - `RetrieveAllAlphaWordSlotsForDevice`
+   - `RetrieveSelectedAlphaWordSlotsForDevice`
+   - `RetrieveSingleAlphaWordSlotForDevice`
+5. `RetrieveFullAlphaWordText`
+6. `GetAppletFileNameForSlot`
+
+What each layer does:
+
+`HandleAlphaWordTreeSelectionChange`
+
+- responds to tree-selection changes in the AlphaWord view
+- clears cached slot-selection bits on the affected tree/device items
+- calls `RefreshAlphaWordPreviewCacheForTreeItem`
+- refreshes the visible list/tree state afterward
+
+`RefreshAlphaWordPreviewCacheForTreeItem`
+
+- is the preview-only population path
+- repeatedly calls `RetrieveAlphaWordPreviewText`
+- stores preview text and preview byte count into the local per-slot cache
+- does not call `GetAppletFileNameForSlot`
+- does not populate the full-text cache used by later retrieval/print flows
+
+`ExecuteGetPrintAlphaWordFlow`
+
+- creates the progress UI
+- sets the progress caption text
+- chooses one of three full-retrieval branches:
+  - all slots on the current device
+  - selected slots only
+  - one explicit slot
+
+`RetrieveAllAlphaWordSlotsForDevice`
+
+- walks slot numbers `1..8`
+- calls `RetrieveFullAlphaWordText(..., applet_id=0xa000, ...)`
+- calls `GetAppletFileNameForSlot(..., applet_id=0xa000, ...)`
+- writes full text, byte count, and file name into the local cache
+- marks each populated slot with status `2`
+
+### Exact `RetrieveAllAlphaWordSlotsForDevice` Flow
+
+Fresh decompilation of `RetrieveAllAlphaWordSlotsForDevice` with the renamed helper accessors gives the exact function-local sequence:
+
+1. call `FUN_00401260()` to obtain the global empty `CString` sentinel
+2. if `param_1 < 1`, return `0x51`
+3. load string resource `0xf1ba`
+4. initialize:
+   - `slot_number = 1`
+   - `slot_index = 0`
+5. for each AlphaWord slot while `slot_index < 8`:
+   - call `FormatAlphaWordSlotProgressText(this, ..., device_ref=param_1, slot_ref=slot_number)`
+   - call `SetProgressDialogTextIfWindowAlive(param_2, formatted_text)`
+   - call `GetAlphaWordSlotStatus(device_cache, slot_index)`
+   - if status is already `2`, skip the rest of this slot and continue
+   - otherwise:
+     - remember the current slot status as `previous_status`
+     - clear the destination `CString`
+     - call `RetrieveFullAlphaWordText(..., device_ref=param_1, file_slot=slot_number, applet_id=0xa000, ..., max_len=0x80000, alternate_mode=0)`
+     - if that returns `-1`:
+       - call `SetAlphaWordSlotStatus(device_cache, slot_index, previous_status)`
+       - return `0x2a`
+     - call `SetAlphaWordSlotText(device_cache, slot_index, full_text)`
+     - call `SetAlphaWordSlotByteCount(device_cache, slot_index, retrieved_length)`
+     - call `GetAppletFileNameForSlot(..., device_ref=param_1, file_slot=slot_number, applet_id=0xa000, ...)`
+     - call `SetAlphaWordSlotFileName(device_cache, slot_index, file_name)`
+     - call `SetAlphaWordSlotStatus(device_cache, slot_index, 2)`
+     - call `GetProgressDialogCancelCode(param_2)`
+     - if that returns `0x33`:
+       - call `FUN_00473470(this->+0x6c, 0)` to tear down the progress binding
+       - return `0x29`
+   - increment both:
+     - `slot_number += 1`
+     - `slot_index += 1`
+6. after all 8 slots, return `0`
+
+Important exact details from the decompile:
+
+- `slot_number` is 1-based and is the value passed on wire to `RetrieveFullAlphaWordText` and `GetAppletFileNameForSlot`
+- `slot_index` is 0-based and is the index used into the local cache object
+- the function does not clear old text or metadata for slots already at status `2`; it skips them entirely
+- the previous slot status is only restored on retrieval failure, not on user cancellation
+- cancellation is checked only after a successful full retrieval, filename fetch, and status promotion to `2`
+
+`RetrieveSelectedAlphaWordSlotsForDevice`
+
+- same as the all-slot variant, but skips slots whose selection bit is clear in the local cache object
+
+`RetrieveSingleAlphaWordSlotForDevice`
+
+- performs the same full retrieval and filename fetch sequence for exactly one slot
+- preserves the prior slot status on retrieval failure and returns `0x2a`
+- returns `0x29` when the progress UI reports cancellation
+
+This resolves the earlier ambiguity around `GetAppletFileNameForSlot`: it is part of the full `Get/Print AlphaWord Files` cache population path and exists specifically to attach the user-visible filename to the retrieved full text.
+
 ## Text Formatting and Print-Side Handoff
 
 `LoadRetrievedTextFileAsCString` is the local formatter / file-backed text loader that runs after retrieval.
 
 Key observed behavior:
 
+- rebuilds the temporary path through resource `0xf1a8` and `BuildRetrievedTextTempPathBase`
 - opens the temporary file with MSVCP60 stream types
-- loads a UI string resource with id `0xf1a8`
-- reads text from the temp file into a `CString`
-- normalizes line endings by replacing `"\r"` with `"\r\n"`
-- may delete the temporary file after loading it
+- reads exactly the requested byte count from the temp file
+- rewrites embedded `0x00` bytes to spaces
+- optionally remaps some spaces to `0xff` depending on the caller flag
+- deletes the temporary file after loading it
 
 Interpretation:
 
 - the updater layer retrieves raw AlphaWord bytes into a local sink
-- `LoadRetrievedTextFileAsCString` re-reads that local file and turns it into printable Windows text
+- `LoadRetrievedTextFileAsCString` re-reads that local file and turns it into a `CString`
 - this is the seam where "retrieve from device" ends and "prepare for display/printing" begins
 
 ## End-to-End Direct Dataflow
@@ -308,8 +601,14 @@ For the direct USB case, the current best reconstruction is:
    - `RetrieveAlphaWordPreviewText` for short preview text capped at `0xb4`
    - `RetrieveFullAlphaWordText` for full retrieval capped at `0x80000`
 12. Higher-level UI code loops over all 8 AlphaWord slots:
-   - preview/session scan callers include `FUN_00406920` and `ScanAlphaWordPreviewSlots`
-   - full retrieval callers include `FUN_00407e20` and `FUN_00408160`
+   - preview/session scan callers include `RefreshAlphaWordPreviewCacheForTreeItem` and `ScanAlphaWordPreviewSlots`
+   - full retrieval callers include `RetrieveAllAlphaWordSlotsForDevice` and `RetrieveSelectedAlphaWordSlotsForDevice`
+
+## Non-Core Sibling Path
+
+Fresh caller checks for `RetrieveFullAlphaWordText` also found `0x0044a140` and `0x0044a5c0`, but those pass applet id `0xa004`, not `0xa000`.
+
+That means they are not the core `Get/Print AlphaWord Files` path documented here. They belong to a sibling AlphaWord-like document parser / renderer flow and should not be used as evidence for the main `0xa000` direct-USB retrieval sequence.
 
 ## Protocol Facts Confirmed So Far
 
@@ -338,11 +637,31 @@ For the direct USB case, the current best reconstruction is:
 - applet list command is `0x04` with page size `7`
 - applet list entry size is `0x84`
 
+## Offline PoC Coverage
+
+The PoC now covers both the updater protocol and the controller-level `Get/Print AlphaWord Files` flow:
+
+- [alphaword_flow.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_flow.py): raw AlphaWord updater packets for preview and full retrieval
+- [alphaword_transfer.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_transfer.py): start/chunk reconstruction with checksum checks
+- [alphaword_session.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_session.py): 8-slot preview and full direct-USB sessions
+- [alphaword_get_print.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_get_print.py): controller-level preview refresh and full get/print retrieval flows, including cache and filename update steps
+- [alphaword_get_print.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_get_print.py): also includes an exact branch-level model of `RetrieveAllAlphaWordSlotsForDevice`, including skip-on-status-2, restore-on-error, and cancel handling
+- [alphaword_get_print.py](/Users/jakubkolcar/customs/neo-re/poc/neotools/src/neotools/alphaword_get_print.py): also includes an exact helper-level model of `RetrieveFullAlphaWordText`, including temp-sink setup, transport dispatch, temp-file load, and workspace finalization
+
+Example commands:
+
+```bash
+uv run --project poc/neotools python -m neotools direct-usb-alphaword-session preview 0xa000
+uv run --project poc/neotools python -m neotools alphaword-get-print-flow preview-all 0xa000 1 2
+uv run --project poc/neotools python -m neotools alphaword-get-print-flow full-selected 0xa000 2 4
+uv run --project poc/neotools python -m neotools retrieve-all-alphaword-slots-flow 0xa000 --file-slots 1 2 3 --initial-statuses 1=2 2=0 3=2
+uv run --project poc/neotools python -m neotools retrieve-full-alphaword-text-flow 2 0xa000 2 --retrieved-length 0x1234
+uv run --project poc/neotools python -m neotools updater-retrieve-applet-file-data-flow 0x12 0xa000 2 0x80000 --reported-total-length 0x30 --chunk-lengths 0x10 0x20 --chunk-checksums 0x10 0x20
+```
+
 ## Still Unresolved
 
-- the exact semantic difference between retrieval opcodes `0x12` and `0x1c`
 - the exact semantics of the attribute word at offset `0x18`
 - the remaining internal layout of the raw AlphaWord attribute block returned by opcode `0x13`
 - the exact UI function that binds the literal `Get/Print AlphaWord Files` label to these retrieval helpers
-- the exact purpose of `GetAppletFileNameForSlot` in the full-retrieval caller chain
-- whether print uses the full retrieval path in all cases, or can sometimes reuse the preview path for very short records
+- the exact downstream print formatter function that consumes the fully cached `0xa000` text after `ExecuteGetPrintAlphaWordFlow`

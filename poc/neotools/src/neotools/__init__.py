@@ -5,6 +5,13 @@ from neotools.alphaword_flow import (
     build_full_text_retrieval_plan,
 )
 from neotools.alphaword_attributes import parse_file_attributes_record
+from neotools.alphaword_get_print import (
+    build_retrieve_all_alpha_word_slots_for_device_flow,
+    build_direct_usb_full_get_print_flow,
+    build_direct_usb_preview_refresh_flow,
+    build_retrieve_full_alpha_word_text_flow,
+    build_updater_retrieve_applet_file_data_flow,
+)
 from neotools.alphaword_session import (
     build_direct_usb_full_text_session,
     build_direct_usb_preview_session,
@@ -60,6 +67,43 @@ def main(argv: list[str] | None = None) -> int:
     direct_usb_session_parser = subparsers.add_parser("direct-usb-alphaword-session")
     direct_usb_session_parser.add_argument("mode", choices=["preview", "full"])
     direct_usb_session_parser.add_argument("applet_id")
+
+    get_print_flow_parser = subparsers.add_parser("alphaword-get-print-flow")
+    get_print_flow_parser.add_argument(
+        "mode",
+        choices=["preview-all", "full-all", "full-selected", "full-single"],
+    )
+    get_print_flow_parser.add_argument("applet_id")
+    get_print_flow_parser.add_argument("file_slots", nargs="*")
+
+    retrieve_all_flow_parser = subparsers.add_parser("retrieve-all-alphaword-slots-flow")
+    retrieve_all_flow_parser.add_argument("applet_id")
+    retrieve_all_flow_parser.add_argument("--file-slots", nargs="*", default=[])
+    retrieve_all_flow_parser.add_argument("--initial-statuses", nargs="*", default=[])
+    retrieve_all_flow_parser.add_argument("--fail-slot")
+    retrieve_all_flow_parser.add_argument("--cancel-after-slot")
+
+    retrieve_full_text_parser = subparsers.add_parser("retrieve-full-alphaword-text-flow")
+    retrieve_full_text_parser.add_argument("transport_mode")
+    retrieve_full_text_parser.add_argument("applet_id")
+    retrieve_full_text_parser.add_argument("file_slot")
+    retrieve_full_text_parser.add_argument("--retrieved-length", default="0")
+    retrieve_full_text_parser.add_argument("--alternate-selector", default="0")
+    retrieve_full_text_parser.add_argument("--temp-open-success", choices=["true", "false"], default="true")
+
+    updater_retrieve_parser = subparsers.add_parser("updater-retrieve-applet-file-data-flow")
+    updater_retrieve_parser.add_argument("command_selector")
+    updater_retrieve_parser.add_argument("applet_id")
+    updater_retrieve_parser.add_argument("file_slot")
+    updater_retrieve_parser.add_argument("requested_length")
+    updater_retrieve_parser.add_argument("--reported-total-length", required=True)
+    updater_retrieve_parser.add_argument("--chunk-lengths", nargs="*", default=[])
+    updater_retrieve_parser.add_argument("--chunk-checksums", nargs="*", default=[])
+    updater_retrieve_parser.add_argument("--computed-chunk-checksums", nargs="*", default=[])
+    updater_retrieve_parser.add_argument("--progress-current", default="0")
+    updater_retrieve_parser.add_argument("--progress-total", default="0")
+    updater_retrieve_parser.add_argument("--start-status", default="0x53")
+    updater_retrieve_parser.add_argument("--chunk-status", default="0x4d")
 
     direct_usb_send_parser = subparsers.add_parser("direct-usb-alphaword-send-record")
     direct_usb_send_parser.add_argument("applet_id")
@@ -147,6 +191,120 @@ def main(argv: list[str] | None = None) -> int:
             session = build_direct_usb_full_text_session(applet_id=int(args.applet_id, 0))
         for step in session:
             print(f"{step.kind}: {step.packet.hex(' ')}")
+        return 0
+
+    if args.command == "alphaword-get-print-flow":
+        slots = [int(raw, 0) for raw in args.file_slots] or list(range(1, 9))
+        if args.mode == "preview-all":
+            flow = build_direct_usb_preview_refresh_flow(
+                applet_id=int(args.applet_id, 0),
+                file_slots=slots,
+            )
+        else:
+            flow = build_direct_usb_full_get_print_flow(
+                applet_id=int(args.applet_id, 0),
+                file_slots=slots,
+                selected_only=args.mode == "full-selected",
+                single_slot=args.mode == "full-single",
+            )
+        for step in flow:
+            if step.packet is not None:
+                if step.file_slot is None:
+                    print(f"{step.kind}: {step.packet.hex(' ')}")
+                else:
+                    print(f"{step.kind} slot={step.file_slot}: {step.packet.hex(' ')}")
+            elif step.status is not None:
+                print(f"{step.kind} slot={step.file_slot} status={step.status}")
+            else:
+                if step.file_slot is None:
+                    print(f"{step.kind}: {step.detail}")
+                else:
+                    print(f"{step.kind} slot={step.file_slot}")
+        return 0
+
+    if args.command == "retrieve-all-alphaword-slots-flow":
+        slots = [int(raw, 0) for raw in args.file_slots] or list(range(1, 9))
+        initial_statuses: dict[int, int] = {}
+        for raw in args.initial_statuses:
+            slot_raw, status_raw = raw.split("=", 1)
+            initial_statuses[int(slot_raw, 0)] = int(status_raw, 0)
+        result = build_retrieve_all_alpha_word_slots_for_device_flow(
+            applet_id=int(args.applet_id, 0),
+            file_slots=slots,
+            initial_statuses=initial_statuses,
+            fail_slot=int(args.fail_slot, 0) if args.fail_slot is not None else None,
+            cancel_after_slot=int(args.cancel_after_slot, 0)
+            if args.cancel_after_slot is not None
+            else None,
+        )
+        for step in result.steps:
+            if step.packet is not None:
+                print(f"{step.kind} slot={step.file_slot}: {step.packet.hex(' ')}")
+            elif step.status is not None:
+                if step.file_slot is None:
+                    print(f"{step.kind} status=0x{step.status:02x}")
+                else:
+                    print(f"{step.kind} slot={step.file_slot} status={step.status}")
+            else:
+                print(f"{step.kind}: {step.detail}")
+        print(f"return_code: 0x{result.return_code:02x}")
+        return 0
+
+    if args.command == "retrieve-full-alphaword-text-flow":
+        result = build_retrieve_full_alpha_word_text_flow(
+            transport_mode=int(args.transport_mode, 0),
+            applet_id=int(args.applet_id, 0),
+            file_slot=int(args.file_slot, 0),
+            retrieved_length=int(args.retrieved_length, 0),
+            alternate_selector=int(args.alternate_selector, 0),
+            temp_open_success=args.temp_open_success == "true",
+        )
+        for step in result.steps:
+            if step.packet is not None:
+                print(f"{step.kind} slot={step.file_slot}: {step.packet.hex(' ')}")
+            elif step.status is not None:
+                if step.kind == "transport" and step.detail is not None:
+                    print(f"{step.kind}: {step.detail} selector={step.status}")
+                elif step.file_slot is None:
+                    print(f"{step.kind} status=0x{step.status:02x}")
+                else:
+                    print(f"{step.kind} slot={step.file_slot} status={step.status}")
+            else:
+                print(f"{step.kind}: {step.detail}")
+        print(f"return_code: 0x{result.return_code:02x}")
+        return 0
+
+    if args.command == "updater-retrieve-applet-file-data-flow":
+        result = build_updater_retrieve_applet_file_data_flow(
+            command_selector=int(args.command_selector, 0),
+            applet_id=int(args.applet_id, 0),
+            file_slot=int(args.file_slot, 0),
+            requested_length=int(args.requested_length, 0),
+            reported_total_length=int(args.reported_total_length, 0),
+            chunk_lengths=[int(raw, 0) for raw in args.chunk_lengths],
+            chunk_checksums=[int(raw, 0) for raw in args.chunk_checksums],
+            computed_chunk_checksums=[int(raw, 0) for raw in args.computed_chunk_checksums]
+            if args.computed_chunk_checksums
+            else None,
+            progress_current=int(args.progress_current, 0),
+            progress_total=int(args.progress_total, 0),
+            start_status=int(args.start_status, 0),
+            chunk_status=int(args.chunk_status, 0),
+        )
+        for step in result.steps:
+            if step.packet is not None:
+                if step.file_slot is None:
+                    print(f"{step.kind}: {step.packet.hex(' ')}")
+                else:
+                    print(f"{step.kind} slot={step.file_slot}: {step.packet.hex(' ')}")
+            elif step.status is not None:
+                if step.file_slot is None:
+                    print(f"{step.kind} status=0x{step.status:08x}")
+                else:
+                    print(f"{step.kind} slot={step.file_slot} status={step.status}")
+            else:
+                print(f"{step.kind}: {step.detail}")
+        print(f"return_code: 0x{result.return_code & 0xffffffff:08x}")
         return 0
 
     if args.command == "direct-usb-alphaword-send-record":
