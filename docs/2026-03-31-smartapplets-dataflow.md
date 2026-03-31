@@ -1,0 +1,233 @@
+# SmartApplets Dataflow
+
+This note maps the SmartApplet binary flow in both directions:
+
+- app to device: install or replace SmartApplets on the NEO
+- device to app: retrieve SmartApplet binaries and the applet list from the NEO
+
+The focus here is the direct updater protocol and the concrete app-side call chain that reaches it.
+
+## Confirmed Updater Primitives
+
+These functions are now pinned from string xrefs and decompilation:
+
+- `FUN_00430470` = `UpdaterGetAppletList`
+- `FUN_004309d0` = `UpdaterAddApplet`
+- `FUN_004328f0` = `UpdaterRemoveApplet`
+- `FUN_00433b10` = `UpdaterRetrieveApplet`
+- `FUN_00435b00` = `UpdaterSaveAppletFileData`
+
+Transport wrappers:
+
+- `FUN_00430410` wraps `UpdaterGetAppletList` for direct USB mode `2`
+- `FUN_00430440` wraps `UpdaterGetAppletList` for alternate mode `3`
+- `FUN_00433ab0` wraps `UpdaterRetrieveApplet` for direct USB mode `2`
+- `FUN_00433ae0` wraps `UpdaterRetrieveApplet` for alternate mode `3`
+
+## Applet List Format
+
+`UpdaterGetAppletList` sends:
+
+- command `0x04`
+- `arg32 = page_offset`
+- `trailing = page_size`
+
+Confirmed default request:
+
+- `0x04`, `page_offset = 0`, `page_size = 7`
+- packet bytes: `04 00 00 00 00 00 07 0b`
+
+Expected response:
+
+- header byte `0x44`
+- payload length is a multiple of `0x84`
+- checksum is 16-bit payload sum
+
+The app normalizes the retrieved `0x84`-byte records after retrieval:
+
+- `FUN_00484c50`
+- `FUN_00484e40`
+
+Those functions swap selected big-endian dwords inside each `0x84` record before the UI uses them.
+
+## Retrieve Applet From Device
+
+`UpdaterRetrieveApplet` is `FUN_00433b10`.
+
+Start command:
+
+- command `0x0f`
+- `arg32 = 0`
+- `trailing = applet_id`
+
+For example, applet id `0xa123` becomes:
+
+- `0f 00 00 00 00 a1 23 d3`
+
+Expected retrieve responses:
+
+- initial response `0x53`
+- `arg32 = total_applet_size`
+- repeated chunk pulls with command `0x10`
+- each chunk response `0x4d`
+- `arg32 = chunk_length`
+- trailing field = 16-bit payload checksum
+
+Read path:
+
+1. send `0x0f`
+2. expect `0x53`
+3. loop sending `0x10`
+4. expect `0x4d`
+5. `read_data1(...)` drains the payload bytes
+6. host writes those bytes to the destination file with `FUN_004383d0`
+7. verify the 16-bit checksum for each chunk
+
+The minimal direct USB session is therefore:
+
+1. `?\xff\x00reset`
+2. `?Swtch 0000`
+3. `0x0f` retrieve-applet command
+4. repeated `0x10` chunk requests until the announced size is satisfied
+
+## Send Applet To Device
+
+`UpdaterAddApplet` is `FUN_004309d0`.
+
+It first reads the first `0x84` bytes of the host `.OS3KApp` file and derives the add-applet start fields from that header.
+
+What is confirmed:
+
+- add-begin command `0x06`
+- response must be `0x46`
+- chunk handshake command `0x02`
+- chunk handshake response must be `0x42`
+- post-chunk completion poll command `0xff`
+- completion response must be `0x43`
+- program-applet command `0x0b`
+- program response must be `0x47`
+- finalize command `0x07`
+- finalize response must be `0x48`
+- payload chunk size is capped at `0x400`
+
+Send path:
+
+1. open the SmartApplet file on disk
+2. read the first `0x84` bytes
+3. derive the `0x06` argument and trailing fields from the header
+4. send `0x06`
+5. expect `0x46`
+6. seek the file to the start and stream the full file in `0x400` chunks
+7. for each chunk:
+8. send `0x02` with `arg32 = chunk_length`, `trailing = sum16(chunk)`
+9. expect `0x42`
+10. write the chunk payload bytes
+11. send `0xff`
+12. expect `0x43`
+13. after all bytes are staged, send `0x0b`
+14. expect `0x47`
+15. send `0x07`
+16. expect `0x48`
+
+## Save Retrieved Applet File Data
+
+`UpdaterSaveAppletFileData` is `FUN_00435b00`.
+
+This is the device-to-host bulk saver for an applet’s associated file data:
+
+1. `FUN_00435990` discovers the total payload size and record count
+2. host writes a 4-byte total-size prefix
+3. for each file slot:
+4. `FUN_00436200` retrieves the raw `0x28` file-attribute record
+5. host writes the `0x28` record
+6. file length is decoded from the attributes
+7. `FUN_00434100` retrieves the actual file bytes
+
+This mirrors the AlphaWord file-data flow, but under the currently selected SmartApplet id.
+
+## Confirmed App-Side Call Chains
+
+### Retrieve Applet List / Device Inventory
+
+- `FUN_004665f0`
+- `FUN_00467980`
+- `FUN_00484e40`
+- `FUN_00430410` or `FUN_00430440`
+- `FUN_00430470`
+
+Meaning:
+
+- `FUN_004665f0` refreshes the SmartApplet/device view
+- `FUN_00467980` triggers the list retrieval and hands the normalized `0x84` entries to the UI layer
+- `FUN_00484e40` is the concrete applet-list adapter over `UpdaterGetAppletList`
+
+### Install SmartApplet On Device
+
+- `FUN_0041eb80`
+- `FUN_00427270`
+- `FUN_00427810`
+- `FUN_00472ee0`
+- `FUN_00484160` or `FUN_00485690`
+- `FUN_00430970` or `FUN_004309a0`
+- `FUN_004309d0`
+
+Meaning:
+
+- `FUN_00430970` is the direct USB wrapper into `UpdaterAddApplet`
+- `FUN_004309a0` is the alternate mode `4` wrapper into `UpdaterAddApplet`
+- `FUN_00484160` and `FUN_00485690` open the host SmartApplet file and dispatch it to those wrappers
+- the higher-level controller entry points above are the install-side callers currently confirmed by xrefs
+
+### Retrieve SmartApplet To Host
+
+- `FUN_00423df0`
+- `FUN_004286c0`
+- `FUN_004851f0`
+- `FUN_00433ab0` or `FUN_00433ae0`
+- `FUN_00433b10`
+
+and also:
+
+- `FUN_004191d0`
+- `FUN_004851f0`
+- `FUN_00433ab0` or `FUN_00433ae0`
+- `FUN_00433b10`
+
+Meaning:
+
+- `FUN_004851f0` opens a host-side output file and retrieves one SmartApplet binary into it
+- `FUN_004286c0` retrieves one selected SmartApplet entry through that helper
+- `FUN_00423df0` iterates the SmartApplet send-list entries and retrieves missing applets to the host workspace
+- `FUN_004191d0` is another controller path that can retrieve selected applets to host storage
+
+## Minimal PoC Coverage
+
+The offline PoC now models the confirmed packet layer in:
+
+- `poc/neotools/src/neotools/smartapplets.py`
+
+Covered operations:
+
+- list applets command construction
+- retrieve-applet command construction
+- direct USB retrieve session planning
+- add-applet begin command construction
+- direct USB add session planning with:
+  - `0x06`
+  - `0x02`
+  - `0xff`
+  - `0x0b`
+  - `0x07`
+
+Useful commands:
+
+```bash
+uv run --project poc/neotools python -m neotools smartapplet-retrieve-plan 0xa123
+uv run --project poc/neotools python -m neotools smartapplet-add-plan 0x12345678 0x9abc "41 42 43 44 45"
+```
+
+## Remaining Unknowns
+
+- the exact semantic breakdown of the `0x06` start-command argument derived from the `.OS3KApp` header
+- the exact field map for every offset inside the `0x84` SmartApplet list entry
+- the exact top-level resource binding from the SmartApplets tab strings to the controller functions above

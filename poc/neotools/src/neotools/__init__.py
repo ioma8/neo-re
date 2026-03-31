@@ -10,6 +10,10 @@ from neotools.alphaword_session import (
     build_direct_usb_preview_session,
 )
 from neotools.alphaword_send import build_direct_usb_send_file_record
+from neotools.smartapplets import (
+    build_direct_usb_add_applet_plan,
+    build_direct_usb_retrieve_applet_plan,
+)
 from neotools.switch_packets import build_switch_packet
 from neotools.updater_packets import build_updater_command
 from neotools.updater_responses import parse_updater_response
@@ -56,6 +60,14 @@ def main(argv: list[str] | None = None) -> int:
     direct_usb_send_parser.add_argument("file_slot")
     direct_usb_send_parser.add_argument("record_hex")
     direct_usb_send_parser.add_argument("payload_hex")
+
+    smartapplet_retrieve_parser = subparsers.add_parser("smartapplet-retrieve-plan")
+    smartapplet_retrieve_parser.add_argument("applet_id")
+
+    smartapplet_add_parser = subparsers.add_parser("smartapplet-add-plan")
+    smartapplet_add_parser.add_argument("start_argument")
+    smartapplet_add_parser.add_argument("trailing")
+    smartapplet_add_parser.add_argument("payload_hex")
 
     decode_response_parser = subparsers.add_parser("decode-updater-response")
     decode_response_parser.add_argument("raw_hex")
@@ -128,6 +140,22 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{step.kind}: {step.packet.hex(' ')}")
             else:
                 raise AssertionError("unexpected non-bytes packet payload")
+        return 0
+
+    if args.command == "smartapplet-retrieve-plan":
+        plan = build_direct_usb_retrieve_applet_plan(applet_id=int(args.applet_id, 0))
+        for step in plan:
+            print(f"{step.kind}: {step.packet.hex(' ')}")
+        return 0
+
+    if args.command == "smartapplet-add-plan":
+        plan = build_direct_usb_add_applet_plan(
+            start_argument=int(args.start_argument, 0),
+            trailing=int(args.trailing, 0),
+            payload=_parse_hex_bytes(args.payload_hex),
+        )
+        for step in plan:
+            print(f"{step.kind}: {step.packet.hex(' ')}")
         return 0
 
     if args.command == "decode-updater-response":
