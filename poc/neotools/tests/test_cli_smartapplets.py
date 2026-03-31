@@ -50,6 +50,32 @@ class SmartAppletCliTests(unittest.TestCase):
             ],
         )
 
+    def test_smartapplet_metadata_prints_named_header_fields(self) -> None:
+        output = io.StringIO()
+        header = bytearray(0x84)
+        header[0x00:0x04] = bytes.fromhex("c0 ff ee ad")
+        header[0x04:0x08] = bytes.fromhex("00 01 a0 bc")
+        header[0x08:0x0C] = bytes.fromhex("00 00 0d 90")
+        header[0x0C:0x10] = bytes.fromhex("00 01 9f a4")
+        header[0x10:0x14] = bytes.fromhex("ff 00 00 ce")
+        header[0x14:0x18] = bytes.fromhex("a0 00 01 00")
+        header[0x18:0x18 + len(b"AlphaWord Plus")] = b"AlphaWord Plus"
+        header[0x3C] = 0x03
+        header[0x3D] = 0x04
+        header[0x3F] = 0x01
+        header[0x80:0x84] = bytes.fromhex("00 00 20 00")
+
+        with redirect_stdout(output):
+            exit_code = main(["smartapplet-metadata", bytes(header).hex(" ")])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "applet_id=0xa000 version=3.4 name=AlphaWord Plus info_table_offset=0x00019fa4 applet_class=0x01 extra_memory_size=0x00002000",
+            ],
+        )
+
     def test_smartapplet_retrieve_plan_prints_expected_steps(self) -> None:
         output = io.StringIO()
 

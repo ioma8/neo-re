@@ -50,6 +50,34 @@ The app normalizes the retrieved `0x84`-byte records after retrieval:
 
 Those functions swap selected big-endian dwords inside each `0x84` record before the UI uses them.
 
+The important structural conclusion is that the device-side `0x84` list entry and the first `0x84` bytes of a host `.OS3KApp` file use the same metadata layout. The same parser object is used for both:
+
+- list entry path: `FUN_00484e40` -> `FUN_004667e0` / `FUN_00466f40` -> `FUN_00476d60`
+- on-disk file path: `FUN_00476650` -> `FUN_00476d60`
+
+Mapped shared `0x84` metadata layout:
+
+- `0x00..0x03`: magic for on-disk `.OS3KApp` files, typically `0xc0ffeead`
+- `0x04..0x07`: total SmartApplet file size
+- `0x08..0x0b`: base memory requirement
+- `0x0c..0x0f`: info-table offset inside the full `.OS3KApp` image, or `0` if absent
+- `0x10..0x13`: packed flags dword
+- `0x14..0x15`: applet id
+- `0x16..0x17`: major/minor applet version in the `applet_id_and_version` dword
+- `0x18..0x3f`: NUL-terminated applet name
+- `0x3c`: BCD major version shown in UI
+- `0x3d`: BCD minor version shown in UI
+- `0x3e`: raw version/build byte
+- `0x3f`: applet class byte used for a string lookup helper
+- `0x40..0x7f`: NUL-terminated copyright string
+- `0x80..0x83`: extra memory requirement
+
+Observed examples:
+
+- `alphawordplus.os3kapp`: applet id `0xa000`, version `3.4`, class `0x01`
+- `calculator.os3kapp`: applet id `0xa002`, version `3.0`, class `0x01`
+- `keywordswireless.os3kapp`: applet id `0xa004`, version `4.0`, class `0x04`
+
 ## Retrieve Applet From Device
 
 `UpdaterRetrieveApplet` is `FUN_00433b10`.
@@ -171,6 +199,40 @@ This is the device-to-host bulk saver for an applet’s associated file data:
 
 This mirrors the AlphaWord file-data flow, but under the currently selected SmartApplet id.
 
+## Embedded SmartApplet Info Table
+
+Header offset `0x0c` is not another size field. It is an offset inside the `.OS3KApp` image to a variable-length info table that the UI uses for SmartApplet details, settings labels, and file-information strings.
+
+Confirmed from the on-disk parser path:
+
+- `FUN_00476650` reads header offset `0x0c`
+- if nonzero, `FUN_00478840` walks a table at that file offset
+- `FUN_00477e90` resolves strings from individual table records by a `(group, key)` pair
+
+The record format is:
+
+- `be16 group`
+- `be16 key`
+- `be16 payload_length`
+- `payload[payload_length]`
+- optional one-byte padding if `payload_length` is odd
+
+The table terminates when the next `group` field is `0`.
+
+Concrete AlphaWord Plus records at file offset `0x19fa4`:
+
+- `(0x0001, 0x8002)` -> `Passwords Enabled`
+- `(0x0001, 0x8003)` -> `Delete all files`
+- `(0x0105, 0x100b)` -> `write`
+
+Concrete KeyWords Wireless records at file offset `0x2d100`:
+
+- `(0x0001, 0x8000)` -> `Delete all students`
+- `(0x0001, 0x8001)` -> `Set custom WPM goals`
+- `(0x0001, 0x8002)` -> `Set custom error goals`
+
+`calculator.os3kapp` has header offset `0x0c = 0`, which matches the absence of an extra info table.
+
 ## Confirmed App-Side Call Chains
 
 ### Retrieve Applet List / Device Inventory
@@ -238,6 +300,8 @@ Covered operations:
 - retrieve-applet command construction
 - direct USB retrieve session planning
 - SmartApplet header parsing
+- shared SmartApplet list-entry / header metadata parsing
+- embedded SmartApplet info-table parsing
 - `0x06` add-begin field derivation from a real `.OS3KApp` header
 - add-applet begin command construction
 - direct USB add session planning directly from a full SmartApplet image
@@ -254,12 +318,12 @@ Useful commands:
 uv run --project poc/neotools python -m neotools smartapplet-retrieve-plan 0xa123
 uv run --project poc/neotools python -m neotools smartapplet-add-plan 0x12345678 0x9abc "41 42 43 44 45"
 uv run --project poc/neotools python -m neotools smartapplet-header "<0x84-byte header hex>"
+uv run --project poc/neotools python -m neotools smartapplet-metadata "<0x84-byte header hex>"
 uv run --project poc/neotools python -m neotools smartapplet-add-plan-from-image "<full .OS3KApp hex>"
 ```
 
 ## Remaining Unknowns
 
-- the exact field map for every offset inside the `0x84` SmartApplet list entry
 - the exact top-level resource binding from the SmartApplets tab strings to the controller functions above
-- the semantic meaning of header offset `0x0c` beyond it being part of the `.OS3KApp` metadata block
-- the semantic meaning of the mixed flag/version dwords at offsets `0x10` and `0x14`
+- the exact semantic names of every bit in the flags dword at offset `0x10`
+- the exact human-readable mapping behind every `applet_class` byte value at offset `0x3f`

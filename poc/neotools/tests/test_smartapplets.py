@@ -3,6 +3,7 @@ import unittest
 from neotools.alphaword_flow import UpdaterStep
 from neotools.smartapplets import (
     SmartAppletHeader,
+    SmartAppletInfoRecord,
     build_add_applet_begin_command,
     build_direct_usb_add_applet_plan,
     build_direct_usb_add_applet_plan_from_image,
@@ -10,11 +11,58 @@ from neotools.smartapplets import (
     build_list_applets_command,
     build_retrieve_applet_command,
     derive_add_applet_start_fields,
+    parse_smartapplet_info_table,
+    parse_smartapplet_metadata,
     parse_smartapplet_header,
 )
 
 
 class SmartAppletTests(unittest.TestCase):
+    def test_parse_smartapplet_metadata_extracts_shared_0x84_record_fields(self) -> None:
+        header = bytearray(0x84)
+        header[0x00:0x04] = bytes.fromhex("c0 ff ee ad")
+        header[0x04:0x08] = bytes.fromhex("00 01 a0 bc")
+        header[0x08:0x0C] = bytes.fromhex("00 00 0d 90")
+        header[0x0C:0x10] = bytes.fromhex("00 01 9f a4")
+        header[0x10:0x14] = bytes.fromhex("ff 00 00 ce")
+        header[0x14:0x18] = bytes.fromhex("a0 00 01 00")
+        header[0x18:0x18 + len(b"AlphaWord Plus")] = b"AlphaWord Plus"
+        header[0x3C] = 0x03
+        header[0x3D] = 0x04
+        header[0x3F] = 0x01
+        copyright_text = b"Copyright (c) 2005-2012 by Renaissance Learning, Inc."
+        header[0x40:0x40 + len(copyright_text)] = copyright_text
+        header[0x80:0x84] = bytes.fromhex("00 00 20 00")
+
+        metadata = parse_smartapplet_metadata(bytes(header))
+
+        self.assertEqual(metadata.applet_id, 0xA000)
+        self.assertEqual(metadata.version_major, 3)
+        self.assertEqual(metadata.version_minor, 4)
+        self.assertEqual(metadata.name, "AlphaWord Plus")
+        self.assertEqual(metadata.info_table_offset, 0x00019FA4)
+        self.assertEqual(metadata.flags_raw, 0xFF0000CE)
+        self.assertEqual(metadata.applet_class, 0x01)
+        self.assertEqual(metadata.extra_memory_size, 0x00002000)
+        self.assertTrue(metadata.has_info_table)
+
+    def test_parse_smartapplet_info_table_decodes_variable_length_string_records(self) -> None:
+        records = parse_smartapplet_info_table(
+            bytes.fromhex(
+                "00 01 80 02 00 12 50 61 73 73 77 6f 72 64 73 20 45 6e 61 62 6c 65 64 00"
+                " 00 01 80 03 00 11 44 65 6c 65 74 65 20 61 6c 6c 20 66 69 6c 65 73 00"
+                " 00 00"
+            )
+        )
+
+        self.assertEqual(
+            records,
+            [
+                SmartAppletInfoRecord(group=0x0001, key=0x8002, payload=b"Passwords Enabled\x00", text="Passwords Enabled"),
+                SmartAppletInfoRecord(group=0x0001, key=0x8003, payload=b"Delete all files\x00", text="Delete all files"),
+            ],
+        )
+
     def test_parse_smartapplet_header_extracts_big_endian_fields(self) -> None:
         header = parse_smartapplet_header(
             bytes.fromhex(

@@ -15,6 +15,7 @@ from neotools.smartapplets import (
     build_direct_usb_add_applet_plan_from_image,
     build_direct_usb_retrieve_applet_plan,
     derive_add_applet_start_fields,
+    parse_smartapplet_metadata,
     parse_smartapplet_header,
 )
 from neotools.switch_packets import build_switch_packet
@@ -77,6 +78,9 @@ def main(argv: list[str] | None = None) -> int:
 
     smartapplet_header_parser = subparsers.add_parser("smartapplet-header")
     smartapplet_header_parser.add_argument("header_hex")
+
+    smartapplet_metadata_parser = subparsers.add_parser("smartapplet-metadata")
+    smartapplet_metadata_parser.add_argument("header_hex")
 
     decode_response_parser = subparsers.add_parser("decode-updater-response")
     decode_response_parser.add_argument("raw_hex")
@@ -183,6 +187,18 @@ def main(argv: list[str] | None = None) -> int:
             f"extra_memory_size=0x{header.extra_memory_size:08x} "
             f"argument=0x{argument:08x} "
             f"trailing=0x{trailing:04x}"
+        )
+        return 0
+
+    if args.command == "smartapplet-metadata":
+        metadata = parse_smartapplet_metadata(_parse_hex_bytes(args.header_hex))
+        print(
+            f"applet_id=0x{metadata.applet_id:04x} "
+            f"version={metadata.version_major}.{metadata.version_minor} "
+            f"name={metadata.name} "
+            f"info_table_offset=0x{metadata.info_table_offset:08x} "
+            f"applet_class=0x{metadata.applet_class:02x} "
+            f"extra_memory_size=0x{metadata.extra_memory_size:08x}"
         )
         return 0
 
