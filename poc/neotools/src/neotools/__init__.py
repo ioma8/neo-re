@@ -9,6 +9,7 @@ from neotools.alphaword_session import (
     build_direct_usb_full_text_session,
     build_direct_usb_preview_session,
 )
+from neotools.alphaword_send import build_direct_usb_send_file_record
 from neotools.switch_packets import build_switch_packet
 from neotools.updater_packets import build_updater_command
 from neotools.updater_responses import parse_updater_response
@@ -49,6 +50,12 @@ def main(argv: list[str] | None = None) -> int:
     direct_usb_session_parser = subparsers.add_parser("direct-usb-alphaword-session")
     direct_usb_session_parser.add_argument("mode", choices=["preview", "full"])
     direct_usb_session_parser.add_argument("applet_id")
+
+    direct_usb_send_parser = subparsers.add_parser("direct-usb-alphaword-send-record")
+    direct_usb_send_parser.add_argument("applet_id")
+    direct_usb_send_parser.add_argument("file_slot")
+    direct_usb_send_parser.add_argument("record_hex")
+    direct_usb_send_parser.add_argument("payload_hex")
 
     decode_response_parser = subparsers.add_parser("decode-updater-response")
     decode_response_parser.add_argument("raw_hex")
@@ -107,6 +114,20 @@ def main(argv: list[str] | None = None) -> int:
             session = build_direct_usb_full_text_session(applet_id=int(args.applet_id, 0))
         for step in session:
             print(f"{step.kind}: {step.packet.hex(' ')}")
+        return 0
+
+    if args.command == "direct-usb-alphaword-send-record":
+        plan = build_direct_usb_send_file_record(
+            applet_id=int(args.applet_id, 0),
+            file_slot=int(args.file_slot, 0),
+            record=_parse_hex_bytes(args.record_hex),
+            payload=_parse_hex_bytes(args.payload_hex),
+        )
+        for step in plan:
+            if isinstance(step.packet, bytes):
+                print(f"{step.kind}: {step.packet.hex(' ')}")
+            else:
+                raise AssertionError("unexpected non-bytes packet payload")
         return 0
 
     if args.command == "decode-updater-response":
