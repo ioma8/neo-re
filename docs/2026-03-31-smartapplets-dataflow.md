@@ -325,6 +325,47 @@ Meaning:
 - it calls `FUN_004665f0`, which refreshes the applet inventory and injects AlphaWord-specific preview text when applet id `0xa000` is present
 - `FUN_00467980` and `FUN_00484e40` provide the normalized `0x84` SmartApplet records that feed that view
 
+## Resource Strings And Popup Menus
+
+`r2` resource decoding and `ghydra` decompilation now pin the AlphaWord-specific SmartApplet labels and the three relevant popup menus.
+
+Confirmed STRINGTABLE entries from resource block `3860`:
+
+- `0xf138` = `Maximum File Size (in characters)`
+- `0xf139` = `Minimum File Size (in characters)`
+- `0xf13a` = `Updating AlphaWord file size limits.`
+
+Those strings are consumed by the AlphaWord-specific SmartApplet settings code:
+
+- `FUN_004774b0` compares generated SmartApplet setting labels against `0xf138` and `0xf139` when applet id `0xa000` is active
+- `FUN_004867d0` uses `0xf138` to find and update the current AlphaWord maximum-size row
+- `FUN_00487440` uses `0xf138` to validate the edited numeric value against the row-local min/max bounds at offsets `0x48` and `0x4c`
+
+That closes the AlphaWord SmartApplet settings mapping: the SmartApplet info-table produces editable rows, and the AlphaWord-specialized UI logic recognizes two of those rows by their resource labels instead of by numeric record key alone.
+
+Confirmed popup menus from `r2` MENU resources:
+
+- resource `163`:
+  - `0x800e` `Startup`
+  - `0x800f` `Startup Lock`
+  - `0x8010` `Remove`
+  - `0x8012` `Get Info`
+  - `0x8013` `Help`
+- resource `208`:
+  - `0x801d` `Startup`
+  - `0x801e` `Startup Lock`
+  - `0x801f` `Get Info`
+  - `0x8020` `Help`
+- resource `219`:
+  - `0x8021` `Undo`
+  - `0x8022` `Cut`
+  - `0x8023` `Copy`
+  - `0x8024` `Paste`
+  - `0x8025` `Delete`
+  - `0x8026` `Select All`
+
+The remaining command-dispatch gap is narrower than before: the popup contents and ids are now decoded, but not every id has been tied to a uniquely named MFC handler.
+
 ## Minimal PoC Coverage
 
 The offline PoC now models the confirmed packet layer in:
@@ -341,6 +382,8 @@ Covered operations:
 - embedded SmartApplet info-table parsing
 - typed info-table record-family classification
 - extraction of the three currently proven `0x10` flag bits
+- offline lookup of the confirmed AlphaWord SmartApplet size-limit resource labels
+- offline lookup of the decoded SmartApplet popup-menu command maps
 - `0x06` add-begin field derivation from a real `.OS3KApp` header
 - add-applet begin command construction
 - direct USB add session planning directly from a full SmartApplet image
@@ -358,11 +401,13 @@ uv run --project poc/neotools python -m neotools smartapplet-retrieve-plan 0xa12
 uv run --project poc/neotools python -m neotools smartapplet-add-plan 0x12345678 0x9abc "41 42 43 44 45"
 uv run --project poc/neotools python -m neotools smartapplet-header "<0x84-byte header hex>"
 uv run --project poc/neotools python -m neotools smartapplet-metadata "<0x84-byte header hex>"
+uv run --project poc/neotools python -m neotools smartapplet-string 0xf138
+uv run --project poc/neotools python -m neotools smartapplet-menu 163
 uv run --project poc/neotools python -m neotools smartapplet-add-plan-from-image "<full .OS3KApp hex>"
 ```
 
 ## Remaining Unknowns
 
-- the exact top-level resource binding from the SmartApplets tab strings to the controller functions above
 - the exact semantic names of the three proven flag bits in the flags dword at offset `0x10`
 - the exact human-readable mapping behind every `applet_class` byte value at offset `0x3f`
+- the final MFC command-handler binding for every decoded popup-menu id

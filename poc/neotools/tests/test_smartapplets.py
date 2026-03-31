@@ -4,6 +4,7 @@ from neotools.alphaword_flow import UpdaterStep
 from neotools.smartapplets import (
     SmartAppletHeader,
     SmartAppletInfoRecord,
+    SmartAppletMenuItem,
     build_add_applet_begin_command,
     build_direct_usb_add_applet_plan,
     build_direct_usb_add_applet_plan_from_image,
@@ -11,9 +12,11 @@ from neotools.smartapplets import (
     build_list_applets_command,
     build_retrieve_applet_command,
     derive_add_applet_start_fields,
+    get_known_smartapplet_menu,
     parse_smartapplet_info_table,
     parse_smartapplet_metadata,
     parse_smartapplet_header,
+    resolve_known_smartapplet_string,
 )
 
 
@@ -192,6 +195,22 @@ class SmartAppletTests(unittest.TestCase):
                 UpdaterStep("program_applet", bytes.fromhex("0b 00 00 00 00 00 00 0b")),
                 UpdaterStep("finalize_applet_update", bytes.fromhex("07 00 00 00 00 00 00 07")),
             ],
+        )
+
+    def test_known_smartapplet_string_map_resolves_alpha_word_file_limit_labels(self) -> None:
+        self.assertEqual(resolve_known_smartapplet_string(0xF138), "Maximum File Size (in characters)")
+        self.assertEqual(resolve_known_smartapplet_string(0xF139), "Minimum File Size (in characters)")
+
+    def test_known_smartapplet_menu_map_decodes_popup_resource_163(self) -> None:
+        self.assertEqual(
+            get_known_smartapplet_menu(163),
+            (
+                SmartAppletMenuItem(command_id=0x800E, label="Startup"),
+                SmartAppletMenuItem(command_id=0x800F, label="Startup Lock"),
+                SmartAppletMenuItem(command_id=0x8010, label="Remove"),
+                SmartAppletMenuItem(command_id=0x8012, label="Get Info"),
+                SmartAppletMenuItem(command_id=0x8013, label="Help"),
+            ),
         )
 
 

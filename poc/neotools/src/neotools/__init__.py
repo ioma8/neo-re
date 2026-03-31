@@ -15,8 +15,10 @@ from neotools.smartapplets import (
     build_direct_usb_add_applet_plan_from_image,
     build_direct_usb_retrieve_applet_plan,
     derive_add_applet_start_fields,
+    get_known_smartapplet_menu,
     parse_smartapplet_metadata,
     parse_smartapplet_header,
+    resolve_known_smartapplet_string,
 )
 from neotools.switch_packets import build_switch_packet
 from neotools.updater_packets import build_updater_command
@@ -81,6 +83,12 @@ def main(argv: list[str] | None = None) -> int:
 
     smartapplet_metadata_parser = subparsers.add_parser("smartapplet-metadata")
     smartapplet_metadata_parser.add_argument("header_hex")
+
+    smartapplet_string_parser = subparsers.add_parser("smartapplet-string")
+    smartapplet_string_parser.add_argument("resource_id")
+
+    smartapplet_menu_parser = subparsers.add_parser("smartapplet-menu")
+    smartapplet_menu_parser.add_argument("resource_id")
 
     decode_response_parser = subparsers.add_parser("decode-updater-response")
     decode_response_parser.add_argument("raw_hex")
@@ -200,6 +208,15 @@ def main(argv: list[str] | None = None) -> int:
             f"applet_class=0x{metadata.applet_class:02x} "
             f"extra_memory_size=0x{metadata.extra_memory_size:08x}"
         )
+        return 0
+
+    if args.command == "smartapplet-string":
+        print(resolve_known_smartapplet_string(int(args.resource_id, 0)))
+        return 0
+
+    if args.command == "smartapplet-menu":
+        for item in get_known_smartapplet_menu(int(args.resource_id, 0)):
+            print(f"command_id=0x{item.command_id:04x} label={item.label}")
         return 0
 
     if args.command == "decode-updater-response":

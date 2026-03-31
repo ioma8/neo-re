@@ -43,6 +43,43 @@ class SmartAppletInfoRecord:
     text: str | None
 
 
+@dataclass(frozen=True)
+class SmartAppletMenuItem:
+    command_id: int
+    label: str
+
+
+KNOWN_SMARTAPPLET_STRING_LABELS = {
+    0xF138: "Maximum File Size (in characters)",
+    0xF139: "Minimum File Size (in characters)",
+}
+
+
+KNOWN_SMARTAPPLET_MENU_RESOURCES = {
+    163: (
+        SmartAppletMenuItem(command_id=0x800E, label="Startup"),
+        SmartAppletMenuItem(command_id=0x800F, label="Startup Lock"),
+        SmartAppletMenuItem(command_id=0x8010, label="Remove"),
+        SmartAppletMenuItem(command_id=0x8012, label="Get Info"),
+        SmartAppletMenuItem(command_id=0x8013, label="Help"),
+    ),
+    208: (
+        SmartAppletMenuItem(command_id=0x801D, label="Startup"),
+        SmartAppletMenuItem(command_id=0x801E, label="Startup Lock"),
+        SmartAppletMenuItem(command_id=0x801F, label="Get Info"),
+        SmartAppletMenuItem(command_id=0x8020, label="Help"),
+    ),
+    219: (
+        SmartAppletMenuItem(command_id=0x8021, label="Undo"),
+        SmartAppletMenuItem(command_id=0x8022, label="Cut"),
+        SmartAppletMenuItem(command_id=0x8023, label="Copy"),
+        SmartAppletMenuItem(command_id=0x8024, label="Paste"),
+        SmartAppletMenuItem(command_id=0x8025, label="Delete"),
+        SmartAppletMenuItem(command_id=0x8026, label="Select All"),
+    ),
+}
+
+
 def _checksum16(payload: bytes) -> int:
     return sum(payload) & 0xFFFF
 
@@ -127,6 +164,14 @@ def parse_smartapplet_info_table(raw: bytes) -> list[SmartAppletInfoRecord]:
         offset = payload_end + (payload_length & 1)
 
     return records
+
+
+def resolve_known_smartapplet_string(resource_id: int) -> str:
+    return KNOWN_SMARTAPPLET_STRING_LABELS[resource_id]
+
+
+def get_known_smartapplet_menu(resource_id: int) -> tuple[SmartAppletMenuItem, ...]:
+    return KNOWN_SMARTAPPLET_MENU_RESOURCES[resource_id]
 
 
 def derive_add_applet_start_fields(header: SmartAppletHeader) -> tuple[int, int]:

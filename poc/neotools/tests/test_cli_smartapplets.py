@@ -93,6 +93,33 @@ class SmartAppletCliTests(unittest.TestCase):
             ],
         )
 
+    def test_smartapplet_string_prints_known_resource_label(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = main(["smartapplet-string", "0xf138"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(output.getvalue().splitlines(), ["Maximum File Size (in characters)"])
+
+    def test_smartapplet_menu_prints_decoded_popup_menu_items(self) -> None:
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = main(["smartapplet-menu", "163"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            output.getvalue().splitlines(),
+            [
+                "command_id=0x800e label=Startup",
+                "command_id=0x800f label=Startup Lock",
+                "command_id=0x8010 label=Remove",
+                "command_id=0x8012 label=Get Info",
+                "command_id=0x8013 label=Help",
+            ],
+        )
+
     def test_smartapplet_add_plan_prints_expected_steps(self) -> None:
         output = io.StringIO()
 
