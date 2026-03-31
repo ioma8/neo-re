@@ -63,6 +63,23 @@ Key assignments observed:
 
 The `0x108e4` mapping is important because `0x0E` is `IRP_MJ_DEVICE_CONTROL`.
 
+The 64-bit driver `asusbdrv64.sys` mirrors the same shape. `FUN_00011008` is the effective `DriverEntry` body and installs:
+
+- `IRP_MJ_CREATE` -> `0x00011400`
+- `IRP_MJ_CLOSE` -> `0x00011528`
+- `IRP_MJ_DEVICE_CONTROL` -> `0x000115a4`
+- `IRP_MJ_PNP` -> `0x000119e4`
+- `IRP_MJ_POWER` -> `0x00012e98`
+- `IRP_MJ_SYSTEM_CONTROL` -> `0x00013dd0`
+- `DriverUnload` -> `0x00012af8`
+
+The add-device path is `0x000110ac`. It:
+
+- creates numbered device objects `\\Device\\AsUsbDrv0` .. `\\Device\\AsUsbDrv255`
+- attaches to the lower PDO stack
+- creates matching symbolic links `\\DosDevices\\AsUsbDrv0` .. `\\DosDevices\\AsUsbDrv255`
+- initializes the device-extension state, events, queues, and WDM-version classification word
+
 ## User-Mode DLL Behavior
 
 ### Exported direct USB API
@@ -281,14 +298,41 @@ What each code appears to do:
   - This matches the user-mode presence check.
   - The copied layout is consistent with a standard USB device descriptor (`bLength == 0x12`, `bDescriptorType == 0x01`).
 - `0x220008`
-  - Looks up a pointer chain and copies a variable-length data block to the caller output buffer.
-  - This is still relevant to the driver’s read-side plumbing, but the user-mode `AsUSBCommReadData` function itself now looks like a staged `ReadFile` loop rather than a `DeviceIoControl` wrapper.
+  - Requires a file-context-derived endpoint pointer.
+  - Builds a `0x28` internal transfer request with function code `0x1e`.
+  - Forwards that request through internal IOCTL `0x220003`.
+  - This is narrower than the normal stream data path; the ordinary direct USB reads and writes go through `IRP_MJ_READ` / `IRP_MJ_WRITE`, not user-mode `DeviceIoControl(0x220008, ...)`.
 - `0x220004`
   - Reaches a separate helper around the `0x109ba` branch.
   - Likely another transport control operation, not yet fully resolved.
 - `0x220000`
   - Reaches a separate helper around the `0x109c6` branch.
   - Likely another transport or reset/setup control operation, not yet fully resolved.
+
+The 64-bit driver `FUN_000115a4` confirms the same four control codes and clarifies their roles:
+
+- `0x220000`
+  - copies a cached device-managed block from `device_extension + 0x60` to the caller output buffer
+  - uses the cached block's `ushort` length field at offset `+2`
+  - returns `STATUS_INVALID_DEVICE_STATE` if the cached block pointer is null
+  - returns `STATUS_BUFFER_TOO_SMALL` if the caller output buffer is shorter than the cached block length
+- `0x220004`
+  - runs an internal lower-stack probe sequence through `FUN_000117c4`
+  - first sends internal IOCTL `0x220013`
+  - if the returned flags word has bit `1` set, it then sends internal IOCTL `0x220007`
+- `0x220008`
+  - requires a non-null file-context pointer chained through the IRP stack location
+  - uses that context to trigger `FUN_0001172c`, which builds a small `0x28` request object with function code `0x1e` and forwards it through internal IOCTL `0x220003`
+- `0x80002000`
+  - copies the cached 18-byte USB device descriptor from `device_extension + 0x58`
+  - requires an output buffer of at least `0x12` bytes
+
+The 64-bit statuses line up with the observed branch structure:
+
+- `STATUS_INVALID_DEVICE_STATE` when the device is not in the started state
+- `STATUS_INVALID_DEVICE_REQUEST` for unknown IOCTLs
+- `STATUS_INVALID_BUFFER_SIZE` / `STATUS_BUFFER_TOO_SMALL` on undersized outputs
+- `STATUS_INVALID_PARAMETER` when `0x220008` arrives without the needed file-context chain
 
 ## Lower-Stack Internal Request
 
@@ -307,18 +351,137 @@ Inference:
 - `0x220013` is likely an internal driver-to-lower-stack control path, not the user-mode API surface.
 - It probably participates in configuration or endpoint setup.
 
+In the 64-bit driver that helper is `FUN_000117c4`, and its exact sequence is:
+
+1. send internal IOCTL `0x220013`
+2. inspect a returned flags word written through the IRP stack location
+3. if bit `0x2` is set, send internal IOCTL `0x220007`
+
+This makes `0x220004` a wrapper around a two-step lower-stack readiness or reset/probe sequence, not a direct data transfer.
+
+The 64-bit setup path also clarifies the create/start flow:
+
+- `FUN_00011bf0` clears the cached descriptor/configuration pointers, forwards the start IRP down, then calls `FUN_00011d84`
+- `FUN_00011d84` sends a `0x220003` request with request type `1` and a `0x12`-byte buffer to fetch the USB device descriptor
+- `FUN_00011e78` sends another `0x220003` request with request type `2`:
+  - first with a 9-byte buffer to fetch the configuration-descriptor header
+  - then with the full configuration length from `wTotalLength`
+- `FUN_00011ff4` parses the returned configuration descriptor with:
+  - `USBD_ParseConfigurationDescriptorEx`
+  - `USBD_CreateConfigurationRequestEx`
+- It caches:
+  - the full USB device descriptor at `device_extension + 0x58`
+  - the full USB configuration descriptor at `device_extension + 0x60`
+  - the generated URB/configuration request at `device_extension + 0x68`
+  - a per-interface “busy” byte array at `device_extension + 0x70`
+
+## Create, Close, and Endpoint Binding
+
+The 64-bit driver makes the file-handle semantics much clearer.
+
+`DispatchCreate`:
+
+- succeeds only when the device state at `device_extension + 0x78` is `2` and the configured-interface cache at `device_extension + 0x68` is non-null
+- opens with an empty file name as a control handle:
+  - clears the file object's context pointer
+  - increments the outstanding-open count at `device_extension + 0x14c`
+  - cancels the pending timer if one is active
+- opens with a suffixed file name as an endpoint-specific handle:
+  - `ResolveInterfaceStateByteFromFileName` parses the trailing decimal suffix from the Unicode file name
+  - valid suffix range is `0..5`
+  - the parsed suffix indexes the per-interface busy-byte array at `device_extension + 0x70`
+  - the matching endpoint descriptor pointer from the cached URB/configuration request is stored in the file object's context slot
+  - the busy byte is set to `1`
+  - the outstanding-open count is incremented
+  - the pending timer is cancelled if active
+
+`DispatchClose`:
+
+- if the file object carried an endpoint-specific context and a named suffix, it resolves that suffix again and clears the corresponding busy byte back to `0`
+- always decrements the outstanding-open count at `device_extension + 0x14c`
+
+Interpretation:
+
+- the driver supports both a control handle and endpoint-bound per-file-object handles
+- endpoint names are numeric suffixes, and the busy-byte table prevents ambiguous reuse of those logical interface slots
+
+## Read and Write Transfer Path
+
+The 64-bit driver resolves the main transport path more precisely than the earlier 32-bit pass.
+
+`DispatchReadWrite`:
+
+- treats major function `0x03` as read and `0x04` as write
+- requires device state `2`
+- waits on the timer event if a timer IRP is active
+- resolves the target endpoint descriptor in one of two ways:
+  - from the file object's stored endpoint context, if present
+  - otherwise by scanning the cached configured pipes at `device_extension + 0x68` and picking the first endpoint whose direction bit matches the read/write request
+- accepts only endpoint types `2` or `3`
+- rejects transfer lengths above `0x10000`
+- returns immediate success for zero-length requests
+- allocates:
+  - a `0x28` transfer-tracking context
+  - an MDL over the caller buffer
+  - an `0x80` lower request block
+- programs the lower request for internal IOCTL `0x220003`
+- uses transfer code `3` for reads and `2` for writes
+- limits each submitted chunk to `0x100` bytes
+- installs `ContinueChunkedReadTransfer` as the completion routine
+- holds an outstanding-I/O reference across the lower-driver call
+- if the immediate lower-driver status is a hard failure other than the two tolerated pending-style statuses, it tries `SendInternalTransferRequest` and, if that also fails, runs `RunInternalProbeSequence`
+
+`ContinueChunkedReadTransfer`:
+
+- adds the completed byte count from the lower request to the IRP's accumulated `Information` value
+- if bytes remain, rebuilds the partial MDL for the next `0x100`-byte-or-smaller slice
+- resubmits the same IRP down with IOCTL `0x220003`
+- when all bytes are consumed, releases the outstanding-I/O reference and frees the request block, MDL, and tracking context
+
+Interpretation:
+
+- normal direct USB data movement in the 64-bit driver is a chunked lower-stack `0x220003` pipeline, not `0x220008`
+- user-mode `ReadFile` / `WriteFile` on `\\\\.\\AsUSBDrv%d` are the important operations to replicate, with the driver's own chunk size capped at `0x100`
+
+## PnP State Machine
+
+`DispatchPnP` maps the main minor codes as follows:
+
+- `0x00` -> `StartDeviceAndLoadUsbDescriptors`
+- `0x01` -> query remove:
+  - saves the previous state
+  - sets current state to `4`
+  - clears the started flag
+  - waits for outstanding I/O to drain
+  - forwards the IRP down
+- `0x02` -> `HandleRemoveDevice`
+- `0x03` -> `HandleCancelRemoveDevice`
+- `0x04` -> `HandleStopDevice`
+- `0x05` -> query stop:
+  - saves the previous state
+  - sets current state to `3`
+  - clears the started flag
+  - waits for outstanding I/O to drain
+  - forwards the IRP down
+- `0x06` -> `HandleCancelStopDevice`
+- `0x09` -> `HandleQueryCapabilities`
+- `0x17` -> `HandleSurpriseRemoval`
+- other minors -> pass through to the lower driver
+
 ## Protocol Framing Observed So Far
 
 Direct USB appears to use two layers:
 
 1. Control and setup:
    - driver private IOCTLs such as `0x220000`, `0x220004`, `0x220008`
+   - lower-stack internal IOCTL `0x220003` for descriptor fetch and transfer submission
    - lower-stack or pass-through descriptor query `0x80002000`
 
 2. Data path:
    - `WriteFile` for outbound stream data
    - `ReadFile` for inbound stream data
    - user-mode chunking capped at `0x40` bytes on write
+   - driver-side chunking capped at `0x100` bytes per lower-stack submission
 
 Small command transactions exist on top of this:
 
@@ -341,9 +504,10 @@ The direct transport likely works like this:
 
 1. Enumerate numbered `AsUSBDrv` device instances.
 2. Query a USB descriptor with `0x80002000` to verify the device is a NEO.
-3. Use private IOCTLs to prepare transfers or expose driver-managed buffers.
-4. Use `WriteFile` and `ReadFile` for the main data exchange.
-5. Use small fixed-width command packets for mode changes such as applet switching.
+3. Start-device handling fetches the USB device and configuration descriptors and builds a configured-pipe cache.
+4. Optional named opens bind a file object to a specific configured endpoint.
+5. Use `WriteFile` and `ReadFile` for the main data exchange, which the driver translates into chunked internal `0x220003` requests.
+6. Use small fixed-width command packets for mode changes such as applet switching.
 
 For the AlphaWord retrieval and print-side flow built on top of this transport, see:
 
@@ -353,28 +517,22 @@ For the AlphaWord retrieval and print-side flow built on top of this transport, 
 
 These still need confirmation:
 
-- Exact semantics of `0x220000`
-- Exact semantics of `0x220004`
-- Exact semantics of `0x220008`
-- Whether `WriteFile` talks to a single USB bulk OUT endpoint
-- Whether `ReadFile` talks to a single USB bulk IN endpoint
+- Exact user-visible semantics of the cached block returned by `0x220000`
+- Exact lower-stack meaning of internal IOCTLs `0x220013` and `0x220007`
+- Whether NeoManager ever opens named endpoint handles explicitly, or relies only on the default direction-matched path
+- Whether `WriteFile` consistently lands on one bulk/interrupt OUT pipe or can switch depending on the configured-interface cache
+- Whether `ReadFile` consistently lands on one bulk/interrupt IN pipe or can switch depending on the configured-interface cache
 - Exact layout of the 8-byte `?Swtch` command beyond the embedded applet ID
 - Whether the 8-byte inbound read staging maps directly to USB max-packet size or to a higher-level record framing choice
 
 ## Best Next Reverse-Engineering Targets
 
-If continuing locally in radare2:
+If continuing locally in Ghidra/radare2:
 
-- Follow the `0x109ba` branch in the `IRP_MJ_DEVICE_CONTROL` handler
-- Follow the `0x109c6` branch in the `IRP_MJ_DEVICE_CONTROL` handler
-- Trace helper calls reached from the `0x220008` branch
-- Follow `EnumerateAsUsbHidInterfacesFallback` into the remaining unnamed helper calls
-- Follow `ProbeAndInitializeAsUsbHidInterface` into the `0xb0040` and `0xb0008` request paths
-
-If using Ghidra next, request decompilation for:
-
-- `IRP_MJ_DEVICE_CONTROL` handler at `0x108e4`
-- The helpers reached from `0x109ba` and `0x109c6`
+- Follow the remaining lower-stack status handling around `DispatchReadWrite`
+- Inspect which configured pipe entries NeoManager actually opens by name versus using the default direction scan
+- Follow the power/timer path around `RequestDevicePowerIrp` and the timer object at `device_extension + 0x150`
+- Follow the 32-bit driver's create/read/write dispatchers and confirm they mirror the 64-bit chunking and endpoint-selection logic
 
 ## Practical Takeaways
 
@@ -389,3 +547,5 @@ What is already firm enough to rely on:
 - The presence-check path can be modeled offline as a standard 18-byte USB device descriptor parse plus `bcdDevice`-based return-code classification.
 - The driver has at least three private user-visible IOCTLs and one descriptor-oriented pass-through request.
 - The DLL exports two MAC helper commands on top of the same 8-byte updater framing.
+- The 64-bit driver confirms that `0x220004` is an internal probe wrapper around lower-stack IOCTLs `0x220013` and `0x220007`.
+- The 64-bit driver confirms that `0x220003` is the lower-stack request used to fetch descriptors and to move data via URB-style request objects.

@@ -6,6 +6,13 @@ from neotools.asusbcomm import (
     build_set_mac_address_packet,
     classify_alpha_smart_presence,
 )
+from neotools.driver64_model import (
+    build_driver64_dispatch_map,
+    classify_driver64_create,
+    classify_driver64_device_control,
+    classify_driver64_pnp_minor,
+    classify_driver64_read_write,
+)
 from neotools.alphaword_flow import (
     build_direct_usb_full_text_retrieval_plan,
     build_full_text_retrieval_plan,
@@ -47,6 +54,15 @@ def _parse_hex_bytes(raw: str) -> bytes:
     return bytes.fromhex(compact)
 
 
+def _parse_bool(raw: str) -> bool:
+    value = raw.strip().lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise ValueError(f"unsupported boolean literal: {raw}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="neotools")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -67,6 +83,26 @@ def main(argv: list[str] | None = None) -> int:
 
     asusbcomm_hid_fallback_parser = subparsers.add_parser("asusbcomm-hid-fallback-plan")
     asusbcomm_hid_fallback_parser.add_argument("os_major_version")
+
+    subparsers.add_parser("driver64-dispatch-map")
+
+    driver64_ioctl_route_parser = subparsers.add_parser("driver64-ioctl-route")
+    driver64_ioctl_route_parser.add_argument("ioctl")
+
+    driver64_create_route_parser = subparsers.add_parser("driver64-create-route")
+    driver64_create_route_parser.add_argument("--state", required=True)
+    driver64_create_route_parser.add_argument("--has-configuration", required=True)
+    driver64_create_route_parser.add_argument("--file-name-suffix")
+
+    driver64_read_write_route_parser = subparsers.add_parser("driver64-read-write-route")
+    driver64_read_write_route_parser.add_argument("--major-function", required=True)
+    driver64_read_write_route_parser.add_argument("--state", required=True)
+    driver64_read_write_route_parser.add_argument("--transfer-length", required=True)
+    driver64_read_write_route_parser.add_argument("--file-context-present", required=True)
+    driver64_read_write_route_parser.add_argument("--endpoint-type", required=True)
+
+    driver64_pnp_route_parser = subparsers.add_parser("driver64-pnp-route")
+    driver64_pnp_route_parser.add_argument("minor")
 
     updater_packet_parser = subparsers.add_parser("updater-packet")
     updater_packet_parser.add_argument("command_byte")
@@ -201,6 +237,66 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{step.kind} code=0x{step.code:08x} payload={step.payload.hex(' ')}")
             else:
                 print(f"{step.kind} payload={step.payload.hex(' ')}")
+        return 0
+
+    if args.command == "driver64-dispatch-map":
+        dispatch_map = build_driver64_dispatch_map()
+        print(f"create: 0x{dispatch_map.create:08x}")
+        print(f"close: 0x{dispatch_map.close:08x}")
+        print(f"device_control: 0x{dispatch_map.device_control:08x}")
+        print(f"pnp: 0x{dispatch_map.pnp:08x}")
+        print(f"power: 0x{dispatch_map.power:08x}")
+        print(f"system_control: 0x{dispatch_map.system_control:08x}")
+        print(f"unload: 0x{dispatch_map.unload:08x}")
+        return 0
+
+    if args.command == "driver64-ioctl-route":
+        route = classify_driver64_device_control(int(args.ioctl, 0))
+        if route.internal_plan is None:
+            print(f"kind={route.kind} ioctl=0x{route.ioctl:08x}")
+        else:
+            print(
+                f"kind={route.kind} ioctl=0x{route.ioctl:08x} "
+                f"first=0x{route.internal_plan.first:08x} "
+                f"second=0x{route.internal_plan.second:08x}"
+            )
+        return 0
+
+    if args.command == "driver64-create-route":
+        suffix = None if args.file_name_suffix is None else int(args.file_name_suffix, 0)
+        route = classify_driver64_create(
+            state=int(args.state, 0),
+            has_configuration=_parse_bool(args.has_configuration),
+            file_name_suffix=suffix,
+        )
+        endpoint_index = "none" if route.endpoint_index is None else str(route.endpoint_index)
+        print(
+            f"kind={route.kind} ntstatus=0x{route.ntstatus:08x} "
+            f"open_count={route.increments_open_count} "
+            f"cancel_timer={route.cancels_timer_if_active} "
+            f"endpoint_index={endpoint_index}"
+        )
+        return 0
+
+    if args.command == "driver64-read-write-route":
+        route = classify_driver64_read_write(
+            major_function=int(args.major_function, 0),
+            state=int(args.state, 0),
+            transfer_length=int(args.transfer_length, 0),
+            file_context_present=_parse_bool(args.file_context_present),
+            endpoint_type=int(args.endpoint_type, 0),
+        )
+        print(
+            f"kind={route.kind} ntstatus=0x{route.ntstatus:08x} "
+            f"direction={route.direction} transfer_code={route.transfer_code} "
+            f"first_chunk=0x{route.first_chunk_length:x} remaining=0x{route.remaining_length:x} "
+            f"ioctl=0x{route.uses_ioctl:08x} probe_fallback={route.falls_back_to_probe_sequence}"
+        )
+        return 0
+
+    if args.command == "driver64-pnp-route":
+        route = classify_driver64_pnp_minor(int(args.minor, 0))
+        print(f"kind={route.kind} minor=0x{route.minor:02x} handler={route.handler}")
         return 0
 
     if args.command == "updater-packet":

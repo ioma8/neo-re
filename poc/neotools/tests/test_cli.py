@@ -82,6 +82,102 @@ class CLITests(unittest.TestCase):
             ),
         )
 
+    def test_driver64_dispatch_map_command_prints_major_handlers(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["driver64-dispatch-map"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "\n".join(
+                [
+                    "create: 0x00011400",
+                    "close: 0x00011528",
+                    "device_control: 0x000115a4",
+                    "pnp: 0x000119e4",
+                    "power: 0x00012e98",
+                    "system_control: 0x00013dd0",
+                    "unload: 0x00012af8",
+                    "",
+                ]
+            ),
+        )
+
+    def test_driver64_ioctl_route_command_prints_internal_probe_sequence(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["driver64-ioctl-route", "0x220004"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "kind=internal_probe_sequence ioctl=0x00220004 first=0x00220013 second=0x00220007\n",
+        )
+
+    def test_driver64_create_route_command_prints_endpoint_open_behavior(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "driver64-create-route",
+                    "--state",
+                    "2",
+                    "--has-configuration",
+                    "true",
+                    "--file-name-suffix",
+                    "5",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "kind=endpoint_handle ntstatus=0x00000000 open_count=True cancel_timer=True endpoint_index=5\n",
+        )
+
+    def test_driver64_read_write_route_command_prints_chunked_transfer_behavior(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(
+                [
+                    "driver64-read-write-route",
+                    "--major-function",
+                    "0x03",
+                    "--state",
+                    "2",
+                    "--transfer-length",
+                    "0x180",
+                    "--file-context-present",
+                    "true",
+                    "--endpoint-type",
+                    "2",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "kind=chunked_internal_transfer ntstatus=0x00000103 direction=read transfer_code=3 "
+            "first_chunk=0x100 remaining=0x80 ioctl=0x00220003 probe_fallback=True\n",
+        )
+
+    def test_driver64_pnp_route_command_prints_remove_handler(self) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["driver64-pnp-route", "0x02"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "kind=remove_device minor=0x02 handler=HandleRemoveDevice\n",
+        )
+
     def test_alphaword_plan_command_prints_retrieval_sequence(self) -> None:
         stdout = io.StringIO()
 
