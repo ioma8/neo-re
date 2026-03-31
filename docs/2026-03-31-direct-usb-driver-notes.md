@@ -100,7 +100,8 @@ Observed behavior:
 - Fails with return code `3` if the device handle is invalid.
 - Validates requested read size against the caller-provided maximum; one failure path returns `0x0b`.
 - Uses `GetTickCount` and a deadline argument for timeout handling.
-- Uses an 8-byte `DeviceIoControl` transaction before or during the `ReadFile` loop.
+- Uses `ReadFile` in 8-byte refill requests and stages the returned bytes in a persistent DLL-global buffer.
+- Drains that staging buffer one byte at a time into the caller output.
 - Tracks byte counts in globals and caller output pointers.
 - Calls `AsUSBCommResetConnection` on error and returns `1`.
 - Returns `0x0c` on timeout-style failure.
@@ -109,7 +110,8 @@ Observed behavior:
 Inference:
 
 - Reads are not plain raw stream reads.
-- The 8-byte control transaction likely arms or describes the next transfer before the actual `ReadFile`.
+- The DLL maintains unread tail bytes across read-loop iterations, and likely across successive reads as long as the global handle stays valid.
+- The transport naturally exposes 8-byte inbound chunks at this layer, even though the caller API asks for arbitrary byte counts.
 
 ### `AsUSBCommSwitchToApplet`
 
@@ -189,7 +191,7 @@ What each code appears to do:
   - The copied layout is consistent with a standard USB device descriptor (`bLength == 0x12`, `bDescriptorType == 0x01`).
 - `0x220008`
   - Looks up a pointer chain and copies a variable-length data block to the caller output buffer.
-  - This is a strong candidate for the `AsUSBCommReadData` control stage.
+  - This is still relevant to the driver’s read-side plumbing, but the user-mode `AsUSBCommReadData` function itself now looks like a staged `ReadFile` loop rather than a `DeviceIoControl` wrapper.
 - `0x220004`
   - Reaches a separate helper around the `0x109ba` branch.
   - Likely another transport control operation, not yet fully resolved.
@@ -252,8 +254,8 @@ These still need confirmation:
 - Whether `WriteFile` talks to a single USB bulk OUT endpoint
 - Whether `ReadFile` talks to a single USB bulk IN endpoint
 - Whether any HID transport remains in the actual data path after enumeration
-- Exact layout of the 8-byte read-control structure
 - Exact layout of the 8-byte `?Swtch` command beyond the embedded applet ID
+- Whether the 8-byte inbound read staging maps directly to USB max-packet size or to a higher-level record framing choice
 
 ## Best Next Reverse-Engineering Targets
 
