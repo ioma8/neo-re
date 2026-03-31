@@ -25,7 +25,7 @@ Each stage has its own updater-side handshake.
 
 ### Raw file attributes put
 
-`FUN_00436670` corresponds to `UpdaterPutRawFileAttributes`.
+`UpdaterPutRawFileAttributes` is the raw-file-attributes put routine.
 
 For the direct USB / generic updater path:
 
@@ -47,7 +47,7 @@ Command fields:
 
 ### File payload put
 
-`FUN_00434810` corresponds to `UpdaterPutFile`.
+`UpdaterPutFileData` is the file-payload put routine.
 
 For the direct USB / generic updater path:
 
@@ -55,7 +55,7 @@ For the direct USB / generic updater path:
 - expected begin response: `0x50`
 - chunk handshake: opcode `0x02`
 - expected chunk ack: `0x42`
-- chunk bytes are sent with `FUN_00430050`
+- chunk bytes are sent with `TransportWriteExact`
 - completion probe after each chunk: opcode `0xff`
 - expected completion ack after each chunk: `0x43`
 - final close command: opcode `0x15`
@@ -74,7 +74,7 @@ Confirmed packet construction:
 
 ## Record-Level Send Wrapper
 
-`FUN_00435dc0` corresponds to `UpdaterRestoreAppletFileData`.
+`UpdaterRestoreAppletFileData` is the record-level send wrapper.
 
 It reads a local stream structured as:
 
@@ -95,66 +95,66 @@ This confirms that the send flow is record-oriented, not just “send arbitrary 
 
 ## Transport Wrappers
 
-`FUN_00486220` is the higher-level wrapper that chooses the transport:
+`SendAlphaWordFileRecordToDevice` is the higher-level wrapper that chooses the transport:
 
-- mode `2` and `5` call `FUN_00435d60`, which wraps `UpdaterRestoreAppletFileData` for direct USB
-- mode `3` calls `FUN_00435d90`, which wraps the same logic for the alternate port-aware context
+- mode `2` and `5` call `DirectUsbRestoreAppletFileData`, which wraps `UpdaterRestoreAppletFileData` for direct USB
+- mode `3` calls `AlternateTransportRestoreAppletFileData`, which wraps the same logic for the alternate port-aware context
 
 ## Confirmed UI-Side Call Chain
 
 The top-level send-side controller chain is now visible:
 
-1. `FUN_00428500`
-2. `FUN_00428130`
-3. `FUN_00428257`
-4. `FUN_0042836a`
-5. `FUN_00486220`
-6. `FUN_00435dc0`
-7. `FUN_00436670` then `FUN_00434810`
+1. `SendSelectedAlphaWordFilesToDevices`
+2. `SendAlphaWordFilesToDevice`
+3. `SendChosenAlphaWordFileRecords`
+4. `SendOneAlphaWordFileRecord`
+5. `SendAlphaWordFileRecordToDevice`
+6. `UpdaterRestoreAppletFileData`
+7. `UpdaterPutRawFileAttributes` then `UpdaterPutFileData`
 
 What each layer does:
 
-### `FUN_00428500`
+### `SendSelectedAlphaWordFilesToDevices`
 
 - initializes the send UI state
 - displays progress text from `s_Sending_retrieved_AW_files_004bd61c`
 - iterates a table at `param_1 + 0x33f4`
 - checks each entry with `FUN_00482a80`
-- for active entries, calls `FUN_00428130(param_1, device_index)`
+- for active entries, calls `SendAlphaWordFilesToDevice(param_1, device_index)`
 
 Interpretation:
 
 - this is the controller-level action that sends retrieved AlphaWord files to selected connected targets
 - the loop bound is transport-dependent and derived from the current device mode
 
-### `FUN_00428130`
+### `SendAlphaWordFilesToDevice`
 
 - resolves the AlphaWord file collection for the selected target/device slot
-- gets a count with `FUN_00401330`
-- if more than one candidate is present, delegates to `FUN_00428257`
-- otherwise iterates file records directly and calls `FUN_0042836a`
+- gets a count with `CountPopulatedAlphaWordFileRecords`
+- if more than one candidate is present, delegates to `SendChosenAlphaWordFileRecords`
+- otherwise iterates file records directly and calls `SendOneAlphaWordFileRecord`
 
 Interpretation:
 
 - this function is the per-target sender for the `AlphaWord Files to Send` workflow
 - it decides whether to walk one record directly or use the helper that searches for the next sendable record
 
-### `FUN_00428257`
+### `SendChosenAlphaWordFileRecords`
 
 - scans file records until it finds one marked sendable
 - builds the per-file path and label strings
-- calls `FUN_0042836a`
+- calls `SendOneAlphaWordFileRecord`
 
 Interpretation:
 
 - this is the per-target file-selection helper used when multiple AlphaWord file entries exist
 
-### `FUN_0042836a`
+### `SendOneAlphaWordFileRecord`
 
 - checks that the host-side file path exists
 - opens the file and rejects zero-length content
-- calls `FUN_004280a0(...)` to obtain a handle/stream for the local file
-- calls `FUN_00486220(..., file_slot, local_file_id)`
+- calls `OpenHostAlphaWordFile(...)` to obtain a handle/stream for the local file
+- calls `SendAlphaWordFileRecordToDevice(..., file_slot, local_file_id)`
 - marks the record as sent on success through `FUN_00482a70`
 
 Interpretation:

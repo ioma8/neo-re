@@ -22,7 +22,12 @@ class AlphaWordSendTests(unittest.TestCase):
             build_put_raw_file_attributes_plan(file_slot=0x01, applet_id=0xA000, record=record),
             [
                 UpdaterStep("put_raw_file_attributes_begin", bytes.fromhex("1d 00 00 00 01 a0 00 be")),
+                UpdaterStep(
+                    "put_raw_file_attributes_handshake",
+                    bytes.fromhex("02 00 00 00 28 07 0f 40"),
+                ),
                 UpdaterStep("put_raw_file_attributes_data", record),
+                UpdaterStep("put_raw_file_attributes_commit", bytes.fromhex("ff 00 00 00 00 00 00 ff")),
                 UpdaterStep("put_raw_file_attributes_finish", bytes.fromhex("1e 00 00 00 01 a0 00 bf")),
             ],
         )
@@ -34,6 +39,7 @@ class AlphaWordSendTests(unittest.TestCase):
                 UpdaterStep("put_file_begin", bytes.fromhex("14 01 00 00 05 a0 00 ba")),
                 UpdaterStep("put_file_chunk_handshake", bytes.fromhex("02 00 00 00 05 01 4f 57")),
                 UpdaterStep("put_file_chunk_data", b"ABCDE"),
+                UpdaterStep("put_file_chunk_commit", bytes.fromhex("ff 00 00 00 00 00 00 ff")),
                 UpdaterStep("put_file_finish", bytes.fromhex("15 00 00 00 00 00 00 15")),
             ],
         )
@@ -46,9 +52,11 @@ class AlphaWordSendTests(unittest.TestCase):
         self.assertEqual(plan[0], UpdaterStep("put_file_begin", bytes.fromhex("14 01 00 04 01 a0 00 ba")))
         self.assertEqual(plan[1], UpdaterStep("put_file_chunk_handshake", bytes.fromhex("02 00 00 04 00 04 00 0a")))
         self.assertEqual(plan[2], UpdaterStep("put_file_chunk_data", b"A" * 0x400))
-        self.assertEqual(plan[3], UpdaterStep("put_file_chunk_handshake", bytes.fromhex("02 00 00 00 01 00 41 44")))
-        self.assertEqual(plan[4], UpdaterStep("put_file_chunk_data", b"A"))
-        self.assertEqual(plan[5], UpdaterStep("put_file_finish", bytes.fromhex("15 00 00 00 00 00 00 15")))
+        self.assertEqual(plan[3], UpdaterStep("put_file_chunk_commit", bytes.fromhex("ff 00 00 00 00 00 00 ff")))
+        self.assertEqual(plan[4], UpdaterStep("put_file_chunk_handshake", bytes.fromhex("02 00 00 00 01 00 41 44")))
+        self.assertEqual(plan[5], UpdaterStep("put_file_chunk_data", b"A"))
+        self.assertEqual(plan[6], UpdaterStep("put_file_chunk_commit", bytes.fromhex("ff 00 00 00 00 00 00 ff")))
+        self.assertEqual(plan[7], UpdaterStep("put_file_finish", bytes.fromhex("15 00 00 00 00 00 00 15")))
 
     def test_direct_usb_send_file_record_bootstraps_once_then_sends_attributes_and_file(self) -> None:
         record = bytes.fromhex(
@@ -70,11 +78,17 @@ class AlphaWordSendTests(unittest.TestCase):
                 UpdaterStep("reset_connection", bytes.fromhex("3f ff 00 72 65 73 65 74")),
                 UpdaterStep("switch_to_updater", bytes.fromhex("3f 53 77 74 63 68 00 00")),
                 UpdaterStep("put_raw_file_attributes_begin", bytes.fromhex("1d 00 00 00 01 a0 00 be")),
+                UpdaterStep(
+                    "put_raw_file_attributes_handshake",
+                    bytes.fromhex("02 00 00 00 28 06 68 98"),
+                ),
                 UpdaterStep("put_raw_file_attributes_data", record),
+                UpdaterStep("put_raw_file_attributes_commit", bytes.fromhex("ff 00 00 00 00 00 00 ff")),
                 UpdaterStep("put_raw_file_attributes_finish", bytes.fromhex("1e 00 00 00 01 a0 00 bf")),
                 UpdaterStep("put_file_begin", bytes.fromhex("14 01 00 00 05 a0 00 ba")),
                 UpdaterStep("put_file_chunk_handshake", bytes.fromhex("02 00 00 00 05 01 4f 57")),
                 UpdaterStep("put_file_chunk_data", b"ABCDE"),
+                UpdaterStep("put_file_chunk_commit", bytes.fromhex("ff 00 00 00 00 00 00 ff")),
                 UpdaterStep("put_file_finish", bytes.fromhex("15 00 00 00 00 00 00 15")),
             ],
         )

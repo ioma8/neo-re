@@ -148,8 +148,8 @@ Inference:
 
 Relevant higher-level callers in `neomanager.exe`:
 
-- `FUN_00438200`
-- `FUN_00438290`
+- `DirectUsbEnterUpdaterApplet`
+- `AlternateTransportEnterUpdaterApplet`
 
 Both do the same direct USB bootstrap pattern:
 

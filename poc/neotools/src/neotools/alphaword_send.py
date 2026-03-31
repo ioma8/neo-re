@@ -14,7 +14,12 @@ def build_put_raw_file_attributes_plan(*, file_slot: int, applet_id: int, record
             "put_raw_file_attributes_begin",
             build_updater_command(command=0x1D, argument=file_slot, trailing=applet_id),
         ),
+        UpdaterStep(
+            "put_raw_file_attributes_handshake",
+            build_updater_command(command=0x02, argument=len(record), trailing=_checksum16(record)),
+        ),
         UpdaterStep("put_raw_file_attributes_data", record),
+        UpdaterStep("put_raw_file_attributes_commit", build_updater_command(command=0xFF, argument=0, trailing=0)),
         UpdaterStep(
             "put_raw_file_attributes_finish",
             build_updater_command(command=0x1E, argument=file_slot, trailing=applet_id),
@@ -47,6 +52,7 @@ def build_put_file_plan(*, file_slot: int, applet_id: int, payload: bytes) -> li
             )
         )
         plan.append(UpdaterStep("put_file_chunk_data", chunk))
+        plan.append(UpdaterStep("put_file_chunk_commit", build_updater_command(command=0xFF, argument=0, trailing=0)))
     plan.append(UpdaterStep("put_file_finish", build_updater_command(command=0x15, argument=0, trailing=0)))
     return plan
 

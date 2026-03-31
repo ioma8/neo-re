@@ -11,18 +11,18 @@ The focus here is the direct updater protocol and the concrete app-side call cha
 
 These functions are now pinned from string xrefs and decompilation:
 
-- `FUN_00430470` = `UpdaterGetAppletList`
-- `FUN_004309d0` = `UpdaterAddApplet`
-- `FUN_004328f0` = `UpdaterRemoveApplet`
-- `FUN_00433b10` = `UpdaterRetrieveApplet`
-- `FUN_00435b00` = `UpdaterSaveAppletFileData`
+- `UpdaterGetAppletList`
+- `UpdaterAddApplet`
+- `UpdaterRemoveApplet`
+- `UpdaterRetrieveApplet`
+- `UpdaterSaveAppletFileData`
 
 Transport wrappers:
 
-- `FUN_00430410` wraps `UpdaterGetAppletList` for direct USB mode `2`
-- `FUN_00430440` wraps `UpdaterGetAppletList` for alternate mode `3`
-- `FUN_00433ab0` wraps `UpdaterRetrieveApplet` for direct USB mode `2`
-- `FUN_00433ae0` wraps `UpdaterRetrieveApplet` for alternate mode `3`
+- `DirectUsbGetAppletList` wraps `UpdaterGetAppletList` for direct USB mode `2`
+- `AlternateTransportGetAppletList` wraps `UpdaterGetAppletList` for alternate mode `3`
+- `DirectUsbRetrieveApplet` wraps `UpdaterRetrieveApplet` for direct USB mode `2`
+- `AlternateTransportRetrieveApplet` wraps `UpdaterRetrieveApplet` for alternate mode `3`
 
 ## Applet List Format
 
@@ -45,15 +45,15 @@ Expected response:
 
 The app normalizes the retrieved `0x84`-byte records after retrieval:
 
-- `FUN_00484c50`
-- `FUN_00484e40`
+- `FetchRawSmartAppletListEntries`
+- `QuerySmartAppletListAdapter`
 
 Those functions swap selected big-endian dwords inside each `0x84` record before the UI uses them.
 
 The important structural conclusion is that the device-side `0x84` list entry and the first `0x84` bytes of a host `.OS3KApp` file use the same metadata layout. The same parser object is used for both:
 
-- list entry path: `FUN_00484e40` -> `FUN_004667e0` / `FUN_00466f40` -> `FUN_00476d60`
-- on-disk file path: `FUN_00476650` -> `FUN_00476d60`
+- list entry path: `QuerySmartAppletListAdapter` -> `BuildSmartAppletDetailsText` / `AppendSmartAppletStartupDetailsText` -> `ParseSmartAppletHeaderRecord`
+- on-disk file path: `ParseSmartAppletImageMetadata` -> `ParseSmartAppletHeaderRecord`
 
 Mapped shared `0x84` metadata layout:
 
@@ -80,8 +80,8 @@ Confirmed bit extraction from the packed flags dword at `0x10..0x13`:
 
 The exact user-facing meaning of those extracted values is still unresolved, and the middle field is not a simple stable boolean in later runtime code. The extraction sites are pinned:
 
-- on-disk path: `FUN_00476650`
-- in-memory metadata path: `FUN_00476a40`
+- on-disk path: `ParseSmartAppletImageMetadata`
+- in-memory metadata path: `ParseSmartAppletListEntryMetadata`
 
 Important runtime distinction:
 
@@ -98,7 +98,7 @@ Observed examples:
 
 ## Retrieve Applet From Device
 
-`UpdaterRetrieveApplet` is `FUN_00433b10`.
+`UpdaterRetrieveApplet` is the device-to-host SmartApplet binary retrieval routine.
 
 Start command:
 
@@ -126,7 +126,7 @@ Read path:
 3. loop sending `0x10`
 4. expect `0x4d`
 5. `read_data1(...)` drains the payload bytes
-6. host writes those bytes to the destination file with `FUN_004383d0`
+6. host writes those bytes to the destination file with `WriteRetrievedBytesToSink`
 7. verify the 16-bit checksum for each chunk
 
 The minimal direct USB session is therefore:
@@ -138,7 +138,7 @@ The minimal direct USB session is therefore:
 
 ## Send Applet To Device
 
-`UpdaterAddApplet` is `FUN_004309d0`.
+`UpdaterAddApplet` is the host-to-device SmartApplet install routine.
 
 It first reads the first `0x84` bytes of the host `.OS3KApp` file and derives the add-applet start fields from that header.
 
@@ -203,17 +203,17 @@ Send path:
 
 ## Save Retrieved Applet File Data
 
-`UpdaterSaveAppletFileData` is `FUN_00435b00`.
+`UpdaterSaveAppletFileData` is the device-to-host saver for an applet's associated file data.
 
 This is the device-to-host bulk saver for an applet’s associated file data:
 
-1. `FUN_00435990` discovers the total payload size and record count
+1. `UpdaterGetAppletUsedFileSpace` discovers the total payload size and record count
 2. host writes a 4-byte total-size prefix
 3. for each file slot:
-4. `FUN_00436200` retrieves the raw `0x28` file-attribute record
+4. `UpdaterGetRawFileAttributes` retrieves the raw `0x28` file-attribute record
 5. host writes the `0x28` record
 6. file length is decoded from the attributes
-7. `FUN_00434100` retrieves the actual file bytes
+7. `UpdaterRetrieveAppletFileData` retrieves the actual file bytes
 
 This mirrors the AlphaWord file-data flow, but under the currently selected SmartApplet id.
 
@@ -223,9 +223,9 @@ Header offset `0x0c` is not another size field. It is an offset inside the `.OS3
 
 Confirmed from the on-disk parser path:
 
-- `FUN_00476650` reads header offset `0x0c`
-- if nonzero, `FUN_00478840` walks a table at that file offset
-- `FUN_00477e90` resolves strings from individual table records by a `(group, key)` pair
+- `ParseSmartAppletImageMetadata` reads header offset `0x0c`
+- if nonzero, `ParseSmartAppletInfoTableAtOffset` walks a table at that file offset
+- `ResolveSmartAppletInfoString` resolves strings from individual table records by a `(group, key)` pair
 
 The record format is:
 
@@ -246,7 +246,7 @@ The app also treats `group` as a typed record family when building the settings/
 - `0x0105`: inline text record with alternate handling flag
 - `0x0106`: inline text record used as a display-only string
 
-Those are instantiated by `FUN_004774b0` / `FUN_00477ac0` after `FUN_00477020` walks the info table.
+Those are instantiated by `ParseSmartAppletSettingRecord` / `ParseSmartAppletTextRecord` after `WalkSmartAppletInfoTable` walks the info table.
 
 Concrete AlphaWord Plus records at file offset `0x19fa4`:
 
@@ -266,71 +266,71 @@ Concrete KeyWords Wireless records at file offset `0x2d100`:
 
 ### Retrieve Applet List / Device Inventory
 
-- `FUN_004665f0`
-- `FUN_00467980`
-- `FUN_00484e40`
-- `FUN_00430410` or `FUN_00430440`
-- `FUN_00430470`
+- `RefreshSmartAppletDeviceView`
+- `LoadSmartAppletInventoryIntoUi`
+- `QuerySmartAppletListAdapter`
+- `DirectUsbGetAppletList` or `AlternateTransportGetAppletList`
+- `UpdaterGetAppletList`
 
 Meaning:
 
-- `FUN_004665f0` refreshes the SmartApplet/device view
-- `FUN_00467980` triggers the list retrieval and hands the normalized `0x84` entries to the UI layer
-- `FUN_00484e40` is the concrete applet-list adapter over `UpdaterGetAppletList`
+- `RefreshSmartAppletDeviceView` refreshes the SmartApplet/device view
+- `LoadSmartAppletInventoryIntoUi` triggers the list retrieval and hands the normalized `0x84` entries to the UI layer
+- `QuerySmartAppletListAdapter` is the concrete applet-list adapter over `UpdaterGetAppletList`
 
 ### Install SmartApplet On Device
 
-- `FUN_0041eb80`
-- `FUN_00427270`
-- `FUN_00427810`
-- `FUN_00472ee0`
-- `FUN_00484160` or `FUN_00485690`
-- `FUN_00430970` or `FUN_004309a0`
-- `FUN_004309d0`
+- `InstallQueuedSmartAppletsToDevice`
+- `InstallSmartAppletToTargets`
+- `InstallSmartAppletWithRetry`
+- `InstallOs3kOsImage`
+- `InstallSmartAppletFromPath` or `InstallPreparedSmartApplet`
+- `DirectUsbAddApplet` or `AlternateTransportAddApplet`
+- `UpdaterAddApplet`
 
 Meaning:
 
-- `FUN_00430970` is the direct USB wrapper into `UpdaterAddApplet`
-- `FUN_004309a0` is the alternate mode `4` wrapper into `UpdaterAddApplet`
-- `FUN_00484160` and `FUN_00485690` open the host SmartApplet file and dispatch it to those wrappers
-- `FUN_0041afd0` is now pinned as the top-level send/install workflow controller that eventually reaches `FUN_0041eb80` and the SmartApplet install helpers
+- `DirectUsbAddApplet` is the direct USB wrapper into `UpdaterAddApplet`
+- `AlternateTransportAddApplet` is the alternate mode `4` wrapper into `UpdaterAddApplet`
+- `InstallSmartAppletFromPath` and `InstallPreparedSmartApplet` open the host SmartApplet file and dispatch it to those wrappers
+- `InstallSelectedSmartApplets` is now pinned as the top-level send/install workflow controller that eventually reaches `InstallQueuedSmartAppletsToDevice` and the SmartApplet install helpers
 - the higher-level controller entry points above are the install-side callers currently confirmed by xrefs
 
 ### Retrieve SmartApplet To Host
 
-- `FUN_00423df0`
-- `FUN_004286c0`
-- `FUN_004851f0`
-- `FUN_00433ab0` or `FUN_00433ae0`
-- `FUN_00433b10`
+- `RetrieveMissingSmartAppletsToWorkspace`
+- `RetrieveOneSelectedSmartApplet`
+- `RetrieveSmartAppletToHostFile`
+- `DirectUsbRetrieveApplet` or `AlternateTransportRetrieveApplet`
+- `UpdaterRetrieveApplet`
 
 and also:
 
-- `FUN_004191d0`
-- `FUN_004851f0`
-- `FUN_00433ab0` or `FUN_00433ae0`
-- `FUN_00433b10`
+- `RetrieveChosenSmartAppletsToHost`
+- `RetrieveSmartAppletToHostFile`
+- `DirectUsbRetrieveApplet` or `AlternateTransportRetrieveApplet`
+- `UpdaterRetrieveApplet`
 
 Meaning:
 
-- `FUN_004851f0` opens a host-side output file and retrieves one SmartApplet binary into it
-- `FUN_004286c0` retrieves one selected SmartApplet entry through that helper
-- `FUN_00423df0` iterates the SmartApplet send-list entries and retrieves missing applets to the host workspace
-- `FUN_004191d0` is another controller path that can retrieve selected applets to host storage
-- `FUN_00417d30` is the higher-level retrieval controller that sets up the progress dialog, iterates selected devices, then calls `FUN_004191d0`
+- `RetrieveSmartAppletToHostFile` opens a host-side output file and retrieves one SmartApplet binary into it
+- `RetrieveOneSelectedSmartApplet` retrieves one selected SmartApplet entry through that helper
+- `RetrieveMissingSmartAppletsToWorkspace` iterates the SmartApplet send-list entries and retrieves missing applets to the host workspace
+- `RetrieveChosenSmartAppletsToHost` is another controller path that can retrieve selected applets to host storage
+- `RetrieveSelectedSmartApplets` is the higher-level retrieval controller that sets up the progress dialog, iterates selected devices, then calls `RetrieveChosenSmartAppletsToHost`
 
 ### Refresh SmartApplet Info / Details View
 
-- `FUN_004662a0`
-- `FUN_004665f0`
-- `FUN_00467980`
-- `FUN_00484e40`
+- `RefreshSmartAppletDetailsPane`
+- `RefreshSmartAppletDeviceView`
+- `LoadSmartAppletInventoryIntoUi`
+- `QuerySmartAppletListAdapter`
 
 Meaning:
 
-- `FUN_004662a0` is the controller that clears and rebuilds the SmartApplet info/details pane
-- it calls `FUN_004665f0`, which refreshes the applet inventory and injects AlphaWord-specific preview text when applet id `0xa000` is present
-- `FUN_00467980` and `FUN_00484e40` provide the normalized `0x84` SmartApplet records that feed that view
+- `RefreshSmartAppletDetailsPane` is the controller that clears and rebuilds the SmartApplet info/details pane
+- it calls `RefreshSmartAppletDeviceView`, which refreshes the applet inventory and injects AlphaWord-specific preview text when applet id `0xa000` is present
+- `LoadSmartAppletInventoryIntoUi` and `QuerySmartAppletListAdapter` provide the normalized `0x84` SmartApplet records that feed that view
 
 ## Resource Strings And Popup Menus
 
@@ -344,9 +344,9 @@ Confirmed STRINGTABLE entries from resource block `3860`:
 
 Those strings are consumed by the AlphaWord-specific SmartApplet settings code:
 
-- `FUN_004774b0` compares generated SmartApplet setting labels against `0xf138` and `0xf139` when applet id `0xa000` is active
-- `FUN_004867d0` uses `0xf138` to find and update the current AlphaWord maximum-size row
-- `FUN_00487440` uses `0xf138` to validate the edited numeric value against the row-local min/max bounds at offsets `0x48` and `0x4c`
+- `ParseSmartAppletSettingRecord` compares generated SmartApplet setting labels against `0xf138` and `0xf139` when applet id `0xa000` is active
+- `UpdateAlphaWordMaxFileSizeSettingRow` uses `0xf138` to find and update the current AlphaWord maximum-size row
+- `ValidateAlphaWordMaxFileSizeEdit` uses `0xf138` to validate the edited numeric value against the row-local min/max bounds at offsets `0x48` and `0x4c`
 
 That closes the AlphaWord SmartApplet settings mapping: the SmartApplet info-table produces editable rows, and the AlphaWord-specialized UI logic recognizes two of those rows by their resource labels instead of by numeric record key alone.
 

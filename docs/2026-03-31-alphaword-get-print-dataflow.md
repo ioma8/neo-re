@@ -43,14 +43,14 @@ The shared transport wrappers inside `neomanager.exe` dispatch to `AsUSBComm*` w
 
 Relevant functions:
 
-- `FUN_00430050`: generic transport write loop
-- `FUN_00430180`: generic transport read loop
+- `TransportWriteExact`: generic transport write loop
+- `TransportReadExact`: generic transport read loop
 
 `AsUSBCommReadData` stages inbound traffic in 8-byte chunks, so updater responses above this layer are assembled by repeated small reads rather than one raw device transfer.
 
 Before the updater commands start, the direct USB path also uses the switch protocol:
 
-- `FUN_00438200` and `FUN_00438290` both do:
+- `DirectUsbEnterUpdaterApplet` and `AlternateTransportEnterUpdaterApplet` both do:
   - `AsUSBCommResetConnection()`
   - `AsUSBCommSwitchToApplet(0)`
   - `AsUSBCommIsAlphaSmartPresent()`
@@ -62,7 +62,7 @@ The offline PoC now models this bootstrap sequence at:
 
 ## Generic Updater Command Frame
 
-`FUN_004374b0` builds every updater command packet.
+`BuildUpdaterCommandPacket` builds every updater command packet.
 
 Ghidra decompilation shows the exact on-wire format:
 
@@ -85,18 +85,18 @@ This framing is now modeled in the PoC at:
 
 ### Raw file attributes
 
-`FUN_00436200` is the raw attribute retrieval routine.
+`UpdaterGetRawFileAttributes` is the raw attribute retrieval routine.
 
 Behavior confirmed by Ghidra:
 
-- calls `FUN_004377c0(..., timeout=600, command=0x13, argument=file_slot & 0xff, trailing=applet_id, ...)`
+- calls `UpdaterSendCommandAndGetResponse(..., timeout=600, command=0x13, argument=file_slot & 0xff, trailing=applet_id, ...)`
 - expects first response byte `0x90` for the simple success case
 - also handles response byte `0x5a` as the data-bearing attributes path
 - reads the returned attribute bytes with `read_data1`
 - verifies the returned 16-bit checksum against the byte sum of the attribute payload
 - caller-provided receive storage is `0x28` bytes
-- `FUN_00436080` endian-swaps two 32-bit words from offsets `0x18` and `0x1c`
-- `FUN_00435b00` treats the big-endian word at offset `0x1c` as the file content length
+- `NormalizeAlphaWordAttributeWords` endian-swaps two 32-bit words from offsets `0x18` and `0x1c`
+- `UpdaterSaveAppletFileData` treats the big-endian word at offset `0x1c` as the file content length
 
 The most concrete attribute command packet currently confirmed is:
 
@@ -110,11 +110,11 @@ The offline PoC models this as `build_raw_file_attributes_command`.
 
 ### File content retrieval
 
-`FUN_00434100` retrieves the actual file contents.
+`UpdaterRetrieveAppletFileData` retrieves the actual file contents.
 
 Behavior confirmed by Ghidra:
 
-- calls `FUN_004377c0(..., timeout=10000, command=0x12 or 0x1c, argument=(requested_length << 8) | file_slot, trailing=applet_id, ...)`
+- calls `UpdaterSendCommandAndGetResponse(..., timeout=10000, command=0x12 or 0x1c, argument=(requested_length << 8) | file_slot, trailing=applet_id, ...)`
 - `param_7` selects command `0x12` vs `0x1c`
 - expects first response byte `0x53` (`'S'`)
 - the initial response `arg32` field is the total payload length NeoManager expects to receive
@@ -123,7 +123,7 @@ Behavior confirmed by Ghidra:
 - each chunk response `arg32` field is the chunk byte count
 - each chunk response trailing field is the expected 16-bit checksum of the chunk payload
 - chunk data is read with `read_data1`
-- chunk bytes are written to the destination sink with `FUN_004383d0`
+- chunk bytes are written to the destination sink with `WriteRetrievedBytesToSink`
 - the byte-sum checksum of each chunk must equal that chunk response’s 16-bit trailing field
 
 The primary retrieve command packet is therefore:
@@ -169,7 +169,7 @@ The PoC also models the 8-byte response headers and chunk reconstruction at:
 
 NeoManager does not hardcode only the AlphaWord applet id at the transport layer. It also walks the applet list.
 
-`FUN_00430470`:
+`UpdaterGetAppletList`:
 
 - sends updater command `0x04`
 - uses `arg32` as the page offset
@@ -186,12 +186,12 @@ This matches the current PoC bootstrap sequence:
 
 ## UI-Facing Retrieval Wrappers
 
-Two small wrappers select transport context before entering `FUN_00434100`:
+Two small wrappers select transport context before entering `UpdaterRetrieveAppletFileData`:
 
-- `FUN_00434080`
-- `FUN_004340c0`
+- `DirectUsbRetrieveAppletFileData`
+- `AlternateTransportRetrieveAppletFileData`
 
-These do not change the updater opcode. They prepare the transport context passed as `param_1` to `FUN_00434100`:
+These do not change the updater opcode. They prepare the transport context passed as `param_1` to `UpdaterRetrieveAppletFileData`:
 
 - mode `2`: direct USB / single-device path
 - mode `3`: alternate port-aware context used by the multi-device path
@@ -204,14 +204,14 @@ Two UI-facing helpers sit on top of the raw retrieval routines.
 
 ### Full text retrieval helper
 
-`FUN_00483bf0`
+`RetrieveFullAlphaWordText`
 
 Behavior:
 
-- opens a temporary output sink through `FUN_00485af0`
-- for direct USB mode, calls `FUN_00434080(..., max_len=0x80000, ...)`
-- for alternate transport mode, calls `FUN_004340c0(..., max_len=0x80000, ...)`
-- then passes the resulting sink to `FUN_00485c50`
+- opens a temporary output sink through `OpenTemporaryRetrievedTextFile`
+- for direct USB mode, calls `DirectUsbRetrieveAppletFileData(..., max_len=0x80000, ...)`
+- for alternate transport mode, calls `AlternateTransportRetrieveAppletFileData(..., max_len=0x80000, ...)`
+- then passes the resulting sink to `LoadRetrievedTextFileAsCString`
 - returns a `CString` built from the retrieved content
 
 Interpretation:
@@ -221,14 +221,14 @@ Interpretation:
 
 ### Preview / short printable text helper
 
-`FUN_00483eb0`
+`RetrieveAlphaWordPreviewText`
 
 Behavior:
 
-- opens a temporary output sink through `FUN_00485af0`
-- for direct USB mode, calls `FUN_00434080(..., max_len=0xb4, ...)`
-- for alternate transport mode, calls `FUN_004340c0(..., max_len=0xb4, ...)`
-- then converts the retrieved data through `FUN_00485c50`
+- opens a temporary output sink through `OpenTemporaryRetrievedTextFile`
+- for direct USB mode, calls `DirectUsbRetrieveAppletFileData(..., max_len=0xb4, ...)`
+- for alternate transport mode, calls `AlternateTransportRetrieveAppletFileData(..., max_len=0xb4, ...)`
+- then converts the retrieved data through `LoadRetrievedTextFileAsCString`
 - replaces CRLF with spaces
 - truncates the resulting string to `0xb3` bytes if needed
 
@@ -243,7 +243,7 @@ The exact resource-to-handler binding for the literal UI string is still unresol
 
 `FUN_00406920`:
 
-- repeatedly calls `FUN_00483eb0(..., applet_id=0xa000, ...)`
+- repeatedly calls `RetrieveAlphaWordPreviewText(..., applet_id=0xa000, ...)`
 - iterates through AlphaWord file slots
 - stores the returned short text and size back into local cache objects
 - is consistent with preview/list population for the `Get/Print AlphaWord Files` view
@@ -251,19 +251,19 @@ The exact resource-to-handler binding for the literal UI string is still unresol
 `FUN_00407e20` and `FUN_00408160`:
 
 - iterate through 8 AlphaWord file slots
-- call `FUN_00483bf0(..., applet_id=0xa000, ...)` for full retrieval
-- then call `FUN_00483b40(..., applet_id=0xa000, ...)` to obtain associated metadata/text used by the local cache
+- call `RetrieveFullAlphaWordText(..., applet_id=0xa000, ...)` for full retrieval
+- then call `GetAppletFileNameForSlot(..., applet_id=0xa000, ...)` to obtain associated metadata/text used by the local cache
 - update per-slot status in local storage after each retrieval
 
 This is enough to say the app path above the transport is not a single monolithic call. It is:
 
-1. preview-oriented slot enumeration using `FUN_00483eb0`
-2. full slot retrieval using `FUN_00483bf0`
+1. preview-oriented slot enumeration using `RetrieveAlphaWordPreviewText`
+2. full slot retrieval using `RetrieveFullAlphaWordText`
 3. cache/status updates for each of the 8 AlphaWord slots
 
-`FUN_004674b0` adds one more confirmed layer above the single-slot preview helper:
+`ScanAlphaWordPreviewSlots` adds one more confirmed layer above the single-slot preview helper:
 
-- calls `FUN_00483eb0(..., applet_id=0xa000, file_slot=1..8, ...)` in a loop
+- calls `RetrieveAlphaWordPreviewText(..., applet_id=0xa000, file_slot=1..8, ...)` in a loop
 - scans all 8 AlphaWord slots for preview content
 - treats preview text longer than `0x32` bytes specially for UI formatting
 - is consistent with the higher-level dialog/page that assembles the printable selection summary
@@ -274,7 +274,7 @@ The PoC now models this app behavior as a session-level 8-slot scan at:
 
 ## Text Formatting and Print-Side Handoff
 
-`FUN_00485c50` is the local formatter / file-backed text loader that runs after retrieval.
+`LoadRetrievedTextFileAsCString` is the local formatter / file-backed text loader that runs after retrieval.
 
 Key observed behavior:
 
@@ -287,7 +287,7 @@ Key observed behavior:
 Interpretation:
 
 - the updater layer retrieves raw AlphaWord bytes into a local sink
-- `FUN_00485c50` re-reads that local file and turns it into printable Windows text
+- `LoadRetrievedTextFileAsCString` re-reads that local file and turns it into printable Windows text
 - this is the seam where "retrieve from device" ends and "prepare for display/printing" begins
 
 ## End-to-End Direct Dataflow
@@ -298,17 +298,17 @@ For the direct USB case, the current best reconstruction is:
 2. NeoManager identifies the direct NEO transport and uses the `AsUSBComm*` path.
 3. The direct USB setup path resets the transport and issues `AsUSBCommSwitchToApplet(0)` to enter updater-side mode.
 4. The updater layer issues command `0x04` to enumerate applets and confirms the AlphaWord applet context.
-5. AlphaWord file metadata is fetched through `FUN_00436200` using opcode `0x13`, `argument=file_slot`, and `trailing=0xa000`.
-6. Full AlphaWord file contents are fetched through `FUN_00434100` using opcode `0x12` or `0x1c`, `argument=(requested_length << 8) | file_slot`, and `trailing=0xa000`.
+5. AlphaWord file metadata is fetched through `UpdaterGetRawFileAttributes` using opcode `0x13`, `argument=file_slot`, and `trailing=0xa000`.
+6. Full AlphaWord file contents are fetched through `UpdaterRetrieveAppletFileData` using opcode `0x12` or `0x1c`, `argument=(requested_length << 8) | file_slot`, and `trailing=0xa000`.
 7. The device returns an initial `0x53` response containing the total byte count.
 8. NeoManager repeatedly issues command `0x10`, receives `0x4d` chunk headers, reads each chunk body, and verifies each chunk checksum.
 9. Retrieved bytes are written to a local temporary sink.
-10. `FUN_00485c50` opens the temporary file, converts it into `CString` text, normalizes line endings, and returns printable text.
+10. `LoadRetrievedTextFileAsCString` opens the temporary file, converts it into `CString` text, normalizes line endings, and returns printable text.
 11. The UI uses:
-   - `FUN_00483eb0` for short preview text capped at `0xb4`
-   - `FUN_00483bf0` for full retrieval capped at `0x80000`
+   - `RetrieveAlphaWordPreviewText` for short preview text capped at `0xb4`
+   - `RetrieveFullAlphaWordText` for full retrieval capped at `0x80000`
 12. Higher-level UI code loops over all 8 AlphaWord slots:
-   - preview/session scan callers include `FUN_00406920` and `FUN_004674b0`
+   - preview/session scan callers include `FUN_00406920` and `ScanAlphaWordPreviewSlots`
    - full retrieval callers include `FUN_00407e20` and `FUN_00408160`
 
 ## Protocol Facts Confirmed So Far
@@ -344,5 +344,5 @@ For the direct USB case, the current best reconstruction is:
 - the exact semantics of the attribute word at offset `0x18`
 - the remaining internal layout of the raw AlphaWord attribute block returned by opcode `0x13`
 - the exact UI function that binds the literal `Get/Print AlphaWord Files` label to these retrieval helpers
-- the exact purpose of `FUN_00483b40` in the full-retrieval caller chain
+- the exact purpose of `GetAppletFileNameForSlot` in the full-retrieval caller chain
 - whether print uses the full retrieval path in all cases, or can sometimes reuse the preview path for very short records
