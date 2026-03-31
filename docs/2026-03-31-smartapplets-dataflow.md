@@ -110,6 +110,32 @@ What is confirmed:
 - finalize response must be `0x48`
 - payload chunk size is capped at `0x400`
 
+The add-begin fields are now mapped precisely from the first `0x84` bytes of the `.OS3KApp` file:
+
+- header offset `0x00`: big-endian magic `0xc0ffeead`
+- header offset `0x04`: big-endian total SmartApplet file size
+- header offset `0x08`: big-endian base memory size
+- header offset `0x80`: big-endian extra memory size
+- combined memory size used by `0x06` is `header[0x08:0x0c] + header[0x80:0x84]`
+- the `0x06` `arg32` packs:
+  - low 24 bits = total file size
+  - high 8 bits = bits `16..23` of the combined memory size
+- the `0x06` trailing field is the low 16 bits of the combined memory size
+
+Equivalent expression from the recovered code path:
+
+```text
+combined_memory = be32(header[0x08:0x0c]) + be32(header[0x80:0x84])
+arg32 = be32(header[0x04:0x08]) | ((combined_memory & 0xffff0000) << 8)
+trailing = combined_memory & 0xffff
+```
+
+For the sampled files extracted from the installer:
+
+- `calculator.os3kapp`: `file_size=0x00005fe0`, `combined_memory=0x0000056c`, so `0x06` starts with `arg32=0x00005fe0`, `trailing=0x056c`
+- `alphawordplus.os3kapp`: `file_size=0x0001a0bc`, `combined_memory=0x00002d90`, so `0x06` starts with `arg32=0x0001a0bc`, `trailing=0x2d90`
+- `keywordswireless.os3kapp`: `file_size=0x0002d350`, `combined_memory=0x00001d60`, so `0x06` starts with `arg32=0x0002d350`, `trailing=0x1d60`
+
 Send path:
 
 1. open the SmartApplet file on disk
@@ -211,7 +237,10 @@ Covered operations:
 - list applets command construction
 - retrieve-applet command construction
 - direct USB retrieve session planning
+- SmartApplet header parsing
+- `0x06` add-begin field derivation from a real `.OS3KApp` header
 - add-applet begin command construction
+- direct USB add session planning directly from a full SmartApplet image
 - direct USB add session planning with:
   - `0x06`
   - `0x02`
@@ -224,10 +253,13 @@ Useful commands:
 ```bash
 uv run --project poc/neotools python -m neotools smartapplet-retrieve-plan 0xa123
 uv run --project poc/neotools python -m neotools smartapplet-add-plan 0x12345678 0x9abc "41 42 43 44 45"
+uv run --project poc/neotools python -m neotools smartapplet-header "<0x84-byte header hex>"
+uv run --project poc/neotools python -m neotools smartapplet-add-plan-from-image "<full .OS3KApp hex>"
 ```
 
 ## Remaining Unknowns
 
-- the exact semantic breakdown of the `0x06` start-command argument derived from the `.OS3KApp` header
 - the exact field map for every offset inside the `0x84` SmartApplet list entry
 - the exact top-level resource binding from the SmartApplets tab strings to the controller functions above
+- the semantic meaning of header offset `0x0c` beyond it being part of the `.OS3KApp` metadata block
+- the semantic meaning of the mixed flag/version dwords at offsets `0x10` and `0x14`

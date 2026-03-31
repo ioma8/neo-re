@@ -12,7 +12,10 @@ from neotools.alphaword_session import (
 from neotools.alphaword_send import build_direct_usb_send_file_record
 from neotools.smartapplets import (
     build_direct_usb_add_applet_plan,
+    build_direct_usb_add_applet_plan_from_image,
     build_direct_usb_retrieve_applet_plan,
+    derive_add_applet_start_fields,
+    parse_smartapplet_header,
 )
 from neotools.switch_packets import build_switch_packet
 from neotools.updater_packets import build_updater_command
@@ -68,6 +71,12 @@ def main(argv: list[str] | None = None) -> int:
     smartapplet_add_parser.add_argument("start_argument")
     smartapplet_add_parser.add_argument("trailing")
     smartapplet_add_parser.add_argument("payload_hex")
+
+    smartapplet_add_from_image_parser = subparsers.add_parser("smartapplet-add-plan-from-image")
+    smartapplet_add_from_image_parser.add_argument("image_hex")
+
+    smartapplet_header_parser = subparsers.add_parser("smartapplet-header")
+    smartapplet_header_parser.add_argument("header_hex")
 
     decode_response_parser = subparsers.add_parser("decode-updater-response")
     decode_response_parser.add_argument("raw_hex")
@@ -156,6 +165,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         for step in plan:
             print(f"{step.kind}: {step.packet.hex(' ')}")
+        return 0
+
+    if args.command == "smartapplet-add-plan-from-image":
+        plan = build_direct_usb_add_applet_plan_from_image(_parse_hex_bytes(args.image_hex))
+        for step in plan:
+            print(f"{step.kind}: {step.packet.hex(' ')}")
+        return 0
+
+    if args.command == "smartapplet-header":
+        header = parse_smartapplet_header(_parse_hex_bytes(args.header_hex))
+        argument, trailing = derive_add_applet_start_fields(header)
+        print(
+            f"magic=0x{header.magic:08x} "
+            f"file_size=0x{header.file_size:08x} "
+            f"base_memory_size=0x{header.base_memory_size:08x} "
+            f"extra_memory_size=0x{header.extra_memory_size:08x} "
+            f"argument=0x{argument:08x} "
+            f"trailing=0x{trailing:04x}"
+        )
         return 0
 
     if args.command == "decode-updater-response":
