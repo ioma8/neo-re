@@ -551,6 +551,24 @@ Additional AlphaWordPlus edit-state findings:
   - it returns the same accept/cancel style modal status codes used elsewhere in AlphaWordPlus
 - `WaitForAlphaWordModalKey`
   - is the common “wait for one modal keypress before continuing” helper used by details, stats, spell-check, file-management, and settings prompts
+- `BeginAlphaWordChooserBuilder`
+  - begins an AlphaWordPlus-local chooser/menu build sequence
+- `AppendAlphaWordChooserRowText`
+  - appends one chooser row using the currently prepared display text
+- `AdvanceAlphaWordChooserRow`
+  - advances to the next chooser row, including explicit spacer rows used by help and spell-check menus
+- `HighlightAlphaWordChooserRow`
+  - marks the current chooser row as highlighted/selected before input begins
+- `BeginAlphaWordChooserInput`
+  - finalizes the chooser layout and enters chooser input mode
+- `ReadAlphaWordChooserEventCode`
+  - returns the current chooser event code such as accept, cancel, or navigation events
+- `ReadAlphaWordChooserSelectionIndex`
+  - returns the current chooser row index
+- `ReadAlphaWordChooserSelectionValue`
+  - returns the chooser row value associated with that current selection
+- `ReadAlphaWordChooserSelectionPayload`
+  - returns the chooser payload pointer/value used by the spell-check suggestion chooser
 - `QueryCurrentAlphaWordEditorSpan`
   - is still the main current-span query used by namespace-2 and the statistics flows
   - current best interpretation remains a two-part editor span descriptor
@@ -568,6 +586,97 @@ Additional AlphaWordPlus edit-state findings:
   - for a valid slot it looks up that slot handle and sums two per-slot queries
   - the fallback path does the same against a fixed default handle
   - current best interpretation is a slot-specific transfer end / capacity boundary rather than a generic current-file query
+
+Late AlphaWordPlus helper block now mapped:
+
+- `ClassifyFindReplaceCharKind`
+  - classifies a byte for the Find/Replace scanner using the local `DAT_00014b35` table
+- `ApplyFindReplaceReplacementCaseMode`
+  - rewrites replacement text to match the source token capitalization mode
+- `ShowFindReplaceSummaryPrompt`
+  - renders the summary/result prompt after a replace operation
+- `DecodeFindReplaceCaretEscapes`
+  - decodes `^t` and `^p` style escapes in the replacement field
+- `ShowFindReplaceCapacityExceededPrompt`
+  - renders the “replacement would exceed capacity” warning
+- `ShowFindReplaceNoMatchesPrompt`
+  - renders the “no matches found” warning
+- `WaitForInteractiveDialogKey`
+  - shared interactive dialog key wait loop used by selector, statistics, single-line editor, and Find/Replace prompts
+- `SetAlphaWordCurrentFileOrdinal`
+  - updates the current AlphaWord file ordinal state and refreshes the backing workspace binding
+- `LoadAlphaWordFileOrdinalIntoCurrentWorkspace`
+  - host-backed helper that loads the requested file ordinal into the current workspace, creating or reusing a backing file as needed
+- `LoadAlphaWordSlotIntoCurrentWorkspace`
+  - higher-level slot workflow that optionally prompts, then loads a slot’s file into the current workspace
+- `ConfirmCurrentAlphaWordFileAvailable`
+  - returns whether a current AlphaWord file is available after applying the standard confirmation/prompt flow
+- `RunConfirmCancelDialog`
+  - shared confirm/cancel wrapped-text dialog wrapper
+- `SelectAlphaWordSlotWithCurrentFilePrompt`
+  - switches slots, optionally prompting to preserve or load the current file first
+- `ReadNextSectionLineIndexIfPresent`
+  - returns the next line index only if the preview stream yields another line
+- `ReadNextSectionLineIndex`
+  - unconditional “next line index” helper for section preview traversal
+- `PrimeSectionPreviewCharStream`
+  - primes the character stream used by section preview scanners
+- `AdvanceTextColumnOnce`
+  - one-column wrapper used by the generic wrapped-text dialog helpers
+- `IsModalAcceptOrCancelKey`
+  - default key filter for wrapped dialogs that accepts only OK/cancel keys
+- `ShowFindReplaceScanBanner`
+  - renders the standard Find/Replace scan banner before range-wide operations
+- `BeginWrappedTextRow`
+  - wrapped-text dialog row setup helper
+- `GetWrappedTextCursorPosition`
+  - returns the current wrapped-text cursor position
+- `RenderWrappedTextBlock`
+  - renders a wrapped block of text starting at the current offset
+- `RunPagedWrappedTextDialog`
+  - generic paged wrapped-text dialog engine used by help and confirmation flows
+- `FindPreviousWrappedPageStart`
+  - computes the starting offset of the previous wrapped-text page
+- `FindNextWrappedLineBreakFrom`
+  - finds the next wrapped line break from a starting offset
+- `IsWrappedTextBreakChar`
+  - classifies wrapped-text break characters
+- `FindWrappedLineBreak`
+  - core wrapped-text line-breaking helper
+- `AdvanceTextColumns`
+  - advances multiple columns in a row
+- `AcceptAnyDialogKey`
+  - permissive wrapped-dialog key filter
+- `HandleSingleLineTextFieldInput`
+  - core keystroke handler for the inline single-line text editor
+- `RunFindReplaceToggleFieldEditor`
+  - editor for the boolean Find/Replace option rows
+- `ShowAlphaWordConfirmFooterPrompt`
+  - shared footer prompt used by confirmation screens
+- `ShowSpellCheckCompletionBanner`
+  - renders the spell-check completion banner for selection vs full-file runs
+- `InitializeSpellCheckSessionState`
+  - initializes selection bounds and ignore-list state for a spell-check run
+- `FinalizeSpellCheckSessionState`
+  - tears down that spell-check session state
+- `IsSpellCheckCandidateWithinSessionRange`
+  - range gate for the active spell-check target
+- `PromptIgnoreAllRemainingSpellCheckMatches`
+  - prompts to ignore all remaining occurrences of the current misspelling
+- `CountRemainingSpellCheckMatches`
+  - counts remaining occurrences of the current misspelling
+- `AppendSpellCheckIgnoreToken`
+  - appends a token to the per-session ignore list
+- `IsSpellCheckTokenIgnored`
+  - checks the current token against that ignore list
+- `CompareSpellCheckToken`
+  - token comparison helper with optional case-folding
+- `ApplySpellCheckReplacementAcrossSessionRange`
+  - applies a replacement across the active spell-check session range
+- `InitializeAlphaWordAdvancedWorkflowState`
+  - conservative name: initializes a larger late-stage AlphaWordPlus workflow state block and dispatches into a jump table
+- `RunAlphaWordSingleValuePrompt`
+  - conservative name: runs a labeled single-value prompt built on the single-line text editor
 
 Helpers intentionally left unnamed for now:
 
