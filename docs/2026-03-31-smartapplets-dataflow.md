@@ -279,6 +279,18 @@ Evidence for those names:
 - `RunAlphaWordChooserDialog` and several other AlphaWordPlus chooser loops use the stable `0xa1f8 -> row text helpers -> 0xa1fc -> 0xa200 -> optional 0xa204 -> 0xa208 -> 0xa20c/0xa210/0xa214` sequence
 - `CountNewlineDrivenRowAdvances` in AlphaWordPlus scans newline-delimited text and calls `0xa1fc`; the nonzero return path acts like a stop/overflow condition, which is why `0xa1fc` is now treated as a row-advance helper rather than an object resolver
 
+Shared AlphaWordPlus-local text rendering helpers layered on top of those runtime services:
+
+- `AdvanceTextRow`
+  - advances the text output position by one row
+  - confirmed by `ShowPleaseWaitBanner`, which calls it three times before drawing the banner string
+- `ResetTextColumn`
+  - resets the horizontal text position to the line or field start
+  - confirmed by statistics/details renderers and by `RedrawSingleLineTextField`, where it brackets field redraw work
+- `DrawPendingText`
+  - emits the currently prepared string payload to the screen
+  - confirmed by the stable pattern `LookupAlphaWordPlusString(...) -> DrawPendingText()`
+
 Recovered call shapes from raw 68k in `RunCalculatorFunctionMenu`:
 
 - `0xa000`: no explicit stack arguments
@@ -516,6 +528,12 @@ Additional AlphaWordPlus edit-state findings:
 - `QueryCurrentAlphaWordTransferCursor`
   - is distinct from the editor span helper and is reused heavily by spell-check, find/replace, and stream export paths
   - current best interpretation remains a transfer/export cursor or offset, not the whole file size
+- `LoadCurrentAlphaWordTransferState`
+  - is called before querying `QueryCurrentAlphaWordTransferCursor` and `QueryCurrentAlphaWordTransferExtent`
+  - current best interpretation is a host-backed load/refresh of the current file transfer state before those values are read
+- `SyncCurrentAlphaWordFileState`
+  - is called after markup normalization, ROM test overwrite writes, namespace-1 append writes, and namespace-2 span validation
+  - current best interpretation is a host-backed sync/flush of the current file state after mutations or before span-sensitive queries
 - `QueryAlphaWordSlotTransferEnd`
   - is slot-aware in raw disassembly
   - for a valid slot it looks up that slot handle and sums two per-slot queries
