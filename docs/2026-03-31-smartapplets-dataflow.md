@@ -290,6 +290,9 @@ Shared AlphaWordPlus-local text rendering helpers layered on top of those runtim
 - `DrawPendingText`
   - emits the currently prepared string payload to the screen
   - confirmed by the stable pattern `LookupAlphaWordPlusString(...) -> DrawPendingText()`
+- `AdvanceTextColumn`
+  - advances the text output position by one column or blank cell
+  - confirmed by menu/highlight renderers that call it repeatedly to offset the active choice marker, and by prompt renderers that use it as left/right padding around drawn text
 
 Recovered call shapes from raw 68k in `RunCalculatorFunctionMenu`:
 
