@@ -454,6 +454,43 @@ Additional AlphaWordPlus-local helpers that are now clear enough to name:
   - rewrites or strips recognized markup constructs
   - normalizes LF/CRLF into the applet's expected CR-oriented line layout
   - expands bracket-style markup shorthands into longer inline sequences
+- `ShowAlphaWordHelpTopicsMenu`
+  - displays the topic chooser headed by `Select help topic:           (esc=exit)`
+  - the visible topics are `Features`, `Settings/Status`, `Navigating`, `Editing`, `International`, and `Symbols/Greek`
+  - after selection it opens the corresponding long-form help text through the standard modal text viewer path
+- `PromptOverwriteCurrentFileWithRomTestFile`
+  - displays the `Are you sure you want to overwrite this file with the ROM test file?` prompt
+  - if accepted it performs a fixed `0x100`-iteration reset/write loop through the lower AlphaWord file primitives
+- `RunAlphaWordSectionSeparatorSettings`
+  - controls the per-file section-break mode stored in the AlphaWord workspace state
+  - the UI strings show this is specifically the `Change section separator from ... to ... ? (y/n)` workflow
+  - the current mode is a count-like blank-line separator setting rather than a generic boolean
+  - `SetDefaultSectionSeparatorMode` seeds that mode byte to `1` during AlphaWordPlus-local initialization
+  - `BuildVisibleSectionPreviewWindow`, `ShiftSectionPreviewWindowBackward`, `ShiftSectionPreviewWindowForward`, `FindPreviousSectionBreak`, `FindNextSectionBreak`, `ReadSectionPreviewLine`, and `DecodeSectionSeparatorHotkey` are the local helper stack behind that screen
+- `ShowOpenFileCharacterTotals`
+  - is the separate open-files aggregate screen headed by `Characters in open files (1000s)`
+  - it is distinct from `ShowOpenAlphaWordFilesList`, which only prints the open-file slot list
+- `SelectAlphaWordSlotWorkspace`
+  - validates slot numbers `1..8`
+  - switches the active AlphaWord slot when the requested slot is not already current
+  - returns the per-slot workspace base used by the local helper stack
+- `GetAlphaWordLineCountForSlot`
+  - selects the requested slot workspace and returns its current line-count metric
+- `IsValidAlphaWordSlotNumber`
+  - is the narrow slot validator used before workspace switching
+- `RunAlphaWordFileStatisticsWorkflow`
+  - drives the summary/details UI reached from the AlphaWord file statistics path
+  - `RenderAlphaWordFileSummaryScreen` renders the first page
+  - `ShowAlphaWordFileStatisticsDialog` renders the expanded statistics/details page
+  - `DecodeAlphaWordModalKey`, `NormalizeFileStatsDialogKey`, and `WaitForNormalizedFileStatsKey` normalize the chooser/dialog key loop around that workflow
+- `RunFindReplaceWorkflow`
+  - is the AlphaWordPlus-local Find/Replace controller
+  - `ShowFindReplaceDialog` presents the multi-field `Find:` / `Replace with:` form
+  - `InitializeFindReplaceFieldBuffers` seeds the editable field descriptors
+  - `AdvanceFindReplaceDialogFieldFocus` handles tab/arrow focus movement between those fields
+  - `ExecuteFindReplaceScan` performs the actual scan/update pass
+  - `ConfirmFindReplaceOperation` is the prompt path for replace-all / capacity checks
+  - `SetFindReplaceSelectionBounds` restores or updates the current selection bounds after the operation
 
 The most useful clarification from the recent AlphaWordPlus pass is that the `0xa364/0xa36c/0xa388` family is shared and context-sensitive:
 
