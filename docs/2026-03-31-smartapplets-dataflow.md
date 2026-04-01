@@ -319,8 +319,10 @@ Current prototype table encoded in the PoC:
 - `0xa1f8` `begin_chooser_row_builder`: `stack_argument_count = 0`, no return value used
 - `0xa1fc` `advance_current_output_row`: `stack_argument_count = 2`, return value used as a row-advance success or stop/overflow result
 - `0xa25c` `yield_until_event`: `stack_argument_count = 0`, no return value used
-- `0xa36c` `shared_runtime_a36c`: `stack_argument_count = 0`, scalar/state return; heavily used by AlphaWordPlus gatekeeping paths
+- `0xa364` `query_active_service_available`: `stack_argument_count = 0`, scalar/state return; used as a feature-availability query before beamer, wireless-transfer, and spell-check flows
+- `0xa36c` `query_active_service_status`: `stack_argument_count = 0`, scalar/state return; used after feature-specific setup and best understood as a current-service status/session query rather than a single feature-specific boolean
 - `0xa368` `shared_runtime_a368`: shared A3xx helper, still unresolved
+- `0xa388` `query_active_service_disabled_state`: `stack_argument_count = 0`, scalar/state return; in AlphaWordPlus spell-check toggles, zero means enabled and nonzero means turned off
 - `0xa38c` `shared_runtime_a38c`: shared A3xx helper, still unresolved
 - `0xa378` `shared_runtime_a378`: shared across calculator and alphaquiz, but still unresolved beyond “common A3xx helper”
 - `0xa390` `shared_runtime_a390`: shared across calculator and alphaquiz, returns a scalar or pointer-like value from at least one explicit argument
@@ -381,7 +383,8 @@ What AlphaWordPlus closes further:
 
 - the `0xa1f8 -> 0xa1fc -> 0xa200 -> 0xa204 -> 0xa208` sequence is now best treated as a chooser/list-row builder API
 - `0xa1fc` is no longer safe to document as an object resolver; the shared map now uses the more conservative row-advance name instead
-- `0xa36c` is clearly a widely shared scalar/state query, but its exact semantic meaning is still unresolved
+- `0xa364` and `0xa36c` are shared current-service queries rather than purely spell-check helpers
+- `0xa388` is now tied more tightly to the spell-check enable/disable path
 
 Additional AlphaWordPlus-local helpers that are now clear enough to name:
 
@@ -402,6 +405,20 @@ Additional AlphaWordPlus-local helpers that are now clear enough to name:
   - rewrites or strips recognized markup constructs
   - normalizes LF/CRLF into the applet's expected CR-oriented line layout
   - expands bracket-style markup shorthands into longer inline sequences
+
+The most useful clarification from the recent AlphaWordPlus pass is that the `0xa364/0xa36c/0xa388` family is shared and context-sensitive:
+
+- beamer path:
+  - `0xa364` behaves like "is this service installed/available?"
+  - `0xa36c` behaves like "is this prepared beamer session currently usable?"
+- wireless file transfer path:
+  - the same pair drives the "not installed" vs "disabled in AlphaSmart Manager" messages
+- spell-check path:
+  - `0xa364` gates whether the Spell Check SmartApplet is present
+  - `0xa388` gates whether spell check is turned off
+  - `0xa36c` is used after spell-check setup and appears to enter or query the active spell-check session state
+
+That is why the PoC now uses generic service-oriented names for those traps instead of earlier calculator-specific placeholders.
 
 New cross-sample evidence for additional shared API surface:
 

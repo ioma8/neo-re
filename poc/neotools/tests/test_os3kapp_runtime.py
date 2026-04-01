@@ -131,7 +131,9 @@ class Os3kAppRuntimeTests(unittest.TestCase):
         chooser_event = describe_known_trap_prototype(0xA20C)
         chooser_selector = describe_known_trap_prototype(0xA210)
         chooser_value = describe_known_trap_prototype(0xA214)
+        shared_available = describe_known_trap_prototype(0xA364)
         shared_state = describe_known_trap_prototype(0xA36C)
+        shared_disabled = describe_known_trap_prototype(0xA388)
         shared = describe_known_trap_prototype(0xA390)
 
         self.assertEqual(layout.name, "set_text_row_column_width")
@@ -170,7 +172,10 @@ class Os3kAppRuntimeTests(unittest.TestCase):
         self.assertEqual(chooser_event.return_kind, "value")
         self.assertEqual(chooser_selector.name, "read_chooser_action_selector")
         self.assertEqual(chooser_value.name, "read_chooser_selection_value")
-        self.assertEqual(shared_state.name, "shared_runtime_a36c")
+        self.assertEqual(shared_available.name, "query_active_service_available")
+        self.assertEqual(shared_available.return_kind, "value")
+        self.assertEqual(shared_state.name, "query_active_service_status")
+        self.assertEqual(shared_disabled.name, "query_active_service_disabled_state")
         self.assertEqual(shared.name, "shared_runtime_a390")
 
     def test_alphaquiz_command_prototype_exposes_namespace_dispatch_contract(self) -> None:

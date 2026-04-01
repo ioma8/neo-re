@@ -103,8 +103,10 @@ KNOWN_TRAP_NAMES: dict[int, str] = {
     0xA210: "read_chooser_action_selector",
     0xA214: "read_chooser_selection_value",
     0xA25C: "yield_until_event",
+    0xA364: "query_active_service_available",
     0xA368: "shared_runtime_a368",
-    0xA36C: "shared_runtime_a36c",
+    0xA36C: "query_active_service_status",
+    0xA388: "query_active_service_disabled_state",
     0xA38C: "shared_runtime_a38c",
     0xA378: "shared_runtime_a378",
     0xA390: "shared_runtime_a390",
@@ -309,6 +311,13 @@ KNOWN_TRAP_PROTOTYPES: dict[int, Os3kAppTrapPrototype] = {
         return_kind="none",
         notes="paired with pump_ui_events in the calculator idle loop",
     ),
+    0xA364: Os3kAppTrapPrototype(
+        opcode=0xA364,
+        name="query_active_service_available",
+        stack_argument_count=0,
+        return_kind="value",
+        notes="AlphaWordPlus uses this as a feature-availability query before beamer, wireless transfer, and spell-check flows; it behaves like a current-service installed/available check rather than a feature-specific API",
+    ),
     0xA378: Os3kAppTrapPrototype(
         opcode=0xA378,
         name="shared_runtime_a378",
@@ -332,10 +341,10 @@ KNOWN_TRAP_PROTOTYPES: dict[int, Os3kAppTrapPrototype] = {
     ),
     0xA36C: Os3kAppTrapPrototype(
         opcode=0xA36C,
-        name="shared_runtime_a36c",
+        name="query_active_service_status",
         stack_argument_count=0,
         return_kind="value",
-        notes="shared scalar/state query used heavily by AlphaWordPlus gatekeeping paths; older calculator-specific naming was too strong and has been dropped",
+        notes="current-service status/session query used after feature-specific setup in AlphaWordPlus; in different callers it gates spell-check, beamer, wireless-transfer, and file-selector readiness, so the shared name remains generic on purpose",
     ),
     0xA368: Os3kAppTrapPrototype(
         opcode=0xA368,
@@ -343,6 +352,13 @@ KNOWN_TRAP_PROTOTYPES: dict[int, Os3kAppTrapPrototype] = {
         stack_argument_count=0,
         return_kind="unknown",
         notes="shared A3xx runtime helper present in calculator imports, but not semantically pinned enough for a stronger cross-sample name",
+    ),
+    0xA388: Os3kAppTrapPrototype(
+        opcode=0xA388,
+        name="query_active_service_disabled_state",
+        stack_argument_count=0,
+        return_kind="value",
+        notes="AlphaWordPlus uses this in the spell-check enable/disable flow, where zero means enabled and nonzero means turned off; it may be a generic disabled-state query for the currently selected service",
     ),
     0xA38C: Os3kAppTrapPrototype(
         opcode=0xA38C,
