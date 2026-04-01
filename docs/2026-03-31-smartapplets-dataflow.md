@@ -467,6 +467,9 @@ Additional AlphaWordPlus-local helpers that are now clear enough to name:
   - the current mode is a count-like blank-line separator setting rather than a generic boolean
   - `SetDefaultSectionSeparatorMode` seeds that mode byte to `1` during AlphaWordPlus-local initialization
   - `BuildVisibleSectionPreviewWindow`, `ShiftSectionPreviewWindowBackward`, `ShiftSectionPreviewWindowForward`, `FindPreviousSectionBreak`, `FindNextSectionBreak`, `ReadSectionPreviewLine`, and `DecodeSectionSeparatorHotkey` are the local helper stack behind that screen
+- `ShowAlphaWordFileSelectorPleaseWaitBanner`
+  - is the tiny selector-page-specific `Please wait...` helper used by `RenderAlphaWordFileSelectorPage`
+  - it is narrower than the generic `ShowPleaseWaitBanner` helper used by the section-separator settings workflow
 - `ShowOpenFileCharacterTotals`
   - is the separate open-files aggregate screen headed by `Characters in open files (1000s)`
   - it is distinct from `ShowOpenAlphaWordFilesList`, which only prints the open-file slot list
@@ -474,6 +477,12 @@ Additional AlphaWordPlus-local helpers that are now clear enough to name:
   - validates slot numbers `1..8`
   - switches the active AlphaWord slot when the requested slot is not already current
   - returns the per-slot workspace base used by the local helper stack
+- `SelectAlphaWordSlotAndMaybePersistMap`
+  - ensures the requested slot handle exists
+  - switches the active slot byte in local AlphaWordPlus state
+  - optionally persists the slot map when the caller requests it
+- `InitializeAlphaWordLocalState`
+  - is the AlphaWordPlus-local startup helper that seeds the default section-separator mode, sets the still-unresolved applet-local flag at `A5+0x21c`, and resets the Find/Replace state block
 - `GetAlphaWordLineCountForSlot`
   - selects the requested slot workspace and returns its current line-count metric
 - `IsValidAlphaWordSlotNumber`
@@ -491,6 +500,26 @@ Additional AlphaWordPlus-local helpers that are now clear enough to name:
   - `ExecuteFindReplaceScan` performs the actual scan/update pass
   - `ConfirmFindReplaceOperation` is the prompt path for replace-all / capacity checks
   - `SetFindReplaceSelectionBounds` restores or updates the current selection bounds after the operation
+
+Helpers intentionally left unnamed for now:
+
+Additional conservative AlphaWordPlus-local names from the final unnamed helper slice:
+
+- `ShowAlphaWordRecoveryStatusAndFinalize`
+  - prints either `Recovering "` plus the current file name or `Performing emergency recovery of`
+  - then runs the same low-level finalize/close sequence used by slot/file-management paths
+  - the exact underlying recovery primitive is still opaque, so the name intentionally stays at the status/finalize level
+- `HandleAlphaWordQueuedWordBatch`
+  - appends one or more 16-bit values into the small queue at `A5+0x13a`
+  - dispatches special queued values through a local jump table
+  - when more than one word is queued it reports output status `3`, calls the batch output primitive, and writes `count * 2` as the emitted size
+  - this name is intentionally queue/batch-oriented because the deeper protocol meaning of those words is still not fully pinned
+- `SetAlphaWordLocalInitFlag`
+  - only sets the AlphaWordPlus-local byte flag at `A5+0x21c`
+  - it is only called from the startup/local-init helper that also seeds the section-separator mode and resets Find/Replace state
+- `SelectAlphaWordSlotAndPrimeCharStream`
+  - selects the requested slot workspace, primes the low-level character stream, and performs one initial read-step
+  - the decompiler collapses this into a very small wrapper, so the name stays at the observed slot-and-stream behavior level
 
 The most useful clarification from the recent AlphaWordPlus pass is that the `0xa364/0xa36c/0xa388` family is shared and context-sensitive:
 
