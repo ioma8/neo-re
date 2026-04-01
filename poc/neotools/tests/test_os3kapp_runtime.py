@@ -196,6 +196,26 @@ class Os3kAppRuntimeTests(unittest.TestCase):
         self.assertEqual(help_prompt.status_code, 0)
         self.assertIn("only when the first input byte is ASCII 'H'", help_prompt.notes)
 
+    def test_alphawordplus_command_prototype_exposes_namespace_dispatch_contract(self) -> None:
+        namespace1_init = describe_known_applet_command_prototype("alphawordplus", 0x10001)
+        current_slot = describe_known_applet_command_prototype("alphawordplus", 0x10004)
+        namespace2_stream = describe_known_applet_command_prototype("alphawordplus", 0x20002)
+        namespace4_payload = describe_known_applet_command_prototype("alphawordplus", 0x40002)
+        namespace7_payload = describe_known_applet_command_prototype("alphawordplus", 0x70002)
+
+        self.assertEqual(namespace1_init.selector_byte, 0x01)
+        self.assertEqual(namespace1_init.handler_name, "HandleAlphaWordNamespace1Commands")
+        self.assertEqual(namespace1_init.status_code, 0x11)
+        self.assertIn("resets the namespace-1 command-stream state", namespace1_init.notes)
+        self.assertEqual(current_slot.handler_name, "HandleAlphaWordNamespace1Commands")
+        self.assertIn("currently selected AlphaWord slot number", current_slot.notes)
+        self.assertEqual(namespace2_stream.handler_name, "HandleAlphaWordNamespace2Commands")
+        self.assertIn("incoming transferred bytes", namespace2_stream.notes)
+        self.assertEqual(namespace4_payload.handler_name, "HandleAlphaWordNamespace4Commands")
+        self.assertIn("byte-payload helper", namespace4_payload.notes)
+        self.assertEqual(namespace7_payload.handler_name, "HandleAlphaWordNamespace7Commands")
+        self.assertIn("encoded transfer machinery", namespace7_payload.notes)
+
     def test_alphaquiz_payload_subcommand_prototype_exposes_status_and_response_shape(self) -> None:
         ready = describe_known_applet_payload_subcommand_prototype("alphaquiz", 0x50002, 0x1D)
         helper = describe_known_applet_payload_subcommand_prototype("alphaquiz", 0x40002, 0x1A)

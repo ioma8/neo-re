@@ -386,6 +386,55 @@ What AlphaWordPlus closes further:
 - `0xa364` and `0xa36c` are shared current-service queries rather than purely spell-check helpers
 - `0xa388` is now tied more tightly to the spell-check enable/disable path
 
+AlphaWordPlus also exposes a richer applet-private command ABI layered on top of the universal SmartApplet entry contract. The currently pinned custom namespace handlers are:
+
+- `HandleAlphaWordNamespace1Commands`
+- `HandleAlphaWordNamespace2Commands`
+- `HandleAlphaWordNamespace4Commands`
+- `HandleAlphaWordNamespace7Commands`
+
+Recovered high-confidence AlphaWordPlus command contracts:
+
+- `0x10001`
+  - handled by `HandleAlphaWordNamespace1Commands`
+  - resets command-stream state through `ResetAlphaWordCommandStreamState`
+  - sets status `0x11`
+- `0x10004`
+  - handled by `HandleAlphaWordNamespace1Commands`
+  - returns one byte containing the current selected slot number `1..8`
+- `0x20001`
+  - handled by `HandleAlphaWordNamespace2Commands`
+  - resets the namespace-2 import/export stream state
+  - sets status `0x11`
+- `0x20002`
+  - handled by `HandleAlphaWordNamespace2Commands`
+  - accepts incoming transferred bytes
+  - decodes them through the transferred-byte tables
+  - terminates on in-band byte `0xbb`
+- `0x40001`
+  - handled by `HandleAlphaWordNamespace4Commands`
+  - resets the namespace-4 command stream
+  - sets status `0x11`
+- `0x40002`
+  - handled by `HandleAlphaWordNamespace4Commands`
+  - routes into `HandleAlphaWordNamespace4PayloadCommand`
+  - the payload helper either emits an immediate error reply byte or starts/continues a streamed response
+- `0x70001`
+  - handled by `HandleAlphaWordNamespace7Commands`
+  - resets the namespace-7 command stream
+  - sets status `0x11`
+- `0x70002`
+  - handled by `HandleAlphaWordNamespace7Commands`
+  - routes namespace-7 payload bytes through the same encoded transfer machinery used by the other AlphaWordPlus stream handlers
+
+Supporting AlphaWordPlus-local transfer helpers now pinned from raw 68k:
+
+- `ResetAlphaWordCommandStreamState`
+- `DecodeAlphaWordTransferredByte`
+- `WriteEncodedAlphaWordTransferredByte`
+- `AppendEncodedAlphaWordTransferredByte`
+- `RebuildAlphaWordTransferPointersFromCurrentFile`
+
 Additional AlphaWordPlus-local helpers that are now clear enough to name:
 
 - `RefreshAlphaWordSlotHandleCache`
