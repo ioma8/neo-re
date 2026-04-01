@@ -525,6 +525,32 @@ Additional AlphaWordPlus-local helpers that are now clear enough to name:
 
 Additional AlphaWordPlus edit-state findings:
 
+- `BeginAlphaWordScreenRedraw`
+  - is the common AlphaWordPlus-local screen reset helper used before rebuilding chooser, prompt, statistics, and settings screens
+  - current best interpretation is “clear/reset the current AlphaWord screen frame before drawing”
+- `FlushAlphaWordScreenRedraw`
+  - is used after a screen body has been laid out and immediately before modal key reads or span/statistics capture
+  - current best interpretation is “finalize/flush the current AlphaWord screen frame for interaction”
+- `GetCurrentAlphaWordFileName`
+  - returns the current AlphaWord file name string pointer
+  - this is the string rendered by current-file prompts and compared against generated default names
+- `AdvanceAlphaWordFileIterator`
+  - advances or rebinds the current AlphaWord file iterator state used by the open-file selector and duplicate-name scans
+  - repeated callers pair it with `QueryCurrentAlphaWordFileOrdinal` and `GetCurrentAlphaWordFileName`
+- `QueryCurrentAlphaWordFileOrdinal`
+  - returns the ordinal/id of the current AlphaWord file selected by that iterator state
+  - the selector, slot reassignment, and duplicate-name scans all use it as the “current file record” identity
+- `QuerySelectedAlphaWordSlotFileOrdinal`
+  - returns the file ordinal currently assigned to the selected AlphaWord slot/workspace
+  - the slot-cache refresh and selector-state builders use it to map slots back to file records
+- `DrawPendingWrappedText`
+  - renders the currently prepared longer prompt/help text block
+  - confirmation and file-name prompts call it for the main wrapped body, then render the footer prompt on the next row
+- `RunAlphaWordFileNameEntryDialog`
+  - is the inline modal file-name editor used by the unique-name workflow
+  - it returns the same accept/cancel style modal status codes used elsewhere in AlphaWordPlus
+- `WaitForAlphaWordModalKey`
+  - is the common “wait for one modal keypress before continuing” helper used by details, stats, spell-check, file-management, and settings prompts
 - `QueryCurrentAlphaWordEditorSpan`
   - is still the main current-span query used by namespace-2 and the statistics flows
   - current best interpretation remains a two-part editor span descriptor
