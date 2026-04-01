@@ -221,7 +221,7 @@ class SmartAppletCliTests(unittest.TestCase):
         lines = output.getvalue().splitlines()
         self.assertEqual(lines[0], "block=0x34ce-0x34ee count=16 first=0xa000 last=0xa03c")
         self.assertIn("offset=0x34ce opcode=0xa000 family=0xa0 selector=0x00 name=clear_text_screen", lines)
-        self.assertIn("offset=0x3666 opcode=0xa378 family=0xa3 selector=0x78 name=shared_runtime_a378", lines)
+        self.assertIn("offset=0x3666 opcode=0xa378 family=0xa3 selector=0x78 name=render_formatted_pending_text", lines)
 
     def test_os3kapp_trap_prototype_prints_known_stack_signature(self) -> None:
         output = io.StringIO()

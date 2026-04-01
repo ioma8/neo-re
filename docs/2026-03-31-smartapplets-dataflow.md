@@ -297,21 +297,85 @@ High-confidence trap-stub mappings from that block:
 - `0x00012dc0` `TrapA09C_IsKeyReady`
 - `0x00012dc8` `TrapA0A4_PumpUiEvents`
 - `0x00012ddc` `TrapA0D4_DelayTicks`
+- `0x00012e5c` `TrapA1D4_AssignCurrentFileNameFromPendingText`
+- `0x00012e62` `TrapA1E0_QueryAdvancedFileIteratorOrdinal`
+- `0x00012e68` `TrapA1EC_SyncCurrentSlotMapEntry`
 - `0x00012e78` `TrapA20C_ReadChooserEventCode`
 - `0x00012e7a` `TrapA210_ReadChooserActionSelector`
+- `0x00012ed0` `TrapA2BC_CommitCurrentFileEditSession`
+- `0x00012ed2` `TrapA2C0_FinalizeCurrentFileContext`
+- `0x00012ed8` `TrapA2CC_BeginCurrentReplacement`
+- `0x00012eda` `TrapA2D0_QueryCurrentReplacementStatus`
+- `0x00012edc` `TrapA2D4_ResetCurrentSearchState`
+- `0x00012ede` `TrapA2D8_ReadNextCharStreamUnit`
+- `0x00012ee0` `TrapA2DC_SwitchToCurrentFileContext`
+- `0x00012eea` `TrapA2EC_QueryCurrentWorkspaceFileStatus`
+- `0x00012ef2` `TrapA2FC_InitializeEmptyWorkspaceFile`
 - `0x00012f12` `TrapA36C_QueryActiveServiceStatus`
-- `0x00012f22` `TrapA388_QueryActiveServiceDisabledState`
-- `0x00012f26` `TrapA390_SharedRuntime`
-- `0x00012f2c` `TrapA39C_SharedRuntime`
+- `0x00012f1e` `TrapA378_RenderFormattedPendingText`
+- `0x00012f22` `TrapA380_FormatPendingText`
+- `0x00012f26` `TrapA388_QueryActiveServiceDisabledState`
+- `0x00012f2a` `TrapA390_SharedRuntime`
+- `0x00012f2e` `TrapA398_QueryPendingTextLength`
+- `0x00012f30` `TrapA39C_SharedRuntime`
 
 Remaining currently unresolved entries in that direct import table are still renamed structurally by exact trap id, for example:
 
 - `TrapA018`, `TrapA01C`, `TrapA084`, `TrapA088`
 - `TrapA0A0`, `TrapA0B4`, `TrapA0DC`, `TrapA0E0`
 - `TrapA14C`, `TrapA158`, `TrapA15C`, `TrapA160`, `TrapA174`
-- `TrapA1AC`, `TrapA1B0`, `TrapA1C0`, `TrapA1C4`, `TrapA1D4`, `TrapA1D8`, `TrapA1DC`, `TrapA1E0`, `TrapA1E4`, `TrapA1EC`
+- `TrapA1AC`, `TrapA1B0`, `TrapA1C0`, `TrapA1C4`, `TrapA1D8`, `TrapA1DC`, `TrapA1E4`
 - `TrapA21C`, `TrapA224`, `TrapA22C`, `TrapA23C`, `TrapA244`, `TrapA248`, `TrapA250`, `TrapA260`, `TrapA26C`, `TrapA270`
-- `TrapA2B0`, `TrapA2B4`, `TrapA2B8`, `TrapA2BC`, `TrapA2CC`, `TrapA2D0`, `TrapA2D4`, `TrapA2DC`, `TrapA2E0`, `TrapA2EC`, `TrapA2F0`, `TrapA2FC`, `TrapA32C`, `TrapA370`, `TrapA374`, `TrapA378_SharedRuntime`, `TrapA380`, `TrapA394`, `TrapA398`, `TrapA3AC`, `TrapA3B0`, `TrapA44C`
+- `TrapA2B0`, `TrapA2B4`, `TrapA2B8`, `TrapA2E0`, `TrapA2F0`, `TrapA32C`, `TrapA370`, `TrapA374`, `TrapA378_SharedRuntime`, `TrapA380`, `TrapA394`, `TrapA398`, `TrapA3AC`, `TrapA3B0`, `TrapA44C`
+
+Current high-confidence interpretation of the newly named AlphaWordPlus file-workspace trap cluster:
+
+- `TrapA1D4_AssignCurrentFileNameFromPendingText`
+  - AlphaWordPlus calls this immediately after loading canned strings like `0xfb` into the pending text slot during create/load flows.
+  - Best current reading: apply the pending text buffer as the current file name.
+- `TrapA1E0_QueryAdvancedFileIteratorOrdinal`
+  - Called only after `AdvanceAlphaWordFileIterator`.
+  - Returns the resulting file ordinal, with nonpositive values meaning no available file slot.
+- `TrapA1EC_SyncCurrentSlotMapEntry`
+  - Paired around reads and writes of the eight-entry slot-to-file table in AlphaWordPlus local state.
+  - Best current reading: sync the current slot-map entry between applet state and host/runtime state.
+- `TrapA2BC_CommitCurrentFileEditSession`
+  - Used after bulk overwrite/edit sequences such as the ROM test-file replacement path.
+  - Best current reading: commit the active current-file edit session.
+- `TrapA2C0_FinalizeCurrentFileContext`
+  - Used at the end of create/load/prompt workflows and before some interactive prompts.
+  - Best current reading: finalize or leave the current-file context/workspace binding.
+- `TrapA2CC_BeginCurrentReplacement`
+  - Used just before spell-check and clear-file replacement work, after the current cursor/selection location has been established.
+- `TrapA2D0_QueryCurrentReplacementStatus`
+  - Queried immediately after `TrapA2CC`.
+  - Best current reading: return replacement-result status, including the empty/no-op case.
+- `TrapA2D4_ResetCurrentSearchState`
+  - Used around search/find/replace prompts and after one-character lookahead checks.
+  - Best current reading: clear or reset the current search/match state.
+- `TrapA2D8_ReadNextCharStreamUnit`
+  - Low-level char-stream iterator primitive underneath the higher-level AlphaWordPlus read/preview/search helpers.
+- `TrapA2DC_SwitchToCurrentFileContext`
+  - Used before destructive or content-sensitive operations like delete, overwrite, search, and file loading.
+  - Best current reading: switch/bind the active current-file workspace.
+- `TrapA2EC_QueryCurrentWorkspaceFileStatus`
+  - Queried after selecting or naming the current file.
+  - Zero triggers the empty-file initialization path.
+- `TrapA2FC_InitializeEmptyWorkspaceFile`
+  - Called only when `TrapA2EC_QueryCurrentWorkspaceFileStatus` reports the zero/empty state for the active file.
+  - Best current reading: initialize default/empty content for the current workspace file.
+- `TrapA378_RenderFormattedPendingText`
+  - Used across confirm/cancel, file-details/statistics, and queued-entry dialogs.
+  - Best current reading: render a formatted pending text/template directly from the current stacked arguments.
+- `TrapA380_FormatPendingText`
+  - Used before wrapped-dialog display and before subsequent pending-text length queries.
+  - Best current reading: build or format the current pending text buffer without drawing it immediately.
+- `TrapA398_QueryPendingTextLength`
+  - Used to size wrapped dialogs and chooser-row preview buffers.
+  - Best current reading: return the current pending/formatted text length.
+- `TrapA14C_ReadTextInputChar`
+  - Used by `HandleSingleLineTextFieldInput` and the numeric live-dialog workflow.
+  - Best current reading: return the next typed input character when text-entry mode is active.
 
 Recovered call shapes from raw 68k in `RunCalculatorFunctionMenu`:
 
@@ -346,6 +410,7 @@ Current prototype table encoded in the PoC:
 - `0xa09c` `is_key_ready`: `stack_argument_count = 0`, return value used as readiness flag
 - `0xa0a4` `pump_ui_events`: `stack_argument_count = 0`, no return value used
 - `0xa0d4` `delay_ticks`: `stack_argument_count = 1`, no return value used; argument behaves like a pacing or timeout value
+- `0xa14c` `read_text_input_char`: `stack_argument_count = 0`, return value used as the next typed input character while AlphaWordPlus field-entry handlers are in text-entry mode
 - `0xa190` `begin_output_builder`: `stack_argument_count = 3`, no return value used
 - `0xa198` `append_output_bytes`: `stack_argument_count = 4`, no return value used
 - `0xa1b4` `query_numeric_state`: `stack_argument_count = 1`, return value used as a scalar runtime value
@@ -356,9 +421,11 @@ Current prototype table encoded in the PoC:
 - `0xa364` `query_active_service_available`: `stack_argument_count = 0`, scalar/state return; used as a feature-availability query before beamer, wireless-transfer, and spell-check flows
 - `0xa36c` `query_active_service_status`: `stack_argument_count = 0`, scalar/state return; used after feature-specific setup and best understood as a current-service status/session query rather than a single feature-specific boolean
 - `0xa368` `shared_runtime_a368`: shared A3xx helper, still unresolved
+- `0xa378` `render_formatted_pending_text`: `stack_argument_count = 0`, no return value used; best current reading is a direct formatted-text render helper for dialogs and status screens
+- `0xa380` `format_pending_text`: `stack_argument_count = 0`, no return value used; best current reading is a pending-text formatter/builder used before wrapped rendering
 - `0xa388` `query_active_service_disabled_state`: `stack_argument_count = 0`, scalar/state return; in AlphaWordPlus spell-check toggles, zero means enabled and nonzero means turned off
+- `0xa398` `query_pending_text_length`: `stack_argument_count = 0`, scalar return; used to measure the current pending/formatted text buffer
 - `0xa38c` `shared_runtime_a38c`: shared A3xx helper, still unresolved
-- `0xa378` `shared_runtime_a378`: shared across calculator and alphaquiz, but still unresolved beyond “common A3xx helper”
 - `0xa390` `shared_runtime_a390`: shared across calculator and alphaquiz, returns a scalar or pointer-like value from at least one explicit argument
 - `0xa39c` `shared_runtime_a39c`: shared across calculator and alphaquiz, side-effect helper likely related to copy/unpack behavior but not pinned further
 
