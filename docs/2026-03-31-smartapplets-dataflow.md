@@ -254,7 +254,7 @@ That makes two authoring patterns visible:
 - UI-heavy / logic-heavy SmartApplets import a substantial shared runtime through dense A-line trap tables
 - very small payloads can be self-contained and omit those imports entirely
 
-Confirmed or strongly inferred trap meanings from named call sites in `calculator.os3kapp`:
+Confirmed or strongly inferred shared trap meanings from the currently renamed call sites:
 
 - `0xa000`: clear text screen
 - `0xa004`: set text row / column / width
@@ -264,16 +264,20 @@ Confirmed or strongly inferred trap meanings from named call sites in `calculato
 - `0xa09c`: test whether a key / event is ready
 - `0xa0a4`: pump pending UI events
 - `0xa25c`: yield while waiting for the next event
-- `0xa368` `TrapA368`: calculator runtime init slot A
-- `0xa38c` `TrapA38C`: calculator runtime init slot C
-- `0xa390` `TrapA390`: calculator runtime store result string
-- `0xa39c` `TrapA39C`: calculator runtime copy input string
+- `0xa1f8`: begin chooser row-builder session
+- `0xa1fc`: advance or commit the current output row
+- `0xa200`: append the current chooser row
+- `0xa204`: highlight the current chooser row
+- `0xa208`: begin chooser input session
+- `0xa20c`: read chooser event code
+- `0xa210`: read chooser action selector
+- `0xa214`: read chooser selection value
 
 Evidence for those names:
 
 - `RunCalculatorFunctionMenu` uses `TrapA000`, `TrapA004`, `TrapA010`, `TrapA014`, `TrapA094`, `TrapA09C`, `TrapA0A4`, and `TrapA25C` in a menu redraw + key polling loop
-- `InitializeCalculatorAppletState` calls `TrapA368`, `TrapA368`, and `TrapA38C`
-- `DispatchCalculatorAppletCommand` calls `TrapA39C` before evaluating the copied input buffer and `TrapA378` after a successful evaluation path that returns a 4-byte result buffer
+- `RunAlphaWordChooserDialog` and several other AlphaWordPlus chooser loops use the stable `0xa1f8 -> row text helpers -> 0xa1fc -> 0xa200 -> optional 0xa204 -> 0xa208 -> 0xa20c/0xa210/0xa214` sequence
+- `CountNewlineDrivenRowAdvances` in AlphaWordPlus scans newline-delimited text and calls `0xa1fc`; the nonzero return path acts like a stop/overflow condition, which is why `0xa1fc` is now treated as a row-advance helper rather than an object resolver
 
 Recovered call shapes from raw 68k in `RunCalculatorFunctionMenu`:
 
@@ -312,8 +316,12 @@ Current prototype table encoded in the PoC:
 - `0xa198` `append_output_bytes`: `stack_argument_count = 4`, no return value used
 - `0xa1b4` `query_numeric_state`: `stack_argument_count = 1`, return value used as a scalar runtime value
 - `0xa1c8` `query_object_metric`: `stack_argument_count = 2`, return value used as a scalar property query on a previously resolved runtime object or token
-- `0xa1fc` `resolve_object_by_selector`: `stack_argument_count = 2`, return value used as an object/token lookup result
+- `0xa1f8` `begin_chooser_row_builder`: `stack_argument_count = 0`, no return value used
+- `0xa1fc` `advance_current_output_row`: `stack_argument_count = 2`, return value used as a row-advance success or stop/overflow result
 - `0xa25c` `yield_until_event`: `stack_argument_count = 0`, no return value used
+- `0xa36c` `shared_runtime_a36c`: `stack_argument_count = 0`, scalar/state return; heavily used by AlphaWordPlus gatekeeping paths
+- `0xa368` `shared_runtime_a368`: shared A3xx helper, still unresolved
+- `0xa38c` `shared_runtime_a38c`: shared A3xx helper, still unresolved
 - `0xa378` `shared_runtime_a378`: shared across calculator and alphaquiz, but still unresolved beyond “common A3xx helper”
 - `0xa390` `shared_runtime_a390`: shared across calculator and alphaquiz, returns a scalar or pointer-like value from at least one explicit argument
 - `0xa39c` `shared_runtime_a39c`: shared across calculator and alphaquiz, side-effect helper likely related to copy/unpack behavior but not pinned further
@@ -323,11 +331,77 @@ New concrete `alphaquiz` evidence for the `0xa190..0xa1fc` family:
 - `AppendCStringToAlphaQuizOutputBuffer` first computes the string length, then calls `0xa190`, then `0xa198`
 - the call shape is stable: `0xa190(id, 0, 2)` followed by `0xa198(id, src, len, 1)`
 - a second helper in `alphaquiz` uses `0xa190(0, 0, 2)` once, then repeatedly calls `0xa198(0, &byte, 1, 1)` for each character in a NUL-terminated string
-- `0xa1fc(0x0d, 0)` produces a handle-like value that is immediately consumed by `0xa1c8(handle, 1)`
+- `0xa1fc(0x0d, 0)` in earlier `alphaquiz` work was initially interpreted as a selector/object lookup, but AlphaWordPlus now shows that the stronger cross-sample interpretation is a shared row-builder helper instead
 - `0xa1b4(key)` returns a scalar value that is compared numerically and also forwarded into nearby update/finalize traps
-- the safer current reading is “object/token resolution plus object metrics”, not literal OS-style handles
+- the safer current reading is:
+  - `0xa1b4` and `0xa1c8` are still scalar query helpers
+  - `0xa1fc` should no longer be treated as a proven object resolver for custom-app authoring purposes
 
 These are still behavioral names, not fully proven SDK names, but they are now specific enough to help build higher-level tooling around text-output and handle/state queries.
+
+## AlphaWordPlus Runtime Evidence
+
+`alphawordplus.os3kapp` is useful because it is much smaller than `alphaquiz` or the spellcheck applets and still exercises a compact but nontrivial runtime/UI surface. Its payload prefix is:
+
+- `(0x94, 0, 1, 2)`
+
+So the main entry logic starts immediately after the 16-byte payload prefix, with no loader stub.
+
+AlphaWordPlus also gives the clearest evidence so far for the chooser/menu-oriented `0xa200..0xa214` runtime family. The applet builds lists of AlphaWord rows, enters a chooser session, then reads back event codes and selection values.
+
+Confirmed AlphaWordPlus-local support functions now renamed in Ghidra:
+
+- `LookupAlphaWordPlusString`
+- `RunAlphaWordChooserDialog`
+- `HandleAlphaWordSlotSelection`
+
+Chooser/session trap evidence from AlphaWordPlus:
+
+- `0xa200` `append_current_chooser_row`
+  - called immediately after a row has been assembled from string/data helpers
+  - repeated once per list row before the chooser becomes interactive
+- `0xa204` `highlight_current_chooser_row`
+  - called when the just-appended row matches the currently selected slot
+- `0xa208` `begin_chooser_input_session`
+  - called once after chooser rows are prepared and just before input/event reads begin
+- `0xa20c` `read_chooser_event_code`
+  - returns command bytes such as `H`, `@`, `0x18`, `0x17`, `0x1c`, or applet-specific action codes
+- `0xa210` `read_chooser_action_selector`
+  - used after `@`-style activation events to identify the selected row/action slot
+- `0xa214` `read_chooser_selection_value`
+  - returns a 16-bit selection value consumed after chooser completion
+
+AlphaWordPlus also strengthens the earlier `0xa1cc` interpretation:
+
+- `0xa1cc` `commit_editable_buffer`
+  - AlphaWordPlus uses the sequence `BeginEditableBufferEdit -> GetEditableBufferPointer -> mutate -> CommitEditableBuffer`
+  - that is now strong enough to treat `0xa1cc` as the end of an editable-buffer transaction rather than a generic query
+
+What AlphaWordPlus closes further:
+
+- the `0xa1f8 -> 0xa1fc -> 0xa200 -> 0xa204 -> 0xa208` sequence is now best treated as a chooser/list-row builder API
+- `0xa1fc` is no longer safe to document as an object resolver; the shared map now uses the more conservative row-advance name instead
+- `0xa36c` is clearly a widely shared scalar/state query, but its exact semantic meaning is still unresolved
+
+Additional AlphaWordPlus-local helpers that are now clear enough to name:
+
+- `RefreshAlphaWordSlotHandleCache`
+  - clears the cached 8-slot handle table
+  - enumerates or creates per-slot handles through `0x12e66/0x12e6e`
+  - restores the current active slot through `EnsureAlphaWordSlotHandleSelected`
+- `EnsureAlphaWordSlotHandleSelected`
+  - lazily creates a slot handle when the cached entry is `-1`
+  - switches the active slot if needed and replays the per-slot selection/update path
+- `PromptForUniqueAlphaWordName`
+  - prompts for a new AlphaWord file name
+  - rejects duplicates by comparing against the existing slot-name list
+- `DecodeAlphaWordMarkupTagKind`
+  - classifies inline markup tokens such as `INPUT`, `NOBR`, `FORM`, and `FORMDATA`
+- `NormalizeAlphaWordMarkupAndLineEndings`
+  - walks the current AlphaWord text buffer
+  - rewrites or strips recognized markup constructs
+  - normalizes LF/CRLF into the applet's expected CR-oriented line layout
+  - expands bracket-style markup shorthands into longer inline sequences
 
 New cross-sample evidence for additional shared API surface:
 
