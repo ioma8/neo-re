@@ -504,6 +504,23 @@ Additional AlphaWordPlus-local helpers that are now clear enough to name:
   - `IsSpellCheckCandidateBoundary` is the boundary test reused while stepping candidate tokens
   - `ClassifySpellCheckTokenCapitalization` classifies the matched token casing before replacement text is generated
   - `ApplySpellCheckReplacementText` applies the replacement bytes and updates the tracked editor counts
+  - `HasActiveAlphaWordSelection` gates the selection-aware branches
+  - `GetAlphaWordSelectionAnchorLineIndex` plus `GetCurrentAlphaWordLineIndex` reconstruct the current selected line range for the active slot
+  - `QueryAlphaWordSlotTransferEnd` is the slot-aware end/capacity helper used by replace-capacity checks
+
+Additional AlphaWordPlus edit-state findings:
+
+- `QueryCurrentAlphaWordEditorSpan`
+  - is still the main current-span query used by namespace-2 and the statistics flows
+  - current best interpretation remains a two-part editor span descriptor
+- `QueryCurrentAlphaWordTransferCursor`
+  - is distinct from the editor span helper and is reused heavily by spell-check, find/replace, and stream export paths
+  - current best interpretation remains a transfer/export cursor or offset, not the whole file size
+- `QueryAlphaWordSlotTransferEnd`
+  - is slot-aware in raw disassembly
+  - for a valid slot it looks up that slot handle and sums two per-slot queries
+  - the fallback path does the same against a fixed default handle
+  - current best interpretation is a slot-specific transfer end / capacity boundary rather than a generic current-file query
 
 Helpers intentionally left unnamed for now:
 
