@@ -500,6 +500,10 @@ Additional AlphaWordPlus-local helpers that are now clear enough to name:
   - `ExecuteFindReplaceScan` performs the actual scan/update pass
   - `ConfirmFindReplaceOperation` is the prompt path for replace-all / capacity checks
   - `SetFindReplaceSelectionBounds` restores or updates the current selection bounds after the operation
+  - `PromptFindReplaceMatchAction` is the interactive per-match chooser used during replace flows
+  - `IsSpellCheckCandidateBoundary` is the boundary test reused while stepping candidate tokens
+  - `ClassifySpellCheckTokenCapitalization` classifies the matched token casing before replacement text is generated
+  - `ApplySpellCheckReplacementText` applies the replacement bytes and updates the tracked editor counts
 
 Helpers intentionally left unnamed for now:
 
@@ -520,6 +524,247 @@ Additional conservative AlphaWordPlus-local names from the final unnamed helper 
 - `SelectAlphaWordSlotAndPrimeCharStream`
   - selects the requested slot workspace, primes the low-level character stream, and performs one initial read-step
   - the decompiler collapses this into a very small wrapper, so the name stays at the observed slot-and-stream behavior level
+
+## AlphaWordPlus Typing And Edit Command Path
+
+AlphaWordPlus does not appear to handle normal document typing through the same trap-driven key loop used by chooser/help menus. The clearer path for live document editing is the applet-private command ABI.
+
+The main write-side entrypoint is:
+
+- `HandleAlphaWordNamespace2Commands`
+  - this is the strongest current candidate for normal document typing and live edit mutation
+  - on command `0x20002` it consumes incoming payload bytes, maps them through the encoding table at `DAT_0001488c`, and writes them with `WriteEncodedAlphaWordTransferredByte`
+  - this is the clearest “incoming text bytes are being inserted into the current document” path
+
+The paired read/control side is:
+
+- `HandleAlphaWordNamespace1Commands`
+  - initializes or resets the current AlphaWord command stream
+  - selects slots and reports lengths or offsets
+  - returns encoded file bytes through `DecodeAlphaWordTransferredByte`
+  - this looks like the stream-control and readback half of the same document/channel ABI rather than the primary typing path
+
+Additional stream-oriented command handlers:
+
+- `HandleAlphaWordNamespace4Commands`
+  - wraps `HandleAlphaWordNamespace4PayloadCommand`
+  - provides another payload-command family with chunked return-data behavior
+  - current evidence makes it look more like command/control and structured payload exchange than ordinary text entry
+- `HandleAlphaWordNamespace7Commands`
+  - handles another transfer/control family
+  - includes slot selection, stream reset, pointer rebuild, and chunked return-data operations
+  - again, this looks stream/control-oriented rather than the simplest live typing path
+
+The key AlphaWordPlus-local primitives behind that document ABI are:
+
+- `WriteEncodedAlphaWordTransferredByte`
+  - write-side encoded byte insertion into the current AlphaWord document stream
+- `DecodeAlphaWordTransferredByte`
+  - read-side decoding of outgoing AlphaWord bytes
+- `AppendEncodedAlphaWordTransferredByte`
+  - helper for accumulating outbound encoded bytes
+- `ResetAlphaWordCommandStreamState`
+  - clears the active document-stream state machine before a new command session
+- `RebuildAlphaWordTransferPointersFromCurrentFile`
+  - resynchronizes the stream pointers against the current open AlphaWord file
+
+Current best interpretation:
+
+- menu/help/topic selection uses the shared runtime key/event traps
+- actual document typing, file transfer, and edit/update work is mainly mediated through the AlphaWordPlus namespace command handlers
+- among those, namespace `2` is the clearest write/mutate path for normal text insertion
+
+### Namespace 2 Sub-ABI
+
+The currently pinned namespace-2 command layer is:
+
+- `0x20001`
+  - initialize or reset the active AlphaWord command stream
+  - calls `ResetAlphaWordCommandStreamState`
+- `0x20002`
+  - main write-side payload path
+  - in normal mode it consumes incoming payload bytes, translates them through `DAT_0001488c`, and forwards them to `WriteEncodedAlphaWordTransferredByte`
+  - this is the strongest current candidate for ordinary typed-character insertion into the current document
+- `0x20006`
+  - continue chunked readback when the local stream state is `3`
+  - returns decoded bytes via `DAT_0001498c`
+  - when the buffered readback is exhausted, it returns a one-byte `0xfe` terminator marker
+- `0x2011f`
+  - returns status code `1`
+  - exact user-visible semantic still unresolved
+
+The important namespace-2 payload/control bytes currently pinned inside `0x20002` are:
+
+- `0xbb`
+  - immediate write/session terminator on the incoming payload path
+  - clears the local stream state and returns status code `0x0d`
+- `0xbc`
+  - enters local state `6`, meaning “interpret the next payload byte as a namespace-2 control selector”
+- `0xbd`
+  - immediate one-byte reply path returning `0xd4`
+  - exact semantic still unresolved
+
+When namespace-2 is in local state `6`, the next payload byte acts as a control selector:
+
+- `0x01..0x08`
+  - select AlphaWord slot `1..8`
+  - handled through `EnsureAlphaWordSlotHandleSelected(slot - 1, ...)`
+- `0x83`
+  - `RebuildAlphaWordTransferPointersFromCurrentFile`
+- `0x84`
+  - begin chunked readback of the current file
+  - loads a length through `FUN_00012ee8`, primes the char stream with `FUN_00012ed6`, sets local stream state `3`, and returns the first decoded chunk
+- `0x87`
+  - performs a size/limit check using `FUN_00012ee8` and `FUN_00012e4a`
+  - on overflow/failure it sets status code `0x0c`
+  - current best interpretation is “does the current editor span reach the end of the file yet”
+- `0x88`
+  - returns the current slot number plus one
+- `0x90`
+  - returns a 16-bit value derived from `FUN_00012ee8`
+  - current best interpretation is the low 16-bit end position of the current editor span
+- `0x91`
+  - returns a 16-bit value from `FUN_00012e4a`
+  - current best interpretation is a current file/document size query
+
+The local namespace-2 stream-state byte at `A5+0x202` now has the following observed meanings:
+
+- `0`
+  - idle
+- `3`
+  - chunked readback active
+- `5`
+  - special handshake/readback mode used by namespace-1 `0x10016` / `0x1011e`
+- `6`
+  - namespace-2 control-selector mode entered by payload byte `0xbc`
+
+So the current best write-side model is:
+
+- host/app sends namespace-2 `0x20002` with encoded text bytes for normal insertion
+- AlphaWordPlus maps those bytes through `DAT_0001488c`
+- the mapped bytes are committed to the current document through `WriteEncodedAlphaWordTransferredByte`
+- special bytes such as `0xbb` and `0xbc` escape out of plain text mode into stream/session control
+
+Related host-backed size/range helpers now distinguished by caller behavior:
+
+- `QueryCurrentAlphaWordFileSize`
+  - behaves like full current document or file size
+  - it is used as the cap/upper bound in statistics screens and in the namespace-2 `0x87` validation path
+  - namespace-2 selector `0x91` returns this value directly
+- `QueryCurrentAlphaWordTransferCursor`
+  - behaves like a stream-position or available-length metric rather than the full file size
+  - it participates in range arithmetic with `QueryCurrentAlphaWordTransferExtent`
+  - it is also used directly by the namespace-1 and namespace-2 readback setup paths
+- `QueryCurrentAlphaWordTransferExtent`
+  - behaves like a companion range/span metric used with `FUN_00012e4c`
+  - AlphaWordPlus combines the two when rebuilding or exporting transfer pointers
+- `QueryCurrentAlphaWordEditorSpan`
+  - returns a two-part range/value structure that feeds:
+    - namespace-2 selector `0x84` readback setup
+    - namespace-2 selector `0x87` validation
+    - namespace-2 selector `0x90` 16-bit span-end query
+  - current best interpretation is “current editor span descriptor” rather than a simple scalar
+
+Current best interpretation of the still-narrow namespace-2 unknowns:
+
+- payload byte `0xbd`
+  - is an immediate one-byte reply command returning `0xd4`
+  - it does not enter the slot/control-selector mode
+  - the safest current reading is a small status or capability probe opcode
+- selector `0x90`
+  - reports the low 16-bit end position derived from `QueryCurrentAlphaWordEditorSpan`
+- selector `0x87`
+  - validates whether that same `QueryCurrentAlphaWordEditorSpan` already reaches the current full document size from `QueryCurrentAlphaWordFileSize`
+
+### AlphaWordPlus Byte Translation Tables
+
+The AlphaWordPlus payload contains two 256-byte translation tables:
+
+- `DAT_0001488c`
+  - write-side source-byte to internal-byte mapping
+- `DAT_0001498c`
+  - read-side internal-byte to output-byte mapping
+
+The PoC now extracts and models them directly from `alphawordplus.os3kapp`.
+
+What is now pinned:
+
+- printable ASCII `0x20..0x7e` is identity in both directions
+  - plain letters, digits, punctuation, and space are not remapped at all
+- the non-identity region is concentrated in:
+  - control bytes `0x00..0x1f`
+  - high bytes `0x80..0xff`
+- the two tables are not perfect inverses
+  - current inverse-match count is `212 / 256` in both directions
+  - the remaining `44` values are alias or reserved cases
+
+Concrete write-side examples from `DAT_0001488c`:
+
+- `0x00 -> 0xe7`
+- `0x01 -> 0xfc`
+- `0x02 -> 0xd6`
+- `0x1d -> 0xac`
+- `0x1e -> 0x00`
+- `0x1f -> 0x00`
+- `0xbc -> 0xb6`
+- `0xbd -> 0xbd`
+- `0xc0 -> 0xf8`
+
+Concrete read-side examples from `DAT_0001498c`:
+
+- `0x80 -> 0x19`
+- `0x8c -> 0x04`
+- `0x9d -> 0xfd`
+- `0xb6 -> 0xbc`
+- `0xbe -> 0x1c`
+- `0xfc -> 0x01`
+
+Important structural property:
+
+- multiple source bytes collapse onto the same encoded byte on the write side
+- for example, encoded `0x00` currently has these known source aliases:
+  - `0x1e 0x1f 0xa9 0xaa 0xab 0xac 0xad 0xae 0xc1 0xd9 0xec 0xfa 0xfe 0xff`
+- that aliasing is why the read table cannot be a full inverse of the write table
+
+Current best interpretation:
+
+- normal typing stays simple because printable ASCII is identity
+- the tables mainly exist to carry:
+  - AlphaWord-internal control bytes
+  - document/stream command markers
+  - non-ASCII or applet-specific symbols and glyph selectors
+- bytes such as `0xbb`, `0xbc`, and nearby high-byte values should be treated as command-space markers rather than plain text
+
+More detailed structure from the current table sweep:
+
+- among high source bytes `0x80..0xff`:
+  - `43` map into control-space outputs `< 0x20`
+  - only `6` map into printable ASCII outputs
+  - the remaining `79` map into high-byte outputs `>= 0x80`
+- the printable-ASCII aliases from the high-byte region are currently:
+  - `0xd3 -> 0x60` `` ` ``
+  - `0xe7 -> 0x67` `'g'`
+  - `0xea -> 0x6a` `'j'`
+  - `0xf0 -> 0x70` `'p'`
+  - `0xf1 -> 0x71` `'q'`
+  - `0xf9 -> 0x79` `'y'`
+
+That means the high-byte region is not “extended ASCII text” in any normal sense. It is mostly a compact command/glyph namespace that happens to include a few printable aliases.
+
+Important command-space preservation examples:
+
+- write-side:
+  - `0xbc -> 0xb6`
+  - `0xbd -> 0xbd`
+  - `0xbf -> 0xbc`
+  - `0xca -> 0xff`
+- read-side:
+  - `0xb6 -> 0xbc`
+  - `0xbd -> 0xbd`
+  - `0xbc -> 0xbf`
+  - `0xff -> 0xca`
+
+So the namespace command markers are not raw pass-through bytes. They are carried through the AlphaWordPlus channel in this translated high-byte domain and must be encoded/decoded through the tables to round-trip correctly.
 
 The most useful clarification from the recent AlphaWordPlus pass is that the `0xa364/0xa36c/0xa388` family is shared and context-sensitive:
 
