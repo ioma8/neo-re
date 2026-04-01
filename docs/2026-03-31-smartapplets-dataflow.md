@@ -279,20 +279,39 @@ Evidence for those names:
 - `RunAlphaWordChooserDialog` and several other AlphaWordPlus chooser loops use the stable `0xa1f8 -> row text helpers -> 0xa1fc -> 0xa200 -> optional 0xa204 -> 0xa208 -> 0xa20c/0xa210/0xa214` sequence
 - `CountNewlineDrivenRowAdvances` in AlphaWordPlus scans newline-delimited text and calls `0xa1fc`; the nonzero return path acts like a stop/overflow condition, which is why `0xa1fc` is now treated as a row-advance helper rather than an object resolver
 
-Shared AlphaWordPlus-local text rendering helpers layered on top of those runtime services:
+Exact AlphaWordPlus trap-stub import table:
 
-- `AdvanceTextRow`
-  - advances the text output position by one row
-  - confirmed by `ShowPleaseWaitBanner`, which calls it three times before drawing the banner string
-- `ResetTextColumn`
-  - resets the horizontal text position to the line or field start
-  - confirmed by statistics/details renderers and by `RedrawSingleLineTextField`, where it brackets field redraw work
-- `DrawPendingText`
-  - emits the currently prepared string payload to the screen
-  - confirmed by the stable pattern `LookupAlphaWordPlusString(...) -> DrawPendingText()`
-- `AdvanceTextColumn`
-  - advances the text output position by one column or blank cell
-  - confirmed by menu/highlight renderers that call it repeatedly to offset the active choice marker, and by prompt renderers that use it as left/right padding around drawn text
+- a raw byte scan of `alphawordplus.os3kapp` at file offset `0x12d88` shows a contiguous A-line import block beginning `a008 a00c a010 a014 ...` and continuing through at least `a44c`
+- that means the addresses `0x00012d88..0x00012f90` are direct runtime service stubs, not ordinary applet-local helper functions
+- a few earlier behavior-level names at those addresses were therefore too local; the exact trap ids now take precedence
+
+High-confidence trap-stub mappings from that block:
+
+- `0x00012d88` `TrapA008_GetTextRowCol`
+- `0x00012d8a` `TrapA00C_DrawPendingTextAndAdvanceRow`
+  - conservative behavioral name; exact trap id is certain, detailed ABI still is not
+- `0x00012d8c` `TrapA010_DrawPredefinedGlyph`
+- `0x00012d8e` `TrapA014_DrawCStringAtCurrentPosition`
+- `0x00012dbc` `TrapA094_ReadKeyCode`
+- `0x00012dbe` `TrapA098_FlushTextFrame`
+- `0x00012dc0` `TrapA09C_IsKeyReady`
+- `0x00012dc8` `TrapA0A4_PumpUiEvents`
+- `0x00012ddc` `TrapA0D4_DelayTicks`
+- `0x00012e78` `TrapA20C_ReadChooserEventCode`
+- `0x00012e7a` `TrapA210_ReadChooserActionSelector`
+- `0x00012f12` `TrapA36C_QueryActiveServiceStatus`
+- `0x00012f22` `TrapA388_QueryActiveServiceDisabledState`
+- `0x00012f26` `TrapA390_SharedRuntime`
+- `0x00012f2c` `TrapA39C_SharedRuntime`
+
+Remaining currently unresolved entries in that direct import table are still renamed structurally by exact trap id, for example:
+
+- `TrapA018`, `TrapA01C`, `TrapA084`, `TrapA088`
+- `TrapA0A0`, `TrapA0B4`, `TrapA0DC`, `TrapA0E0`
+- `TrapA14C`, `TrapA158`, `TrapA15C`, `TrapA160`, `TrapA174`
+- `TrapA1AC`, `TrapA1B0`, `TrapA1C0`, `TrapA1C4`, `TrapA1D4`, `TrapA1D8`, `TrapA1DC`, `TrapA1E0`, `TrapA1E4`, `TrapA1EC`
+- `TrapA21C`, `TrapA224`, `TrapA22C`, `TrapA23C`, `TrapA244`, `TrapA248`, `TrapA250`, `TrapA260`, `TrapA26C`, `TrapA270`
+- `TrapA2B0`, `TrapA2B4`, `TrapA2B8`, `TrapA2BC`, `TrapA2CC`, `TrapA2D0`, `TrapA2D4`, `TrapA2DC`, `TrapA2E0`, `TrapA2EC`, `TrapA2F0`, `TrapA2FC`, `TrapA32C`, `TrapA370`, `TrapA374`, `TrapA378_SharedRuntime`, `TrapA380`, `TrapA394`, `TrapA398`, `TrapA3AC`, `TrapA3B0`, `TrapA44C`
 
 Recovered call shapes from raw 68k in `RunCalculatorFunctionMenu`:
 
