@@ -673,6 +673,70 @@ Late AlphaWordPlus helper block now mapped:
   - token comparison helper with optional case-folding
 - `ApplySpellCheckReplacementAcrossSessionRange`
   - applies a replacement across the active spell-check session range
+- `MatchFindReplaceLiteralAtCharStream`
+  - matches a prepared literal against the current AlphaWord character stream using exact byte comparison
+- `MatchFindReplaceLiteralCaseFoldedAtCharStream`
+  - matches that same prepared literal using the AlphaWord case-folding helper instead of raw byte equality
+- `UpdateSingleLineTextFieldViewportForKey`
+  - updates the inline single-line editor cursor/window state for home/end and left/right style navigation keys
+- `LocateNthNewlineDelimitedEntry`
+  - walks a newline-delimited in-memory entry table and returns the start pointer plus byte length of the requested entry
+- `LoadCurrentCharStreamPreviewIntoBuffer`
+  - conservative name: primes the current AlphaWord char stream, optionally skips one initial unit, and loads up to the requested preview length into the caller buffer
+- `ValidateAlphaWordFileNameCharacters`
+  - validates a proposed AlphaWord file name against the local filename-character classification table
+- `LoadActiveSelectionIntoSearchBuffer`
+  - loads the active document selection into the shared search/replace buffer
+- `LoadCurrentWordIntoSearchBuffer`
+  - loads the current word under the char-stream cursor into that same search buffer
+- `ExtractDelimitedTokenFromCharStream`
+  - skips forward to the next delimiter boundary, then extracts the following token until the next delimiter or NUL
+- `CopyCharStreamPrefixToBuffer`
+  - copies a bounded prefix of the current AlphaWord char stream into a caller buffer
+- `IsDelimitedTokenBoundary`
+  - classifies bytes accepted as token boundaries by the local scanner
+- `LookupQueuedEntryKindString`
+  - maps small queued-entry kind codes to the corresponding AlphaWordPlus string ids
+- `AdvanceQueuedEntryCursor`
+  - advances the current queued-entry iterator before querying the entry kind
+- `ReadQueuedEntryKind`
+  - returns the small kind code for the current queued entry
+- `ReadQueuedEntryCount`
+  - returns the queued-entry count used by the chooser/action workflows
+- `IsQueuedEntryMarked`
+  - returns whether the current queued entry is already marked/selected
+- `ShowCurrentFileSearchBanner`
+  - draws the current-file banner used by cross-file prepared-snippet search
+- `ShowAlphaWordModalStatusPrompt`
+  - renders a short modal status prompt and waits for acknowledgment
+- `RunValidatedSingleLineTextFieldPrompt`
+  - runs the inline single-line text field until accept/cancel, rejecting empty input when the current pending text length is zero
+- `SearchCurrentFileForPreparedSnippet`
+  - searches the current file’s char stream for the prepared pending-text snippet
+- `SearchAcrossAlphaWordFilesForPreparedSnippet`
+  - iterates AlphaWord files and rebinds the current workspace until that prepared snippet is found or the file ring is exhausted
+- `RefreshNumericStatusDisplayIfChanged`
+  - redraws the numeric status area only when the sampled value differs from the cached value
+- `RenderPrimaryNumericStatusValue`
+  - formats and draws the primary numeric status field
+- `RenderSecondaryNumericStatusValue`
+  - formats and draws the secondary numeric status field
+- `RunNumericStatusSummaryDialog`
+  - conservative name: draws a summary screen for the two numeric status values and loops on modal dialog keys
+- `RunNumericStatusLiveDialog`
+  - conservative name: drives the live numeric status monitor, refreshing until user exit or a local limit condition
+- `RunQueuedEntryPreflightPrompt`
+  - conservative name: performs the intro/preflight prompt before the queued-entry chooser flow starts
+- `RunQueuedEntryChooserWorkflow`
+  - conservative name: chooser workflow over the full queued-entry set
+- `RunQueuedEntryActionChooserWorkflow`
+  - conservative name: action chooser layered on top of that queued-entry set
+- `RunMarkedQueuedEntryChooserWorkflow`
+  - conservative name: chooser workflow restricted to entries already marked in the queued-entry state
+- `RunMarkedQueuedEntryActionChooserWorkflow`
+  - conservative name: action chooser layered on top of the marked queued-entry subset
+- `RunPreparedSnippetActionChooser`
+  - chooser dialog for the prepared snippet buffer, including edit/confirm actions
 - `InitializeAlphaWordAdvancedWorkflowState`
   - conservative name: initializes a larger late-stage AlphaWordPlus workflow state block and dispatches into a jump table
 - `RunAlphaWordSingleValuePrompt`
@@ -697,6 +761,21 @@ Additional conservative AlphaWordPlus-local names from the final unnamed helper 
 - `SelectAlphaWordSlotAndPrimeCharStream`
   - selects the requested slot workspace, primes the low-level character stream, and performs one initial read-step
   - the decompiler collapses this into a very small wrapper, so the name stays at the observed slot-and-stream behavior level
+
+Shared compiler/runtime helper layer now named in the AlphaWordPlus project:
+
+- `NormalizeInternalFloat32`, `DecodeIeeeFloat32ToInternal`, `EncodeInternalToIeeeFloat32`
+  - compiler-style float32 normalization and pack/unpack helpers reused by the applet-local numeric status code
+- `DecodeIeeeFloat64ToInternal`, `EncodeInternalToIeeeFloat64`
+  - corresponding float64 conversion helpers
+- `ShiftRightU64PairWithFill`, `ShiftLeftU64PairWithCarry`, `AddU64PairWithCarry`, `DivideU64PairByU64Pair`
+  - 64-bit pair arithmetic helpers used by the float64 normalization/conversion path
+- `ShiftRightU32WithFill`, `ShiftLeftU32WithCarry`, `AddU32WithCarry`
+  - matching 32-bit helper layer used by the float32 path
+- `NormalizeMantissaU32`, `NormalizeMantissaU64Pair`
+  - mantissa normalization helpers built on the shift/count-leading-zero primitives
+- `CountLeadingZerosU32`, `CountLeadingZerosU64`, `MultiplyU32Fragments`
+  - low-level compiler runtime helpers rather than AlphaWordPlus-specific document logic
 
 ## AlphaWordPlus Typing And Edit Command Path
 
