@@ -1,0 +1,55 @@
+pub mod app;
+pub mod backup;
+pub mod protocol;
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub mod usb;
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+pub mod usb {
+    use std::time::Duration;
+
+    use crate::protocol::FileEntry;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum NeoMode {
+        Missing,
+        Hid,
+        Direct,
+    }
+
+    pub struct NeoClient;
+
+    pub fn detect_mode() -> anyhow::Result<NeoMode> {
+        Ok(NeoMode::Missing)
+    }
+
+    pub fn switch_hid_to_direct() -> anyhow::Result<()> {
+        anyhow::bail!("USB access is not implemented for this target yet")
+    }
+
+    pub fn wait_for_mode(
+        _target: NeoMode,
+        _attempts: usize,
+        _delay: Duration,
+    ) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+
+    impl NeoClient {
+        pub fn open_and_init() -> anyhow::Result<Self> {
+            anyhow::bail!("USB access is not implemented for this target yet")
+        }
+
+        pub fn list_files(&mut self) -> anyhow::Result<Vec<FileEntry>> {
+            anyhow::bail!("USB access is not implemented for this target yet")
+        }
+
+        pub fn download_file(&mut self, _slot: u8) -> anyhow::Result<Vec<u8>> {
+            anyhow::bail!("USB access is not implemented for this target yet")
+        }
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
+pub mod usb_support;

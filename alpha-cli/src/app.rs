@@ -258,6 +258,12 @@ impl App {
     }
 }
 
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub fn human_bytes(bytes: u32) -> String {
     if bytes >= 1_048_576 {
         format!("{:.1} MB", f64::from(bytes) / 1_048_576.0)

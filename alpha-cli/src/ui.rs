@@ -11,10 +11,9 @@ use crossterm::{
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
 
-use crate::{
-    app::{App, Screen},
-    ui_render,
-};
+use alpha_cli::app::{App, Screen};
+
+use crate::ui_render;
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
 

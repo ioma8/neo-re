@@ -2,10 +2,16 @@
 
 Minimal terminal backup utility for AlphaSmart NEO.
 
-Run:
+Run the terminal UI:
 
 ```bash
 cargo run --manifest-path alpha-cli/Cargo.toml
+```
+
+Run the GUI:
+
+```bash
+cargo run --manifest-path alpha-cli/Cargo.toml --bin alpha-gui
 ```
 
 Behavior:
@@ -29,4 +35,19 @@ Logs are written to:
 
 ```text
 ~/alpha-cli/logs/alpha-cli.log
+```
+
+The GUI writes its own log file:
+
+```text
+~/alpha-cli/logs/alpha-gui.log
+```
+
+The GUI uses `eframe`/`egui` with the lighter `glow` renderer. It shares the same protocol, USB, and backup code as the terminal UI. The desktop USB implementation is enabled for macOS, Linux, and Windows. Mobile targets compile the GUI with a clear USB-not-implemented path until a mobile USB adapter is added.
+
+Validated GUI check targets:
+
+```bash
+cargo check --manifest-path alpha-cli/Cargo.toml --target aarch64-apple-darwin --bin alpha-gui
+cargo check --manifest-path alpha-cli/Cargo.toml --target aarch64-linux-android --bin alpha-gui
 ```

@@ -1,11 +1,7 @@
-mod app;
-mod backup;
-mod protocol;
 mod ui;
 mod ui_render;
-mod usb;
-mod usb_support;
 
+use alpha_cli::backup;
 use anyhow::Context;
 use tracing_subscriber::{fmt, prelude::*};
 

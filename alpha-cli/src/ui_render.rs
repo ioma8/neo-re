@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap},
 };
 
-use crate::app::{self, App, Screen};
+use alpha_cli::app::{self, App, Screen};
 
 pub fn draw(frame: &mut Frame<'_>, app: &App) {
     let chunks = Layout::default()
