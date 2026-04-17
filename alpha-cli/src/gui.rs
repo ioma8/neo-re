@@ -72,7 +72,6 @@ const MUTED: Color32 = Color32::from_rgb(106, 113, 124);
 const LINE: Color32 = Color32::from_rgb(225, 229, 236);
 const ROW_SELECTED: Color32 = Color32::from_rgb(224, 238, 255);
 const SURFACE: Color32 = Color32::from_rgb(246, 248, 251);
-const TABLE: Color32 = Color32::from_rgb(255, 255, 255);
 const ROW_ALT: Color32 = Color32::from_rgb(250, 251, 253);
 
 struct AlphaGui {
@@ -119,7 +118,7 @@ impl eframe::App for AlphaGui {
                 ui.add_space(if compact { 10.0 } else { 14.0 });
 
                 let footer_height = if self.app.screen == Screen::Files {
-                    if compact { 126.0 } else { 78.0 }
+                    if compact { 120.0 } else { 72.0 }
                 } else if compact {
                     58.0
                 } else {
@@ -184,7 +183,14 @@ impl AlphaGui {
 
     fn files_view(&mut self, ui: &mut egui::Ui, compact: bool) {
         ui.horizontal(|ui| {
-            ui.heading(RichText::new("Files").color(INK));
+            ui.vertical(|ui| {
+                ui.heading(RichText::new("Files").color(INK));
+                ui.label(
+                    RichText::new(format!("{} AlphaWord slots", self.app.files.len()))
+                        .size(13.0)
+                        .color(MUTED),
+                );
+            });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
                     .add_enabled(!self.app.is_downloading(), secondary_button_widget("Back"))
@@ -195,12 +201,10 @@ impl AlphaGui {
             });
         });
 
-        table_header(ui, compact);
-        let list_height = (ui.available_height() - 10.0).max(160.0);
+        ui.add_space(if compact { 8.0 } else { 12.0 });
+        let list_height = (ui.available_height() - 8.0).max(160.0);
         egui::Frame::new()
-            .fill(TABLE)
-            .stroke(Stroke::new(1.0, LINE))
-            .corner_radius(12.0)
+            .fill(Color32::TRANSPARENT)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height(list_height)
@@ -211,6 +215,7 @@ impl AlphaGui {
                             if file_row(ui, selected, index, entry, compact).clicked() {
                                 self.selected_row = index;
                             }
+                            ui.add_space(6.0);
                         }
                         let all_index = self.app.files.len();
                         if all_files_row(ui, self.selected_row == all_index, compact).clicked() {
@@ -227,7 +232,7 @@ impl AlphaGui {
         let disabled = self.app.is_downloading();
         let selection = selected_label(&self.app.files, self.selected_row);
         if compact {
-            ui.label(RichText::new(selection).color(MUTED));
+            ui.label(RichText::new(selection).size(13.0).color(MUTED));
             if ui
                 .add_enabled_ui(!disabled, |ui| {
                     ui.add_sized(
@@ -241,17 +246,28 @@ impl AlphaGui {
                 self.start_selected_backup();
             }
         } else {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(selection).color(MUTED));
-                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    if ui
-                        .add_enabled(!disabled, primary_button_widget("Download selected"))
-                        .clicked()
-                    {
-                        self.start_selected_backup();
-                    }
+            egui::Frame::new()
+                .fill(SURFACE)
+                .inner_margin(egui::Margin::symmetric(0, 2))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(selection).size(13.0).color(MUTED));
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            if ui
+                                .add_enabled_ui(!disabled, |ui| {
+                                    ui.add_sized(
+                                        [172.0, 36.0],
+                                        primary_button_widget("Download selected"),
+                                    )
+                                })
+                                .inner
+                                .clicked()
+                            {
+                                self.start_selected_backup();
+                            }
+                        });
+                    });
                 });
-            });
         }
     }
 
@@ -359,13 +375,28 @@ fn file_row(
                     ui.label(RichText::new(format!("{size}  ~{words} words")).color(MUTED));
                 });
             } else {
-                table_row(
-                    ui,
-                    RichText::new(slot).color(MUTED),
-                    RichText::new(&entry.name).strong().color(INK),
-                    RichText::new(size).color(MUTED),
-                    RichText::new(format!("~{words}")).color(MUTED),
-                );
+                ui.horizontal(|ui| {
+                    slot_badge(ui, &slot, selected);
+                    ui.add_space(6.0);
+                    ui.vertical(|ui| {
+                        ui.add_space(2.0);
+                        ui.label(RichText::new(&entry.name).size(15.0).strong().color(INK));
+                        ui.label(
+                            RichText::new(format!("Slot {}", entry.slot))
+                                .size(12.0)
+                                .color(MUTED),
+                        );
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!("~{words} words"))
+                                .size(13.0)
+                                .color(MUTED),
+                        );
+                        ui.add_space(18.0);
+                        ui.label(RichText::new(size).size(13.0).strong().color(ACCENT_DARK));
+                    });
+                });
             }
         })
         .response
@@ -382,59 +413,31 @@ fn all_files_row(ui: &mut egui::Ui, selected: bool, compact: bool) -> egui::Resp
                     ui.label(RichText::new("Download every AlphaWord slot").color(MUTED));
                 });
             } else {
-                table_row(
-                    ui,
-                    RichText::new("").color(MUTED),
-                    RichText::new("All files").strong().color(INK),
-                    RichText::new("").color(MUTED),
-                    RichText::new("all slots").color(MUTED),
-                );
+                ui.horizontal(|ui| {
+                    slot_badge(ui, "All", selected);
+                    ui.add_space(6.0);
+                    ui.vertical(|ui| {
+                        ui.add_space(2.0);
+                        ui.label(RichText::new("All files").size(15.0).strong().color(INK));
+                        ui.label(
+                            RichText::new("Download every AlphaWord slot")
+                                .size(12.0)
+                                .color(MUTED),
+                        );
+                    });
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new("all slots").size(13.0).color(MUTED));
+                    });
+                });
             }
         })
         .response
         .interact(egui::Sense::click())
 }
 
-fn table_header(ui: &mut egui::Ui, compact: bool) {
-    if compact {
-        return;
-    }
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.add_sized(
-            [52.0, 20.0],
-            egui::Label::new(RichText::new("Slot").color(MUTED)),
-        );
-        let file_width = (ui.available_width() - 216.0).max(220.0);
-        ui.add_sized(
-            [file_width, 20.0],
-            egui::Label::new(RichText::new("File").color(MUTED)),
-        );
-        ui.add_sized(
-            [96.0, 20.0],
-            egui::Label::new(RichText::new("Size").color(MUTED)),
-        );
-        ui.add_sized(
-            [96.0, 20.0],
-            egui::Label::new(RichText::new("Words").color(MUTED)),
-        );
-    });
-    ui.add_space(2.0);
-}
-
-fn table_row(ui: &mut egui::Ui, slot: RichText, name: RichText, size: RichText, words: RichText) {
-    ui.horizontal(|ui| {
-        ui.add_sized([52.0, 20.0], egui::Label::new(slot));
-        let file_width = (ui.available_width() - 216.0).max(220.0);
-        ui.add_sized([file_width, 20.0], egui::Label::new(name).truncate());
-        ui.add_sized([96.0, 20.0], egui::Label::new(size));
-        ui.add_sized([96.0, 20.0], egui::Label::new(words));
-    });
-}
-
 fn row_frame(selected: bool, index: usize) -> egui::Frame {
     egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(12, 8))
+        .inner_margin(egui::Margin::symmetric(12, 9))
         .stroke(if selected {
             Stroke::new(1.0, ACCENT)
         } else {
@@ -446,6 +449,18 @@ fn row_frame(selected: bool, index: usize) -> egui::Frame {
             (false, false) => ROW_ALT,
         })
         .corner_radius(if selected { 8.0 } else { 0.0 })
+}
+
+fn slot_badge(ui: &mut egui::Ui, text: &str, selected: bool) {
+    let fill = if selected { ACCENT } else { CONTROL };
+    let color = if selected { Color32::WHITE } else { MUTED };
+    egui::Frame::new()
+        .fill(fill)
+        .corner_radius(8.0)
+        .inner_margin(egui::Margin::symmetric(10, 5))
+        .show(ui, |ui| {
+            ui.label(RichText::new(text).size(12.0).strong().color(color));
+        });
 }
 
 fn primary_button(ui: &mut egui::Ui, label: &str, width: f32) -> egui::Response {
