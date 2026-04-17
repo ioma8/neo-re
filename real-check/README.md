@@ -30,6 +30,14 @@ Probe the connected device and print the selected interface and endpoints:
 uv run --project real-check real-check probe
 ```
 
+Print a read-only raw trace of AlphaWord file-attribute responses:
+
+```bash
+uv run --project real-check real-check debug-attributes
+```
+
+Use this when `list` fails. It prints the reset/switch response, each slot's raw attribute command/header, and payload checksums for data-bearing responses.
+
 List AlphaWord files:
 
 ```bash
@@ -58,6 +66,7 @@ uv run --project real-check real-check get 2 --output slot2.bin
 - AlphaWord applet id is `0xa000`
 - file listing is based on raw attribute opcode `0x13` across slots `1..8`
 - file download uses retrieve opcode `0x12` and repeated chunk opcode `0x10`
+- direct USB reads can return short packets; callers must accumulate until the requested byte count is satisfied
 
 ## Physical-device safety
 

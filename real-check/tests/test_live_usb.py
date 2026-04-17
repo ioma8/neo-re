@@ -2,12 +2,13 @@ import unittest
 from unittest import mock
 
 from real_check.live_usb import (
+    LiveUsbTransport,
     build_interface_descriptors,
     classify_alphasmart_device,
     try_switch_to_updater,
     watch_alphasmart_devices,
 )
-from real_check.usb_select import EndpointDescriptor, InterfaceDescriptor
+from real_check.usb_select import EndpointDescriptor, EndpointSelection, InterfaceDescriptor
 
 
 class FakeEndpoint:
@@ -50,6 +51,21 @@ class FakeUsbDevice:
         if timeout != 600:
             raise AssertionError(f"unexpected timeout {timeout}")
         return b"Switched"
+
+    def attach_kernel_driver(self, interface: int) -> None:
+        pass
+
+
+class ChunkedReadUsbDevice:
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = list(chunks)
+        self.reads: list[tuple[int, int, int]] = []
+
+    def read(self, endpoint: int, length: int, *, timeout: int):
+        self.reads.append((endpoint, length, timeout))
+        if not self.chunks:
+            raise AssertionError("unexpected read")
+        return self.chunks.pop(0)
 
     def attach_kernel_driver(self, interface: int) -> None:
         pass
@@ -158,6 +174,34 @@ class TrySwitchToUpdaterTests(unittest.TestCase):
             [
                 (0x02, b"?\xff\x00reset"),
                 (0x02, b"?Swtch\x00\x00"),
+            ],
+        )
+
+
+class LiveUsbTransportTests(unittest.TestCase):
+    def test_read_exact_accumulates_short_usb_reads(self) -> None:
+        device = ChunkedReadUsbDevice([b"12345678", b"abcdefgh", b"ABCDEFGH", b"87654321", b"abcdefgh"])
+        transport = LiveUsbTransport(
+            device,
+            EndpointSelection(
+                interface_number=0,
+                alternate_setting=0,
+                out_endpoint=EndpointDescriptor(address=0x01, transfer_type="bulk", max_packet_size=64),
+                in_endpoint=EndpointDescriptor(address=0x82, transfer_type="bulk", max_packet_size=64),
+            ),
+        )
+
+        data = transport.read_exact(40, timeout_ms=600)
+
+        self.assertEqual(data, b"12345678abcdefghABCDEFGH87654321abcdefgh")
+        self.assertEqual(
+            device.reads,
+            [
+                (0x82, 40, 600),
+                (0x82, 32, 600),
+                (0x82, 24, 600),
+                (0x82, 16, 600),
+                (0x82, 8, 600),
             ],
         )
 

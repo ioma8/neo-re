@@ -47,8 +47,15 @@ class LiveUsbTransport:
         self._device.write(self._selection.out_endpoint.address, payload)
 
     def read_exact(self, length: int, *, timeout_ms: int) -> bytes:
-        data = self._device.read(self._selection.in_endpoint.address, length, timeout=timeout_ms)
-        return bytes(data)
+        payload = bytearray()
+        while len(payload) < length:
+            chunk = self._device.read(
+                self._selection.in_endpoint.address,
+                length - len(payload),
+                timeout=timeout_ms,
+            )
+            payload.extend(bytes(chunk))
+        return bytes(payload)
 
     def close(self) -> None:
         if self._closed:

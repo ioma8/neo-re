@@ -81,6 +81,44 @@ class ClientTests(unittest.TestCase):
         )
         self.assertEqual(transport.writes[2], build_updater_command(command=0x13, argument=1, trailing=0xA000))
 
+    def test_debug_alpha_word_attributes_reports_raw_headers_payload_and_checksums(self) -> None:
+        slot_one_record = (
+            b"FILE1\x00" + (b"\x00" * 18) + (0x28).to_bytes(4, "big") + (0x123).to_bytes(4, "big") + b"\x11" * 8
+        )
+        transport = FakeTransport(
+            [
+                b"Switched",
+                _build_response(0x5A, 0x28, sum(slot_one_record) & 0xFFFF),
+                slot_one_record,
+                _build_response(0x90, 0, 0),
+                _build_response(0x90, 0, 0),
+                _build_response(0x90, 0, 0),
+                _build_response(0x90, 0, 0),
+                _build_response(0x90, 0, 0),
+                _build_response(0x90, 0, 0),
+                _build_response(0x90, 0, 0),
+            ]
+        )
+        client = NeoAlphaWordClient(transport)
+
+        lines = client.debug_alpha_word_attributes()
+
+        self.assertEqual(lines[0], "write reset 3f ff 00 72 65 73 65 74")
+        self.assertEqual(lines[1], "write switch 3f 53 77 74 63 68 00 00")
+        self.assertEqual(lines[2], "switch response 53 77 69 74 63 68 65 64 Switched")
+        self.assertIn("slot 1 status=0x5a argument=40 trailing=0x0225", lines)
+        self.assertIn("slot 1 sum16=0x0225 sum8=0x25 trailing=0x0225", lines)
+
+    def test_debug_alpha_word_attributes_reports_unparseable_headers(self) -> None:
+        bad_header = bytes.fromhex("5a 00 00 00 28 00 00 00")
+        transport = FakeTransport([b"Switched", bad_header])
+        client = NeoAlphaWordClient(transport)
+
+        lines = client.debug_alpha_word_attributes()
+
+        self.assertIn("slot 1 header 5a 00 00 00 28 00 00 00", lines)
+        self.assertIn("slot 1 header_parse_error updater response checksum mismatch", lines)
+
     def test_download_alpha_word_file_reassembles_chunked_payload(self) -> None:
         transport = FakeTransport(
             [

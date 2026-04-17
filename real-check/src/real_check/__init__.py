@@ -28,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     watch_parser.add_argument("--timeout", type=float, default=10.0)
     watch_parser.add_argument("--try-switch", action="store_true")
     subparsers.add_parser("switch-to-direct")
+    subparsers.add_parser("debug-attributes")
     subparsers.add_parser("list")
 
     get_parser = subparsers.add_parser("get")
@@ -89,6 +90,16 @@ def main(argv: list[str] | None = None) -> int:
                     f"slot={entry.slot} name={entry.name} "
                     f"file_length={entry.file_length} reserved_length={entry.reserved_length}"
                 )
+        finally:
+            client.close()
+        return 0
+
+    if args.command == "debug-attributes":
+        transport = open_direct_usb_transport()
+        client = NeoAlphaWordClient(transport)
+        try:
+            for line in client.debug_alpha_word_attributes():
+                print(line)
         finally:
             client.close()
         return 0

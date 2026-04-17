@@ -21,6 +21,7 @@ class CLITests(unittest.TestCase):
         self.assertIn("probe", stdout.getvalue())
         self.assertIn("watch", stdout.getvalue())
         self.assertIn("switch-to-direct", stdout.getvalue())
+        self.assertIn("debug-attributes", stdout.getvalue())
         self.assertIn("list", stdout.getvalue())
         self.assertIn("get", stdout.getvalue())
 
@@ -122,6 +123,22 @@ class CLITests(unittest.TestCase):
             "slot=1 name=FILE1 file_length=5 reserved_length=40\n",
         )
         open_transport.assert_called_once()
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_debug_attributes_command_prints_raw_trace(self, client_cls: mock.Mock, open_transport: mock.Mock) -> None:
+        client = client_cls.return_value
+        client.debug_alpha_word_attributes.return_value = ["write reset 3f ff 00 72 65 73 65 74", "slot 1 empty"]
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["debug-attributes"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "write reset 3f ff 00 72 65 73 65 74\nslot 1 empty\n")
+        open_transport.assert_called_once()
+        client.debug_alpha_word_attributes.assert_called_once()
         client.close.assert_called_once()
 
     @mock.patch("real_check.open_direct_usb_transport")

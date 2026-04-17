@@ -69,6 +69,43 @@ class NeoAlphaWordClient:
             )
         return entries
 
+    def debug_alpha_word_attributes(self) -> list[str]:
+        lines: list[str] = []
+        reset = build_reset_preamble()
+        switch = build_switch_packet(0)
+        lines.append(f"write reset {reset.hex(' ')}")
+        self._transport.write(reset)
+        lines.append(f"write switch {switch.hex(' ')}")
+        self._transport.write(switch)
+        switch_response = self._transport.read_exact(8, timeout_ms=1000)
+        lines.append(f"switch response {switch_response.hex(' ')} {parse_switch_response(switch_response).value}")
+        self._updater_entered = True
+
+        for slot in range(1, 9):
+            command = build_raw_file_attributes_command(file_slot=slot, applet_id=self._alphaword_applet_id)
+            lines.append(f"slot {slot} command {command.hex(' ')}")
+            self._transport.write(command)
+            header_raw = self._transport.read_exact(8, timeout_ms=1000)
+            lines.append(f"slot {slot} header {header_raw.hex(' ')}")
+            try:
+                response = parse_updater_response(header_raw)
+            except ValueError as exc:
+                lines.append(f"slot {slot} header_parse_error {exc}")
+                break
+            lines.append(
+                f"slot {slot} status=0x{response.status:02x} "
+                f"argument={response.argument} trailing=0x{response.trailing:04x}"
+            )
+            if response.status != 0x5A:
+                continue
+            payload = self._transport.read_exact(response.argument, timeout_ms=1000)
+            lines.append(f"slot {slot} payload {payload.hex(' ')}")
+            lines.append(
+                f"slot {slot} sum16=0x{sum(payload) & 0xffff:04x} "
+                f"sum8=0x{sum(payload) & 0xff:02x} trailing=0x{response.trailing:04x}"
+            )
+        return lines
+
     def download_alpha_word_file(self, *, slot: int, requested_length: int = 0x80000) -> bytes:
         self.enter_updater_mode()
         self._transport.write(

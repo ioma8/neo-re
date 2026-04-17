@@ -95,6 +95,7 @@ Behavior confirmed by Ghidra:
 - reads the returned attribute bytes with `read_data1`
 - verifies the returned 16-bit checksum against the byte sum of the attribute payload
 - caller-provided receive storage is `0x28` bytes
+- live USB confirmation: the `0x28`-byte payload can arrive as multiple short bulk reads, observed as five 8-byte reads for a single attributes record. The transport must accumulate exact byte counts before parsing the next updater header.
 - `CopyAppletFileNameFromRawAttributes` copies a NUL-terminated string directly from the first `0x18` bytes
 - `NormalizeAlphaWordAttributeWords` endian-swaps two 32-bit words from offsets `0x18` and `0x1c`
 - `UpdaterSaveAppletFileData` treats the big-endian word at offset `0x1c` as the file content length
@@ -674,6 +675,7 @@ That means they are not the core `Get/Print AlphaWord Files` path documented her
   - `0x90`
   - `0x5a`
 - raw attribute record length is `0x28`
+- live direct USB reads may return short packets, so higher-level reads must loop until `arg32` bytes have been collected
 - raw attribute offsets `0x00..0x17` are the fixed name field copied by `CopyAppletFileNameFromRawAttributes`
 - raw attribute offsets `0x18` and `0x1c` are big-endian 32-bit values used by NeoManager
 - raw attribute offset `0x18` is best understood as a reserved length / storage-footprint field distinct from payload byte count

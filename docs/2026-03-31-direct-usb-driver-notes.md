@@ -136,6 +136,7 @@ Inference:
 - Reads are not plain raw stream reads.
 - The DLL maintains unread tail bytes across read-loop iterations, and likely across successive reads as long as the global handle stays valid.
 - The transport naturally exposes 8-byte inbound chunks at this layer, even though the caller API asks for arbitrary byte counts.
+- Live macOS/libusb testing confirmed the same behavior: a `0x28` AlphaWord attributes payload arrived as five 8-byte reads. User-mode `read_exact` logic must accumulate short reads before parsing the next 8-byte updater header.
 
 ### `AsUSBCommSwitchToApplet`
 
@@ -595,7 +596,6 @@ These still need confirmation:
 - Whether `WriteFile` consistently lands on one bulk OUT pipe or can switch depending on the configured-interface cache
 - Whether `ReadFile` consistently lands on one bulk IN pipe or can switch depending on the configured-interface cache
 - Exact layout of the 8-byte `?Swtch` command beyond the embedded applet ID
-- Whether the 8-byte inbound read staging maps directly to USB max-packet size or to a higher-level record framing choice
 
 ## Best Next Reverse-Engineering Targets
 

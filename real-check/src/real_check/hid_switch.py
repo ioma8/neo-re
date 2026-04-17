@@ -5,6 +5,8 @@ import sys
 import time
 from typing import Protocol
 
+import usb.core
+
 
 ALPHASMART_VENDOR_ID = 0x081E
 ALPHASMART_DIRECT_PRODUCT_ID = 0xBD01
@@ -286,6 +288,7 @@ def send_manager_switch_sequence(
     *,
     backend: HidBackend | None = None,
     delay_seconds: float = 2.0,
+    wait_for_direct_seconds: float = 5.0,
 ) -> ManagerSwitchResult:
     hid_backend = backend if backend is not None else _default_backend()
     try:
@@ -301,4 +304,16 @@ def send_manager_switch_sequence(
             time.sleep(delay_seconds)
     finally:
         hid_backend.close(handle)
+    _wait_for_direct_device(wait_for_direct_seconds)
     return ManagerSwitchResult(reports_sent=reports_sent)
+
+
+def _wait_for_direct_device(timeout_seconds: float) -> None:
+    if timeout_seconds <= 0:
+        return
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() <= deadline:
+        if usb.core.find(idVendor=ALPHASMART_VENDOR_ID, idProduct=ALPHASMART_DIRECT_PRODUCT_ID) is not None:
+            return
+        time.sleep(0.1)
+    raise RuntimeError("AlphaSmart did not re-enumerate as direct USB mode")

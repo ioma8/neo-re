@@ -1,6 +1,13 @@
 import unittest
+from unittest import mock
 
-from real_check.hid_switch import AlreadyDirectMode, MANAGER_SWITCH_SEQUENCE, MacIOHidBackend, send_manager_switch_sequence
+from real_check.hid_switch import (
+    AlreadyDirectMode,
+    MANAGER_SWITCH_SEQUENCE,
+    MacIOHidBackend,
+    ManagerSwitchResult,
+    send_manager_switch_sequence,
+)
 
 
 class FakeHidBackend:
@@ -35,7 +42,7 @@ class SendManagerSwitchSequenceTests(unittest.TestCase):
     def test_sends_recovered_led_output_report_sequence(self) -> None:
         backend = FakeHidBackend()
 
-        result = send_manager_switch_sequence(backend=backend, delay_seconds=0)
+        result = send_manager_switch_sequence(backend=backend, delay_seconds=0, wait_for_direct_seconds=0)
 
         self.assertEqual(result.reports_sent, len(MANAGER_SWITCH_SEQUENCE))
         self.assertTrue(backend.opened)
@@ -49,6 +56,16 @@ class SendManagerSwitchSequenceTests(unittest.TestCase):
         result = send_manager_switch_sequence(backend=FakeHidBackend(already_direct=True), delay_seconds=0)
 
         self.assertEqual(result.reports_sent, 0)
+
+    @mock.patch("real_check.hid_switch.usb.core.find", side_effect=[None, object()])
+    def test_waits_for_direct_device_after_sending_switch_sequence(self, find: mock.Mock) -> None:
+        backend = FakeHidBackend()
+
+        result = send_manager_switch_sequence(backend=backend, delay_seconds=0, wait_for_direct_seconds=0.3)
+
+        self.assertEqual(result, ManagerSwitchResult(reports_sent=len(MANAGER_SWITCH_SEQUENCE)))
+        self.assertEqual(find.call_count, 2)
+        find.assert_called_with(idVendor=0x081E, idProduct=0xBD01)
 
     def test_mac_iokit_backend_strips_hidapi_report_id_before_set_report(self) -> None:
         self.assertEqual(MacIOHidBackend.output_report_payload(bytes([0x00, 0x05])), bytes([0x05]))
