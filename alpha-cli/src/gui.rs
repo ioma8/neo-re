@@ -48,23 +48,32 @@ fn init_logging() -> anyhow::Result<()> {
 
 fn configure_style(ctx: &egui::Context) {
     let mut style = (*ctx.global_style()).clone();
-    style.spacing.item_spacing = Vec2::new(10.0, 8.0);
-    style.spacing.button_padding = Vec2::new(16.0, 9.0);
-    style.visuals.window_corner_radius = 6.0.into();
+    style.spacing.item_spacing = Vec2::new(10.0, 9.0);
+    style.spacing.button_padding = Vec2::new(18.0, 10.0);
+    style.visuals.window_corner_radius = 12.0.into();
+    style.visuals.window_shadow = egui::epaint::Shadow::NONE;
+    style.visuals.widgets.inactive.bg_fill = CONTROL;
+    style.visuals.widgets.inactive.weak_bg_fill = CONTROL;
+    style.visuals.widgets.hovered.bg_fill = CONTROL_HOVER;
+    style.visuals.widgets.hovered.weak_bg_fill = CONTROL_HOVER;
     style.visuals.widgets.active.bg_fill = ACCENT;
-    style.visuals.widgets.hovered.bg_fill = SOFT_BLUE;
+    style.visuals.widgets.active.weak_bg_fill = ACCENT_SOFT;
+    style.visuals.widgets.noninteractive.bg_fill = SURFACE;
     ctx.set_global_style(style);
 }
 
-const ACCENT: Color32 = Color32::from_rgb(18, 105, 185);
-const ACCENT_DARK: Color32 = Color32::from_rgb(23, 73, 118);
-const INK: Color32 = Color32::from_rgb(28, 36, 46);
-const MUTED: Color32 = Color32::from_rgb(96, 106, 119);
-const LINE: Color32 = Color32::from_rgb(216, 222, 230);
-const SOFT_BLUE: Color32 = Color32::from_rgb(232, 242, 252);
-const ROW_SELECTED: Color32 = Color32::from_rgb(228, 240, 251);
-const SURFACE: Color32 = Color32::from_rgb(250, 251, 253);
-const ROW_ALT: Color32 = Color32::from_rgb(247, 249, 251);
+const ACCENT: Color32 = Color32::from_rgb(0, 122, 255);
+const ACCENT_DARK: Color32 = Color32::from_rgb(0, 87, 184);
+const ACCENT_SOFT: Color32 = Color32::from_rgb(218, 235, 255);
+const CONTROL: Color32 = Color32::from_rgb(239, 242, 247);
+const CONTROL_HOVER: Color32 = Color32::from_rgb(229, 234, 242);
+const INK: Color32 = Color32::from_rgb(29, 33, 41);
+const MUTED: Color32 = Color32::from_rgb(106, 113, 124);
+const LINE: Color32 = Color32::from_rgb(225, 229, 236);
+const ROW_SELECTED: Color32 = Color32::from_rgb(224, 238, 255);
+const SURFACE: Color32 = Color32::from_rgb(246, 248, 251);
+const TABLE: Color32 = Color32::from_rgb(255, 255, 255);
+const ROW_ALT: Color32 = Color32::from_rgb(250, 251, 253);
 
 struct AlphaGui {
     app: App,
@@ -164,10 +173,7 @@ impl AlphaGui {
             } else {
                 340.0
             };
-            let response = ui.add_sized(
-                [button_width, 48.0],
-                egui::Button::new(RichText::new("Files on device").strong()).fill(ACCENT),
-            );
+            let response = primary_button(ui, "Files on device", button_width);
             if response.clicked()
                 && let Err(error) = self.app.open_files()
             {
@@ -181,7 +187,7 @@ impl AlphaGui {
             ui.heading(RichText::new("Files").color(INK));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
-                    .add_enabled(!self.app.is_downloading(), egui::Button::new("Back"))
+                    .add_enabled(!self.app.is_downloading(), secondary_button_widget("Back"))
                     .clicked()
                 {
                     self.app.screen = Screen::MainMenu;
@@ -192,9 +198,9 @@ impl AlphaGui {
         table_header(ui, compact);
         let list_height = (ui.available_height() - 10.0).max(160.0);
         egui::Frame::new()
-            .fill(Color32::WHITE)
+            .fill(TABLE)
             .stroke(Stroke::new(1.0, LINE))
-            .corner_radius(6.0)
+            .corner_radius(12.0)
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .max_height(list_height)
@@ -226,7 +232,7 @@ impl AlphaGui {
                 .add_enabled_ui(!disabled, |ui| {
                     ui.add_sized(
                         [ui.available_width(), 48.0],
-                        egui::Button::new(RichText::new("Download selected").strong()).fill(ACCENT),
+                        primary_button_widget("Download selected"),
                     )
                 })
                 .inner
@@ -239,11 +245,7 @@ impl AlphaGui {
                 ui.label(RichText::new(selection).color(MUTED));
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     if ui
-                        .add_enabled(
-                            !disabled,
-                            egui::Button::new(RichText::new("Download selected").strong())
-                                .fill(ACCENT),
-                        )
+                        .add_enabled(!disabled, primary_button_widget("Download selected"))
                         .clicked()
                     {
                         self.start_selected_backup();
@@ -307,7 +309,7 @@ impl AlphaGui {
 fn header(ui: &mut egui::Ui, compact: bool) {
     if compact {
         ui.vertical(|ui| {
-            ui.label(RichText::new("Alpha GUI").size(26.0).strong().color(INK));
+            ui.label(RichText::new("Alpha GUI").size(25.0).strong().color(INK));
             ui.label(
                 RichText::new("AlphaSmart NEO backup")
                     .size(14.0)
@@ -316,7 +318,7 @@ fn header(ui: &mut egui::Ui, compact: bool) {
         });
     } else {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Alpha GUI").size(28.0).strong().color(INK));
+            ui.label(RichText::new("Alpha GUI").size(27.0).strong().color(INK));
             ui.label(
                 RichText::new("AlphaSmart NEO backup")
                     .size(15.0)
@@ -324,7 +326,7 @@ fn header(ui: &mut egui::Ui, compact: bool) {
             );
         });
     }
-    ui.add_space(8.0);
+    ui.add_space(10.0);
     ui.separator();
 }
 
@@ -397,7 +399,7 @@ fn table_header(ui: &mut egui::Ui, compact: bool) {
     if compact {
         return;
     }
-    ui.add_space(6.0);
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.add_sized(
             [52.0, 20.0],
@@ -432,7 +434,7 @@ fn table_row(ui: &mut egui::Ui, slot: RichText, name: RichText, size: RichText, 
 
 fn row_frame(selected: bool, index: usize) -> egui::Frame {
     egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(10, 7))
+        .inner_margin(egui::Margin::symmetric(12, 8))
         .stroke(if selected {
             Stroke::new(1.0, ACCENT)
         } else {
@@ -443,6 +445,25 @@ fn row_frame(selected: bool, index: usize) -> egui::Frame {
             (false, true) => Color32::WHITE,
             (false, false) => ROW_ALT,
         })
+        .corner_radius(if selected { 8.0 } else { 0.0 })
+}
+
+fn primary_button(ui: &mut egui::Ui, label: &str, width: f32) -> egui::Response {
+    ui.add_sized([width, 48.0], primary_button_widget(label))
+}
+
+fn primary_button_widget(label: &str) -> egui::Button<'_> {
+    egui::Button::new(RichText::new(label).strong().color(Color32::WHITE))
+        .fill(ACCENT)
+        .corner_radius(10.0)
+        .stroke(Stroke::NONE)
+}
+
+fn secondary_button_widget(label: &str) -> egui::Button<'_> {
+    egui::Button::new(RichText::new(label).strong().color(INK))
+        .fill(CONTROL)
+        .corner_radius(10.0)
+        .stroke(Stroke::new(1.0, LINE))
 }
 
 fn footer(ui: &mut egui::Ui, compact: bool, status: &str, screen: Screen) {
