@@ -5,7 +5,18 @@ pub mod protocol;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod usb;
 
-#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+#[cfg(target_os = "android")]
+pub mod usb_android;
+
+#[cfg(target_os = "android")]
+pub use usb_android as usb;
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android"
+)))]
 pub mod usb {
     use std::time::Duration;
 

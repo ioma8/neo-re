@@ -43,7 +43,21 @@ The GUI writes its own log file:
 ~/alpha-cli/logs/alpha-gui.log
 ```
 
-The GUI uses `eframe`/`egui` with the lighter `glow` renderer. It shares the same protocol, USB, and backup code as the terminal UI. The desktop USB implementation is enabled for macOS, Linux, and Windows. Mobile targets compile the GUI with a clear USB-not-implemented path until a mobile USB adapter is added.
+The GUI uses `eframe`/`egui` with the lighter `glow` renderer. It shares the same protocol, USB, and backup code as the terminal UI.
+
+USB support:
+
+- macOS, Linux, Windows: desktop USB backend through `rusb`
+- Android: native USB Host backend through Android `UsbManager` over JNI
+- other targets: compile with a clear USB-not-implemented path
+
+On Android the app enumerates `081e:bd04` HID keyboard mode and `081e:bd01` direct mode devices through `UsbManager`. If Android has not granted access to the connected NEO, the backend requests USB permission with the system dialog and returns an error telling the user to approve it and retry. APK packaging must declare USB Host support, for example:
+
+```xml
+<uses-feature android:name="android.hardware.usb.host" android:required="true" />
+```
+
+The Android backend sends the same validated HID switch reports and uses the same direct-mode bulk protocol as the desktop backend.
 
 Validated GUI check targets:
 
