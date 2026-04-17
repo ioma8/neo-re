@@ -225,6 +225,10 @@ These are the first high-value unknowns:
 - Is HID only used for enumeration, or also for data transfer?
   - Live confirmation: HID is used to trigger direct USB mode from keyboard mode. It is not the AlphaWord data path after the device re-enumerates as `081e:bd01`.
   - The confirmed switch for the tested NEO is HID output report payloads `e0 e1 e2 e3 e4`.
+- Which read-only direct commands are now validated on real hardware?
+  - Live confirmation: `real-check list` validates AlphaWord file attributes via opcode `0x13`.
+  - Live confirmation: `real-check applets` validates SmartApplet metadata listing via opcode `0x04`.
+  - Live confirmation: `real-check verify-get` validates AlphaWord retrieval via opcode `0x12` plus chunk pulls `0x10` without printing or writing document contents.
 - What are the parameter and buffer layouts for:
   - `AsUSBCommWriteData`
   - `AsUSBCommReadData`

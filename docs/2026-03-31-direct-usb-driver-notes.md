@@ -570,6 +570,15 @@ For AlphaWord retrieval specifically, the reconstructed fresh direct USB sequenc
 8. Send updater command `0x12` or `0x1c` to begin file retrieval.
 9. Send repeated updater command `0x10` chunk pulls.
 
+Live physical-device validation on the tested NEO now confirms the read-only parts of that sequence:
+
+- `real-check watch --timeout 5` observed `081e:bd01` direct mode with bulk OUT `0x01` and bulk IN `0x82`.
+- `real-check probe` selected interface `0`, OUT endpoint `0x01`, and IN endpoint `0x82`.
+- `real-check switch-to-direct` is idempotent once already direct and reports `sent_manager_switch_reports=0`.
+- `real-check list` successfully reads all eight AlphaWord `0x13` file-attribute records.
+- `real-check applets` successfully reads the SmartApplet `0x04` list pages and parses `0x84`-byte metadata records.
+- `real-check verify-get 1..8` successfully exercises read-only AlphaWord retrieval (`0x12` plus repeated `0x10`) without printing or writing document contents.
+
 ## Working Hypothesis
 
 The direct transport likely works like this:
@@ -615,6 +624,7 @@ What is already firm enough to rely on:
 - The confirmed `081e:bd04` -> `081e:bd01` switch for the tested NEO is HID output report payloads `e0 e1 e2 e3 e4`.
 - On macOS, direct `libusb_control_transfer` works for that switch when it avoids claiming the HID keyboard interface.
 - The tested `081e:bd01` direct endpoint pair is bulk OUT `0x01` and bulk IN `0x82`.
+- The read-only live probe set now validates descriptor selection, applet listing, AlphaWord file-attribute listing, and AlphaWord content retrieval checksums against a physical NEO.
 - The driver exposes a named DOS device path consumed from user mode.
 - User-mode writes are stream writes in `0x40` byte chunks.
 - Applet switching is an 8-byte request and 8-byte response exchange.

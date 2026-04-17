@@ -647,6 +647,30 @@ For the direct USB case, the current best reconstruction is:
    - preview/session scan callers include `RefreshAlphaWordPreviewCacheForTreeItem` and `ScanAlphaWordPreviewSlots`
    - full retrieval callers include `RetrieveAllAlphaWordSlotsForDevice` and `RetrieveSelectedAlphaWordSlotsForDevice`
 
+Live read-only validation against the tested physical NEO:
+
+- `real-check list` successfully fetched all eight `0x13` attribute records:
+  - slot 1: name `File 1`, attribute file length `23063`, reserved length `512`
+  - slot 2: name `File 2`, attribute file length `1464`, reserved length `512`
+  - slot 3: name `File 3`, attribute file length `512`, reserved length `512`
+  - slot 4: name `File 4`, attribute file length `512`, reserved length `512`
+  - slot 5: name `File 5`, attribute file length `512`, reserved length `512`
+  - slot 6: name `File 6`, attribute file length `534`, reserved length `512`
+  - slot 7: name `File 7`, attribute file length `512`, reserved length `512`
+  - slot 8: name `File 8`, attribute file length `512`, reserved length `512`
+- `real-check verify-get 1..8` successfully exercised the full read-only retrieve path without printing document bytes.
+- The device-reported `0x53` retrieve lengths were:
+  - slot 1: `22712`
+  - slot 2: `936`
+  - slot 3: `0`
+  - slot 4: `0`
+  - slot 5: `0`
+  - slot 6: `22`
+  - slot 7: `0`
+  - slot 8: `0`
+
+This confirms that the raw attribute `file_length` field and the initial retrieve response's reported byte count are related but not identical on the tested device. The retrieve response is the authoritative byte count for the live transfer loop.
+
 ## Non-Core Sibling Path
 
 Fresh caller checks for `RetrieveFullAlphaWordText` also found `0x0044a140` and `0x0044a5c0`, but those pass applet id `0xa004`, not `0xa000`.
@@ -669,6 +693,7 @@ That means they are not the core `Get/Print AlphaWord Files` path documented her
   - initial `'S'` / `0x53`
   - chunk `'M'` / `0x4d`
 - initial `'S'` response `arg32` is total transfer length
+- live validation confirms that this initial `'S'` length can differ from the raw attribute `file_length` field; callers should use the `'S'` length for retrieval loop termination
 - chunk `'M'` response `arg32` is chunk length
 - chunk `'M'` response trailing field is the expected payload checksum
 - attribute retrieval success/data bytes include:

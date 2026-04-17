@@ -43,6 +43,26 @@ Expected response:
 - payload length is a multiple of `0x84`
 - checksum is 16-bit payload sum
 
+Live physical-device validation:
+
+- `real-check applets` successfully sends this read-only list command against a direct-mode NEO.
+- The tested NEO returned these parsed metadata entries without retrieving applet binaries:
+  - `0x0000` System 3.15, size `401408`
+  - `0xa000` AlphaWord Plus 3.4, size `106684`
+  - `0xa004` KeyWords 3.6, size `126888`
+  - `0xa007` Control Panel 1.0, size `27412`
+  - `0xa006` Beamer 1.0, size `32580`
+  - `0xa001` AlphaQuiz 1.0, size `49828`
+  - `0xa002` Calculator 3.0, size `24544`
+  - `0xa027` Text2Speech Updater 1.4, size `11460`
+  - `0xaf00` Neo Font - Small (6 lines) 1.0, size `4164`
+  - `0xaf75` Neo Font - Medium (5 lines) 1.0, size `4360`
+  - `0xaf02` Neo Font - Large (4 lines) 1.0, size `4264`
+  - `0xaf73` Neo Font - Very Large (3 lines) 1.0, size `9392`
+  - `0xaf03` Neo Font - Extra Large (2 lines) 1.0, size `13152`
+  - `0xa005` SpellCheck Large USA 1.0, size `357312`
+  - `0xa017` Thesaurus Large USA 1.1, size `366796`
+
 The app normalizes the retrieved `0x84`-byte records after retrieval:
 
 - `FetchRawSmartAppletListEntries`
@@ -1537,6 +1557,7 @@ The offline PoC now models the confirmed packet layer in:
 Covered operations:
 
 - list applets command construction
+- live read-only applet metadata listing through `real-check applets`
 - retrieve-applet command construction
 - direct USB retrieve session planning
 - SmartApplet header parsing
@@ -1560,6 +1581,7 @@ Covered operations:
 Useful commands:
 
 ```bash
+uv run --project real-check real-check applets
 uv run --project poc/neotools python -m neotools smartapplet-retrieve-plan 0xa123
 uv run --project poc/neotools python -m neotools smartapplet-add-plan 0x12345678 0x9abc "41 42 43 44 45"
 uv run --project poc/neotools python -m neotools smartapplet-header "<0x84-byte header hex>"
@@ -1569,6 +1591,8 @@ uv run --project poc/neotools python -m neotools smartapplet-string 0xf138
 uv run --project poc/neotools python -m neotools smartapplet-menu 163
 uv run --project poc/neotools python -m neotools smartapplet-add-plan-from-image "<full .OS3KApp hex>"
 ```
+
+Safety note: `real-check applets` is a read-only live metadata list probe. The offline `smartapplet-add-plan*` commands only print modeled packets, but any future live implementation of the `0x06` / `0x02` / `0xff` / `0x0b` / `0x07` add/program/finalize sequence would modify the device and must not be used as a probe on a data-bearing NEO.
 
 ## Remaining Unknowns
 
