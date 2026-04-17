@@ -48,12 +48,22 @@ fn init_logging() -> anyhow::Result<()> {
 
 fn configure_style(ctx: &egui::Context) {
     let mut style = (*ctx.global_style()).clone();
-    style.spacing.item_spacing = Vec2::new(12.0, 10.0);
-    style.spacing.button_padding = Vec2::new(14.0, 8.0);
-    style.visuals.widgets.active.bg_fill = Color32::from_rgb(33, 132, 214);
-    style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(230, 241, 252);
+    style.spacing.item_spacing = Vec2::new(12.0, 12.0);
+    style.spacing.button_padding = Vec2::new(18.0, 10.0);
+    style.visuals.window_corner_radius = 8.0.into();
+    style.visuals.widgets.active.bg_fill = ACCENT;
+    style.visuals.widgets.hovered.bg_fill = SOFT_BLUE;
     ctx.set_global_style(style);
 }
+
+const ACCENT: Color32 = Color32::from_rgb(25, 112, 190);
+const ACCENT_DARK: Color32 = Color32::from_rgb(20, 72, 116);
+const INK: Color32 = Color32::from_rgb(25, 34, 45);
+const MUTED: Color32 = Color32::from_rgb(88, 99, 112);
+const LINE: Color32 = Color32::from_rgb(215, 222, 230);
+const SOFT_BLUE: Color32 = Color32::from_rgb(231, 243, 253);
+const PANEL: Color32 = Color32::from_rgb(249, 251, 253);
+const ROW_SELECTED: Color32 = Color32::from_rgb(228, 241, 252);
 
 struct AlphaGui {
     app: App,
@@ -87,17 +97,22 @@ impl eframe::App for AlphaGui {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let compact = ui.available_width() < 560.0;
         egui::Frame::central_panel(ui.style()).show(ui, |ui| {
-            ui.add_space(4.0);
-            header(ui);
-            ui.add_space(12.0);
-            match self.app.screen {
-                Screen::Waiting => self.waiting_view(ui),
-                Screen::MainMenu => self.main_menu(ui),
-                Screen::Files => self.files_view(ui),
-            }
-            ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-                status_bar(ui, &self.app.status);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                let max_width = if compact { ui.available_width() } else { 920.0 };
+                ui.vertical_centered(|ui| {
+                    ui.set_max_width(max_width);
+                    header(ui, compact);
+                    ui.add_space(if compact { 8.0 } else { 14.0 });
+                    match self.app.screen {
+                        Screen::Waiting => self.waiting_view(ui, compact),
+                        Screen::MainMenu => self.main_menu(ui, compact),
+                        Screen::Files => self.files_view(ui, compact),
+                    }
+                    ui.add_space(12.0);
+                    status_bar(ui, &self.app.status, compact);
+                });
             });
         });
 
@@ -110,99 +125,137 @@ impl eframe::App for AlphaGui {
 }
 
 impl AlphaGui {
-    fn waiting_view(&self, ui: &mut egui::Ui) {
-        egui::Frame::group(ui.style())
-            .inner_margin(24.0)
+    fn waiting_view(&self, ui: &mut egui::Ui, compact: bool) {
+        panel()
+            .inner_margin(if compact { 18.0 } else { 28.0 })
             .show(ui, |ui| {
-                ui.heading("Connect your AlphaSmart NEO");
-                ui.add_space(8.0);
-                ui.label("1. Plug the NEO into this computer with USB.");
-                ui.label("2. Leave it in normal USB keyboard mode.");
-                ui.label("3. Alpha GUI will switch it to direct USB mode and initialize it.");
-                ui.add_space(12.0);
-                ui.spinner();
-                ui.label("Waiting for the device...");
+                ui.vertical_centered(|ui| {
+                    ui.heading(RichText::new("Connect your AlphaSmart NEO").color(INK));
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Leave it in normal USB keyboard mode.").color(MUTED));
+                    ui.add_space(if compact { 12.0 } else { 18.0 });
+                    ui.spinner();
+                    ui.add_space(10.0);
+                    ui.label(RichText::new("Waiting for the device...").color(ACCENT_DARK));
+                });
+                ui.add_space(if compact { 12.0 } else { 18.0 });
+                step_row(ui, "1", "Plug the NEO into this computer with USB.");
+                step_row(ui, "2", "Keep the NEO in its normal USB keyboard mode.");
+                step_row(
+                    ui,
+                    "3",
+                    "Alpha GUI will switch it to direct USB mode and initialize it.",
+                );
             });
     }
 
-    fn main_menu(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Ready");
-        ui.label("The NEO is initialized. Choose what to inspect.");
-        ui.add_space(16.0);
-        if ui
-            .add_sized([240.0, 44.0], egui::Button::new("Files on device"))
-            .clicked()
-            && let Err(error) = self.app.open_files()
-        {
-            self.app.set_error(error);
-        }
+    fn main_menu(&mut self, ui: &mut egui::Ui, compact: bool) {
+        panel()
+            .inner_margin(if compact { 18.0 } else { 28.0 })
+            .show(ui, |ui| {
+                ui.heading(RichText::new("Ready").color(INK));
+                ui.label(RichText::new("The NEO is initialized.").color(MUTED));
+                ui.add_space(16.0);
+                let button_width = if compact { ui.available_width() } else { 300.0 };
+                if ui
+                    .add_sized(
+                        [button_width, 52.0],
+                        egui::Button::new(RichText::new("Files on device").strong()).fill(ACCENT),
+                    )
+                    .clicked()
+                    && let Err(error) = self.app.open_files()
+                {
+                    self.app.set_error(error);
+                }
+            });
     }
 
-    fn files_view(&mut self, ui: &mut egui::Ui) {
+    fn files_view(&mut self, ui: &mut egui::Ui, compact: bool) {
         ui.horizontal(|ui| {
-            ui.heading("Files on device");
+            ui.heading(RichText::new("Files on device").color(INK));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if ui.button("Back").clicked() && !self.app.is_downloading() {
+                if ui
+                    .add_enabled(!self.app.is_downloading(), egui::Button::new("Back"))
+                    .clicked()
+                {
                     self.app.screen = Screen::MainMenu;
                 }
             });
         });
-        ui.label(
-            "Select a file, or choose All files. Backups are saved as length-validated .txt files.",
-        );
+        ui.label(RichText::new("Backups are saved as length-validated .txt files.").color(MUTED));
         ui.add_space(10.0);
 
-        egui::ScrollArea::vertical().show(ui, |ui| {
+        panel().inner_margin(8.0).show(ui, |ui| {
             let files = self.app.files.clone();
-            for (index, entry) in files.iter().enumerate() {
-                let selected = self.selected_row == index;
-                let label = format!(
-                    "Slot {:>2}   {:<24}   {:>9}   ~{} words",
-                    entry.slot,
-                    entry.name,
-                    app::human_bytes(entry.attribute_bytes),
-                    app::approximate_words_from_bytes(entry.attribute_bytes)
-                );
-                if selectable_row(ui, selected, &label).clicked() {
-                    self.selected_row = index;
-                }
-            }
-            let all_index = self.app.files.len();
-            if selectable_row(ui, self.selected_row == all_index, "All files").clicked() {
-                self.selected_row = all_index;
-            }
+            egui::ScrollArea::vertical()
+                .max_height(if compact { 390.0 } else { 460.0 })
+                .show(ui, |ui| {
+                    for (index, entry) in files.iter().enumerate() {
+                        if file_row(ui, self.selected_row == index, entry, compact).clicked() {
+                            self.selected_row = index;
+                        }
+                        ui.add_space(6.0);
+                    }
+                    let all_index = self.app.files.len();
+                    if all_files_row(ui, self.selected_row == all_index, compact).clicked() {
+                        self.selected_row = all_index;
+                    }
+                });
         });
 
         ui.add_space(12.0);
-        ui.horizontal(|ui| {
+        if compact {
             let disabled = self.app.is_downloading();
             if ui
-                .add_enabled(!disabled, egui::Button::new("Download selected"))
+                .add_enabled_ui(!disabled, |ui| {
+                    ui.add_sized(
+                        [ui.available_width(), 52.0],
+                        egui::Button::new(RichText::new("Download selected").strong()).fill(ACCENT),
+                    )
+                })
+                .inner
                 .clicked()
             {
-                self.app.file_selected = self.selected_row;
-                if let Err(error) = self.app.start_backup_selected() {
-                    self.app.set_error(error);
-                }
+                self.start_selected_backup();
             }
-            ui.label("Destination: ~/alpha-cli/backups/{date-time}/");
-        });
+            ui.label(RichText::new("~/alpha-cli/backups/{date-time}/").color(MUTED));
+        } else {
+            ui.horizontal(|ui| {
+                let disabled = self.app.is_downloading();
+                if ui
+                    .add_enabled(
+                        !disabled,
+                        egui::Button::new(RichText::new("Download selected").strong()).fill(ACCENT),
+                    )
+                    .clicked()
+                {
+                    self.start_selected_backup();
+                }
+                ui.label(
+                    RichText::new("Destination: ~/alpha-cli/backups/{date-time}/").color(MUTED),
+                );
+            });
+        }
     }
 
     fn progress_window(&self, ctx: &egui::Context) {
         let Some(progress) = &self.app.download else {
             return;
         };
+        let width = dialog_width(ctx, 360.0);
         egui::Window::new("Downloading")
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.set_width(360.0);
+                ui.set_width(width);
                 ui.vertical_centered(|ui| {
                     ui.spinner();
-                    ui.heading(&progress.message);
-                    ui.label(format!("File {} of {}", progress.current, progress.total));
+                    ui.heading(RichText::new(&progress.message).color(INK));
+                    ui.label(
+                        RichText::new(format!("File {} of {}", progress.current, progress.total))
+                            .color(MUTED),
+                    );
                 });
             });
     }
@@ -211,12 +264,13 @@ impl AlphaGui {
         let Some(message) = self.app.error.clone() else {
             return;
         };
+        let width = dialog_width(ctx, 460.0);
         egui::Window::new("Problem")
             .collapsible(false)
             .resizable(true)
             .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.set_width(460.0);
+                ui.set_width(width);
                 ui.colored_label(Color32::from_rgb(180, 30, 30), message);
                 ui.add_space(8.0);
                 ui.label("Details were written to ~/alpha-cli/logs/alpha-gui.log");
@@ -226,47 +280,138 @@ impl AlphaGui {
                 }
             });
     }
+
+    fn start_selected_backup(&mut self) {
+        self.app.file_selected = self.selected_row;
+        if let Err(error) = self.app.start_backup_selected() {
+            self.app.set_error(error);
+        }
+    }
 }
 
-fn header(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Alpha GUI").size(28.0).strong());
-        ui.label(
-            RichText::new("AlphaSmart NEO backup")
-                .size(16.0)
-                .color(Color32::DARK_GRAY),
-        );
-    });
+fn header(ui: &mut egui::Ui, compact: bool) {
+    if compact {
+        ui.vertical(|ui| {
+            ui.label(RichText::new("Alpha GUI").size(28.0).strong().color(INK));
+            ui.label(
+                RichText::new("AlphaSmart NEO backup")
+                    .size(15.0)
+                    .color(MUTED),
+            );
+        });
+    } else {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Alpha GUI").size(30.0).strong().color(INK));
+            ui.label(
+                RichText::new("AlphaSmart NEO backup")
+                    .size(16.0)
+                    .color(MUTED),
+            );
+        });
+    }
+    ui.add_space(8.0);
     ui.separator();
 }
 
-fn selectable_row(ui: &mut egui::Ui, selected: bool, text: &str) -> egui::Response {
-    let frame = egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(12, 10))
-        .stroke(if selected {
-            Stroke::new(1.5, Color32::from_rgb(33, 132, 214))
-        } else {
-            Stroke::new(1.0, Color32::from_gray(220))
-        })
-        .fill(if selected {
-            Color32::from_rgb(232, 244, 255)
-        } else {
-            Color32::from_rgb(250, 250, 250)
-        })
-        .corner_radius(8.0);
-    frame
+fn panel() -> egui::Frame {
+    egui::Frame::new()
+        .fill(PANEL)
+        .stroke(Stroke::new(1.0, LINE))
+        .corner_radius(8.0)
+}
+
+fn step_row(ui: &mut egui::Ui, number: &str, text: &str) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            RichText::new(number)
+                .strong()
+                .color(Color32::WHITE)
+                .background_color(ACCENT),
+        );
+        ui.add(egui::Label::new(RichText::new(text).color(INK)).wrap());
+    });
+}
+
+fn file_row(
+    ui: &mut egui::Ui,
+    selected: bool,
+    entry: &crate::protocol::FileEntry,
+    compact: bool,
+) -> egui::Response {
+    let title = format!("Slot {}  {}", entry.slot, entry.name);
+    let size = app::human_bytes(entry.attribute_bytes);
+    let words = app::approximate_words_from_bytes(entry.attribute_bytes);
+    row_frame(selected)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(text);
+            if compact {
+                ui.vertical(|ui| {
+                    ui.add(egui::Label::new(RichText::new(title).strong().color(INK)).wrap());
+                    ui.label(RichText::new(format!("{size}  ~{words} words")).color(MUTED));
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Label::new(RichText::new(title).strong().color(INK)).wrap());
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new(format!("~{words} words")).color(MUTED));
+                        ui.label(RichText::new(size).color(ACCENT_DARK).strong());
+                    });
+                });
+            }
         })
         .response
         .interact(egui::Sense::click())
 }
 
-fn status_bar(ui: &mut egui::Ui, status: &str) {
-    ui.separator();
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("Status").strong());
-        ui.label(status);
-    });
+fn all_files_row(ui: &mut egui::Ui, selected: bool, compact: bool) -> egui::Response {
+    row_frame(selected)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if compact {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("All files").strong().color(INK));
+                    ui.label(RichText::new("Download every AlphaWord slot").color(MUTED));
+                });
+            } else {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("All files").strong().color(INK));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(RichText::new("Download every AlphaWord slot").color(MUTED));
+                    });
+                });
+            }
+        })
+        .response
+        .interact(egui::Sense::click())
+}
+
+fn row_frame(selected: bool) -> egui::Frame {
+    egui::Frame::new()
+        .inner_margin(egui::Margin::symmetric(14, 12))
+        .stroke(if selected {
+            Stroke::new(1.5, ACCENT)
+        } else {
+            Stroke::new(1.0, LINE)
+        })
+        .fill(if selected {
+            ROW_SELECTED
+        } else {
+            Color32::WHITE
+        })
+        .corner_radius(8.0)
+}
+
+fn status_bar(ui: &mut egui::Ui, status: &str, compact: bool) {
+    panel()
+        .inner_margin(if compact { 12.0 } else { 14.0 })
+        .show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(RichText::new("Status").strong().color(ACCENT_DARK));
+                ui.label(RichText::new(status).color(MUTED));
+            });
+        });
+}
+
+fn dialog_width(ctx: &egui::Context, preferred: f32) -> f32 {
+    (ctx.content_rect().width() - 32.0).clamp(260.0, preferred)
 }
