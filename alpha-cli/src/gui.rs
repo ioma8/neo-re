@@ -118,7 +118,7 @@ impl eframe::App for AlphaGui {
                 ui.add_space(if compact { 10.0 } else { 14.0 });
 
                 let footer_height = if self.app.screen == Screen::Files {
-                    if compact { 120.0 } else { 72.0 }
+                    if compact { 104.0 } else { 54.0 }
                 } else if compact {
                     58.0
                 } else {
@@ -183,14 +183,12 @@ impl AlphaGui {
 
     fn files_view(&mut self, ui: &mut egui::Ui, compact: bool) {
         ui.horizontal(|ui| {
-            ui.vertical(|ui| {
-                ui.heading(RichText::new("Files").color(INK));
-                ui.label(
-                    RichText::new(format!("{} AlphaWord slots", self.app.files.len()))
-                        .size(13.0)
-                        .color(MUTED),
-                );
-            });
+            ui.heading(RichText::new("Files").color(INK));
+            ui.label(
+                RichText::new(format!("{} slots", self.app.files.len()))
+                    .size(13.0)
+                    .color(MUTED),
+            );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 if ui
                     .add_enabled(!self.app.is_downloading(), secondary_button_widget("Back"))
@@ -201,8 +199,8 @@ impl AlphaGui {
             });
         });
 
-        ui.add_space(if compact { 8.0 } else { 12.0 });
-        let list_height = (ui.available_height() - 8.0).max(160.0);
+        ui.add_space(if compact { 8.0 } else { 10.0 });
+        let list_height = ui.available_height().max(160.0);
         egui::Frame::new()
             .fill(Color32::TRANSPARENT)
             .show(ui, |ui| {
@@ -215,7 +213,7 @@ impl AlphaGui {
                             if file_row(ui, selected, index, entry, compact).clicked() {
                                 self.selected_row = index;
                             }
-                            ui.add_space(6.0);
+                            ui.add_space(if compact { 6.0 } else { 4.0 });
                         }
                         let all_index = self.app.files.len();
                         if all_files_row(ui, self.selected_row == all_index, compact).clicked() {
@@ -248,7 +246,7 @@ impl AlphaGui {
         } else {
             egui::Frame::new()
                 .fill(SURFACE)
-                .inner_margin(egui::Margin::symmetric(0, 2))
+                .inner_margin(egui::Margin::symmetric(0, 0))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(selection).size(13.0).color(MUTED));
@@ -377,16 +375,12 @@ fn file_row(
             } else {
                 ui.horizontal(|ui| {
                     slot_badge(ui, &slot, selected);
-                    ui.add_space(6.0);
-                    ui.vertical(|ui| {
-                        ui.add_space(2.0);
-                        ui.label(RichText::new(&entry.name).size(15.0).strong().color(INK));
-                        ui.label(
-                            RichText::new(format!("Slot {}", entry.slot))
-                                .size(12.0)
-                                .color(MUTED),
-                        );
-                    });
+                    ui.add_space(8.0);
+                    ui.add_sized(
+                        [220.0, 20.0],
+                        egui::Label::new(RichText::new(&entry.name).size(14.0).strong().color(INK))
+                            .truncate(),
+                    );
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(
                             RichText::new(format!("~{words} words"))
@@ -415,16 +409,8 @@ fn all_files_row(ui: &mut egui::Ui, selected: bool, compact: bool) -> egui::Resp
             } else {
                 ui.horizontal(|ui| {
                     slot_badge(ui, "All", selected);
-                    ui.add_space(6.0);
-                    ui.vertical(|ui| {
-                        ui.add_space(2.0);
-                        ui.label(RichText::new("All files").size(15.0).strong().color(INK));
-                        ui.label(
-                            RichText::new("Download every AlphaWord slot")
-                                .size(12.0)
-                                .color(MUTED),
-                        );
-                    });
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("All files").size(14.0).strong().color(INK));
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         ui.label(RichText::new("all slots").size(13.0).color(MUTED));
                     });
@@ -437,7 +423,7 @@ fn all_files_row(ui: &mut egui::Ui, selected: bool, compact: bool) -> egui::Resp
 
 fn row_frame(selected: bool, index: usize) -> egui::Frame {
     egui::Frame::new()
-        .inner_margin(egui::Margin::symmetric(12, 9))
+        .inner_margin(egui::Margin::symmetric(10, 5))
         .stroke(if selected {
             Stroke::new(1.0, ACCENT)
         } else {
@@ -457,7 +443,7 @@ fn slot_badge(ui: &mut egui::Ui, text: &str, selected: bool) {
     egui::Frame::new()
         .fill(fill)
         .corner_radius(8.0)
-        .inner_margin(egui::Margin::symmetric(10, 5))
+        .inner_margin(egui::Margin::symmetric(9, 3))
         .show(ui, |ui| {
             ui.label(RichText::new(text).size(12.0).strong().color(color));
         });
@@ -484,7 +470,6 @@ fn secondary_button_widget(label: &str) -> egui::Button<'_> {
 fn footer(ui: &mut egui::Ui, compact: bool, status: &str, screen: Screen) {
     ui.separator();
     if screen == Screen::Files {
-        ui.label(RichText::new("Select a file to back it up, or choose All files.").color(MUTED));
     } else if compact {
         ui.vertical(|ui| {
             ui.label(RichText::new(status).color(MUTED));
