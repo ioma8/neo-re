@@ -1,0 +1,9 @@
+bd04 exposes only standard HID keyboard input plus the standard keyboard LED output, so direct file retrieval cannot run until a mode switch occurs	proven
+bd04 has a HID output-report LED sequence that switches it into manager/direct mode	proven
+bd01 direct mode is not a passive transient attach state; it is triggered by the bd04 HID output-report sequence	proven
+macOS currently blocks our process from opening the AlphaSmart keyboard HID service through hidapi	proven
+hidapi path-based open will bypass the AlphaSmart keyboard HID open failure	disproven
+macOS raw USB HID control transfer reaches AlphaSmart bd04 but requires elevated interface claim access	disproven
+libusb control_transfer without claiming interface bypasses PyUSB's macOS HID access failure	proven
+the recovered modern 4-byte output report sequence alone switches this connected NEO to bd01	disproven
+the legacy one-byte output report sequence e0 e1 e2 e3 e4 switches this connected NEO to bd01	proven

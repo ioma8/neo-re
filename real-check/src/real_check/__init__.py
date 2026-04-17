@@ -1,7 +1,22 @@
 import argparse
+import sys
 
 from real_check.client import NeoAlphaWordClient
-from real_check.live_usb import open_direct_usb_transport, probe_direct_usb_device
+from real_check.hid_switch import send_manager_switch_sequence
+from real_check.live_usb import open_direct_usb_transport, probe_direct_usb_device, watch_alphasmart_devices
+from real_check.usb_select import EndpointDescriptor, InterfaceDescriptor
+
+
+def _endpoint_direction(endpoint: EndpointDescriptor) -> str:
+    return "in" if endpoint.is_in else "out"
+
+
+def _format_interface(interface: InterfaceDescriptor) -> str:
+    endpoints = " ".join(
+        f"0x{endpoint.address:02x}:{endpoint.transfer_type}:{_endpoint_direction(endpoint)}:max{endpoint.max_packet_size}"
+        for endpoint in interface.endpoints
+    )
+    return f"  interface={interface.number} alt={interface.alternate_setting} endpoints={endpoints}"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -9,6 +24,10 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("probe")
+    watch_parser = subparsers.add_parser("watch")
+    watch_parser.add_argument("--timeout", type=float, default=10.0)
+    watch_parser.add_argument("--try-switch", action="store_true")
+    subparsers.add_parser("switch-to-direct")
     subparsers.add_parser("list")
 
     get_parser = subparsers.add_parser("get")
@@ -29,6 +48,36 @@ def main(argv: list[str] | None = None) -> int:
             f"out_ep=0x{result.out_endpoint:02x} "
             f"in_ep=0x{result.in_endpoint:02x}"
         )
+        return 0
+
+    if args.command == "watch":
+        observations = watch_alphasmart_devices(
+            timeout_seconds=args.timeout,
+            interval_seconds=0.25,
+            try_switch=args.try_switch,
+        )
+        for observation in observations:
+            switch_suffix = f" switch={observation.switch_result}" if observation.switch_result else ""
+            print(
+                f"vendor_id=0x{observation.vendor_id:04x} "
+                f"product_id=0x{observation.product_id:04x} "
+                f"mode={observation.mode.kind} "
+                f"detail={observation.mode.detail}"
+                f"{switch_suffix}"
+            )
+            for interface in observation.interfaces:
+                print(_format_interface(interface))
+        if not observations:
+            print("No AlphaSmart USB device observed")
+        return 0
+
+    if args.command == "switch-to-direct":
+        try:
+            result = send_manager_switch_sequence()
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        print(f"sent_manager_switch_reports={result.reports_sent}")
         return 0
 
     if args.command == "list":

@@ -5,6 +5,9 @@ from unittest import mock
 
 from real_check import main
 from real_check.client import AlphaWordFileEntry
+from real_check.hid_switch import ManagerSwitchResult
+from real_check.live_usb import AlphaSmartDeviceMode, ObservedAlphaSmartDevice
+from real_check.usb_select import EndpointDescriptor, InterfaceDescriptor
 
 
 class CLITests(unittest.TestCase):
@@ -16,6 +19,8 @@ class CLITests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         self.assertIn("probe", stdout.getvalue())
+        self.assertIn("watch", stdout.getvalue())
+        self.assertIn("switch-to-direct", stdout.getvalue())
         self.assertIn("list", stdout.getvalue())
         self.assertIn("get", stdout.getvalue())
 
@@ -35,6 +40,68 @@ class CLITests(unittest.TestCase):
         self.assertEqual(
             stdout.getvalue(),
             "vendor_id=0x081e product_id=0xbd01 interface=1 out_ep=0x02 in_ep=0x83\n",
+        )
+
+    @mock.patch("real_check.watch_alphasmart_devices")
+    def test_watch_command_prints_observed_modes(self, watch_alphasmart_devices: mock.Mock) -> None:
+        watch_alphasmart_devices.return_value = [
+            ObservedAlphaSmartDevice(
+                vendor_id=0x081E,
+                product_id=0xBD04,
+                mode=AlphaSmartDeviceMode("keyboard", "AlphaSmart HID keyboard mode; no direct USB OUT endpoint"),
+                interfaces=[
+                    InterfaceDescriptor(
+                        number=0,
+                        alternate_setting=0,
+                        endpoints=[EndpointDescriptor(address=0x82, transfer_type="interrupt", max_packet_size=64)],
+                    )
+                ],
+            )
+        ]
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["watch", "--timeout", "0.1"])
+
+        self.assertEqual(exit_code, 0)
+        watch_alphasmart_devices.assert_called_once_with(timeout_seconds=0.1, interval_seconds=0.25, try_switch=False)
+        self.assertEqual(
+            stdout.getvalue(),
+            "vendor_id=0x081e product_id=0xbd04 mode=keyboard detail=AlphaSmart HID keyboard mode; no direct USB OUT endpoint\n"
+            "  interface=0 alt=0 endpoints=0x82:interrupt:in:max64\n",
+        )
+
+    @mock.patch("real_check.watch_alphasmart_devices")
+    def test_watch_command_can_enable_switch_attempt(self, watch_alphasmart_devices: mock.Mock) -> None:
+        watch_alphasmart_devices.return_value = []
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["watch", "--timeout", "0.1", "--try-switch"])
+
+        self.assertEqual(exit_code, 0)
+        watch_alphasmart_devices.assert_called_once_with(timeout_seconds=0.1, interval_seconds=0.25, try_switch=True)
+
+    @mock.patch("real_check.watch_alphasmart_devices")
+    def test_watch_command_prints_switch_result(self, watch_alphasmart_devices: mock.Mock) -> None:
+        watch_alphasmart_devices.return_value = [
+            ObservedAlphaSmartDevice(
+                vendor_id=0x081E,
+                product_id=0xBD01,
+                mode=AlphaSmartDeviceMode("direct", "NEO direct USB mode"),
+                interfaces=[],
+                switch_result="Switched",
+            )
+        ]
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["watch", "--try-switch"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "vendor_id=0x081e product_id=0xbd01 mode=direct detail=NEO direct USB mode switch=Switched\n",
         )
 
     @mock.patch("real_check.open_direct_usb_transport")
@@ -72,6 +139,30 @@ class CLITests(unittest.TestCase):
         open_transport.assert_called_once()
         client.download_alpha_word_file.assert_called_once_with(slot=2)
         client.close.assert_called_once()
+
+    @mock.patch("real_check.send_manager_switch_sequence", return_value=ManagerSwitchResult(reports_sent=6))
+    def test_switch_to_direct_command_prints_sent_report_count(self, send_manager_switch_sequence: mock.Mock) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["switch-to-direct"])
+
+        self.assertEqual(exit_code, 0)
+        send_manager_switch_sequence.assert_called_once()
+        self.assertEqual(stdout.getvalue(), "sent_manager_switch_reports=6\n")
+
+    @mock.patch("real_check.send_manager_switch_sequence", side_effect=RuntimeError("USB HID GET_REPORT failed"))
+    def test_switch_to_direct_command_prints_runtime_error_without_traceback(
+        self, send_manager_switch_sequence: mock.Mock
+    ) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            exit_code = main(["switch-to-direct"])
+
+        self.assertEqual(exit_code, 1)
+        send_manager_switch_sequence.assert_called_once()
+        self.assertEqual(stderr.getvalue(), "USB HID GET_REPORT failed\n")
 
 
 if __name__ == "__main__":

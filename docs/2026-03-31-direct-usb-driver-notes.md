@@ -270,8 +270,26 @@ Interpretation:
 
 Interpretation:
 
-- HID is part of fallback discovery and initialization.
-- It is not the main AlphaWord direct-USB data path, which still runs through `\\\\.\\AsUSBDrv%d` using `WriteFile` and `ReadFile`.
+- HID is part of discovery and direct-mode initialization. A NEO can attach first as `081e:bd04`, a standard HID boot keyboard with only interrupt IN plus keyboard LED output-report support.
+- The physical NEO tested on macOS did **not** switch when given the newer 4-byte `05 02 04 01 06 07` sequence, even though those USB/HID writes completed successfully.
+- The same physical NEO **did** switch to direct USB mode when given the legacy one-byte output-report sequence `e0 e1 e2 e3 e4`.
+- After the switch the device re-enumerates as `081e:bd01` with direct endpoints:
+  - interface `0`
+  - bulk OUT endpoint `0x01`, max packet `64`
+  - bulk IN endpoint `0x82`, max packet `64`
+- HID is not the main AlphaWord direct-USB data path after this point. AlphaWord traffic runs over the `081e:bd01` bulk endpoints, corresponding to the Windows `\\\\.\\AsUSBDrv%d` `WriteFile` / `ReadFile` path.
+
+macOS transport notes from live testing:
+
+- hidapi can enumerate the `081e:bd04` keyboard path but fails to open it as a keyboard-class HID device.
+- PyUSB can find the device, but its managed `ctrl_transfer` path tries to claim interface `0` and fails on macOS for the HID keyboard interface.
+- Direct `libusb_control_transfer` works when it sends HID class `SET_REPORT` requests without claiming the interface.
+- The working macOS switch request is:
+  - `bmRequestType = 0x21` (`host-to-device | class | interface`)
+  - `bRequest = 0x09` (`SET_REPORT`)
+  - `wValue = 0x0200` (`output report`, report id `0`)
+  - `wIndex = 0`
+  - payloads: `e0`, `e1`, `e2`, `e3`, `e4`
 
 ## Private Driver IOCTL Surface
 
@@ -541,23 +559,27 @@ Small command transactions exist on top of this:
 
 For AlphaWord retrieval specifically, the reconstructed fresh direct USB sequence is now:
 
-1. `?\xff\x00reset`
-2. `?Swtch\x00\x00`
-3. updater command `0x04` to enumerate applets
-4. updater command `0x13` to get file attributes
-5. updater command `0x12` or `0x1c` to begin file retrieval
-6. repeated updater command `0x10` chunk pulls
+1. If the device is attached as `081e:bd04`, send HID output report payloads `e0 e1 e2 e3 e4`.
+2. Wait for re-enumeration as `081e:bd01`.
+3. Open the direct USB bulk endpoints (`OUT 0x01`, `IN 0x82` on the tested NEO).
+4. Send `?\xff\x00reset`.
+5. Send `?Swtch\x00\x00`.
+6. Send updater command `0x04` to enumerate applets.
+7. Send updater command `0x13` to get file attributes.
+8. Send updater command `0x12` or `0x1c` to begin file retrieval.
+9. Send repeated updater command `0x10` chunk pulls.
 
 ## Working Hypothesis
 
 The direct transport likely works like this:
 
-1. Enumerate numbered `AsUSBDrv` device instances.
-2. Query a USB descriptor with `0x80002000` to verify the device is a NEO.
-3. Start-device handling fetches the USB device and configuration descriptors and builds a configured-pipe cache.
-4. Optional named opens bind a file object to a specific configured endpoint.
-5. Use `WriteFile` and `ReadFile` for the main data exchange, which the driver translates into chunked internal `0x220003` requests.
-6. Use small fixed-width command packets for mode changes such as applet switching.
+1. If only `081e:bd04` is present, NeoManager's HID fallback path switches the device into `081e:bd01` direct mode using HID output reports.
+2. Enumerate numbered `AsUSBDrv` device instances.
+3. Query a USB descriptor with `0x80002000` to verify the device is a NEO.
+4. Start-device handling fetches the USB device and configuration descriptors and builds a configured-pipe cache.
+5. Optional named opens bind a file object to a specific configured endpoint.
+6. Use `WriteFile` and `ReadFile` for the main data exchange, which the driver translates into chunked internal `0x220003` requests.
+7. Use small fixed-width command packets for applet switching after direct mode is active.
 
 For the AlphaWord retrieval and print-side flow built on top of this transport, see:
 
@@ -570,8 +592,8 @@ These still need confirmation:
 - Exact user-visible semantics of the cached block returned by `0x220000`
 - Exact lower-stack meaning of internal IOCTLs `0x220013` and `0x220007`
 - Whether NeoManager ever opens named endpoint handles explicitly, or relies only on the default direction-matched path
-- Whether `WriteFile` consistently lands on one bulk/interrupt OUT pipe or can switch depending on the configured-interface cache
-- Whether `ReadFile` consistently lands on one bulk/interrupt IN pipe or can switch depending on the configured-interface cache
+- Whether `WriteFile` consistently lands on one bulk OUT pipe or can switch depending on the configured-interface cache
+- Whether `ReadFile` consistently lands on one bulk IN pipe or can switch depending on the configured-interface cache
 - Exact layout of the 8-byte `?Swtch` command beyond the embedded applet ID
 - Whether the 8-byte inbound read staging maps directly to USB max-packet size or to a higher-level record framing choice
 
@@ -589,6 +611,10 @@ If continuing locally in Ghidra/radare2:
 What is already firm enough to rely on:
 
 - Direct USB is separate from AlphaHub and should be documented independently.
+- A directly connected NEO may first attach as `081e:bd04`, a HID keyboard interface, not `081e:bd01`.
+- The confirmed `081e:bd04` -> `081e:bd01` switch for the tested NEO is HID output report payloads `e0 e1 e2 e3 e4`.
+- On macOS, direct `libusb_control_transfer` works for that switch when it avoids claiming the HID keyboard interface.
+- The tested `081e:bd01` direct endpoint pair is bulk OUT `0x01` and bulk IN `0x82`.
 - The driver exposes a named DOS device path consumed from user mode.
 - User-mode writes are stream writes in `0x40` byte chunks.
 - Applet switching is an 8-byte request and 8-byte response exchange.

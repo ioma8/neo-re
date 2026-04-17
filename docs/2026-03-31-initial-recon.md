@@ -54,7 +54,8 @@ The USB driver INF identifies two device IDs:
 
 This already gives us the first hardware mapping:
 
-- Direct device connection: likely `VID_081e PID_bd01`
+- Direct NEO data connection: `VID_081e PID_bd01`
+- Fresh direct physical attach can initially enumerate as `VID_081e PID_bd04`, a HID keyboard-mode device. NeoManager switches that mode to `PID_bd01` through HID output reports.
 - Hub/cart connection: likely `VID_081e PID_0100`
 
 ## Transport Split
@@ -220,7 +221,10 @@ These are the first high-value unknowns:
 
 - What IOCTL codes does `AsUSBDrv` expose?
 - Which USB endpoints are used for direct NEO communication?
+  - Live confirmation: after the `081e:bd04` -> `081e:bd01` switch, the tested NEO exposes bulk OUT `0x01` and bulk IN `0x82`.
 - Is HID only used for enumeration, or also for data transfer?
+  - Live confirmation: HID is used to trigger direct USB mode from keyboard mode. It is not the AlphaWord data path after the device re-enumerates as `081e:bd01`.
+  - The confirmed switch for the tested NEO is HID output report payloads `e0 e1 e2 e3 e4`.
 - What are the parameter and buffer layouts for:
   - `AsUSBCommWriteData`
   - `AsUSBCommReadData`

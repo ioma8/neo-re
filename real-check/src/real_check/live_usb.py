@@ -1,13 +1,16 @@
 from dataclasses import dataclass
+import time
 
 import usb.core
 import usb.util
 
+from real_check.client import NeoAlphaWordClient
 from real_check.usb_select import EndpointDescriptor, EndpointSelection, InterfaceDescriptor, select_direct_usb_endpoints
 
 
 VENDOR_ID = 0x081E
 PRODUCT_ID = 0xBD01
+KEYBOARD_PRODUCT_ID = 0xBD04
 
 
 @dataclass(frozen=True)
@@ -17,6 +20,21 @@ class ProbeResult:
     interface_number: int
     out_endpoint: int
     in_endpoint: int
+
+
+@dataclass(frozen=True)
+class AlphaSmartDeviceMode:
+    kind: str
+    detail: str
+
+
+@dataclass(frozen=True)
+class ObservedAlphaSmartDevice:
+    vendor_id: int
+    product_id: int
+    mode: AlphaSmartDeviceMode
+    interfaces: list[InterfaceDescriptor]
+    switch_result: str | None = None
 
 
 class LiveUsbTransport:
@@ -74,11 +92,99 @@ def build_interface_descriptors(configuration) -> list[InterfaceDescriptor]:
     return interfaces
 
 
+def classify_alphasmart_device(
+    *,
+    vendor_id: int,
+    product_id: int,
+    interfaces: list[InterfaceDescriptor],
+) -> AlphaSmartDeviceMode:
+    if vendor_id != VENDOR_ID:
+        return AlphaSmartDeviceMode("other", "not an AlphaSmart USB device")
+    if product_id == PRODUCT_ID:
+        return AlphaSmartDeviceMode("direct", "NEO direct USB mode")
+    if product_id == KEYBOARD_PRODUCT_ID and all(endpoint.is_in for interface in interfaces for endpoint in interface.endpoints):
+        return AlphaSmartDeviceMode("keyboard", "AlphaSmart HID keyboard mode; no direct USB OUT endpoint")
+    return AlphaSmartDeviceMode("unknown", "unknown AlphaSmart USB mode")
+
+
 def _open_device() -> usb.core.Device:
     device = usb.core.find(idVendor=VENDOR_ID, idProduct=PRODUCT_ID)
     if device is None:
-        raise ValueError("AlphaSmart NEO USB device not found")
+        keyboard = usb.core.find(idVendor=VENDOR_ID, idProduct=KEYBOARD_PRODUCT_ID)
+        if keyboard is not None:
+            raise ValueError("AlphaSmart found in HID keyboard mode (081e:bd04), not NEO direct USB mode (081e:bd01)")
+        raise ValueError("AlphaSmart NEO direct USB device not found")
     return device
+
+
+def _observe_device(device: usb.core.Device, *, try_switch: bool = False) -> ObservedAlphaSmartDevice:
+    configuration = device.get_active_configuration()
+    interfaces = build_interface_descriptors(configuration)
+    switch_result = None
+    if try_switch:
+        try:
+            select_direct_usb_endpoints(interfaces)
+            switch_result = try_switch_to_updater(device, interfaces=interfaces)
+        except (ValueError, usb.core.USBError):
+            switch_result = None
+    return ObservedAlphaSmartDevice(
+        vendor_id=device.idVendor,
+        product_id=device.idProduct,
+        mode=classify_alphasmart_device(
+            vendor_id=device.idVendor,
+            product_id=device.idProduct,
+            interfaces=interfaces,
+        ),
+        interfaces=interfaces,
+        switch_result=switch_result,
+    )
+
+
+def try_switch_to_updater(device: usb.core.Device, *, interfaces: list[InterfaceDescriptor]) -> str:
+    selection = select_direct_usb_endpoints(interfaces)
+    _prepare_device(device, selection)
+    transport = LiveUsbTransport(device, selection)
+    client = NeoAlphaWordClient(transport)
+    try:
+        client.enter_updater_mode()
+        return "Switched"
+    finally:
+        client.close()
+
+
+def watch_alphasmart_devices(
+    *,
+    timeout_seconds: float,
+    interval_seconds: float = 0.25,
+    try_switch: bool = False,
+) -> list[ObservedAlphaSmartDevice]:
+    deadline = time.monotonic() + timeout_seconds
+    observed: dict[tuple[int, int], ObservedAlphaSmartDevice] = {}
+    attempted_switches: set[tuple[int, int]] = set()
+    while time.monotonic() <= deadline:
+        for device in usb.core.find(find_all=True, idVendor=VENDOR_ID):
+            key = (device.idVendor, device.idProduct)
+            should_try_switch = try_switch and key not in attempted_switches
+            try:
+                observation = _observe_device(device, try_switch=should_try_switch)
+            except usb.core.USBError:
+                continue
+            if should_try_switch:
+                attempted_switches.add(key)
+            previous = observed.get(key)
+            if previous is not None and previous.switch_result and observation.switch_result is None:
+                observation = ObservedAlphaSmartDevice(
+                    vendor_id=observation.vendor_id,
+                    product_id=observation.product_id,
+                    mode=observation.mode,
+                    interfaces=observation.interfaces,
+                    switch_result=previous.switch_result,
+                )
+            observed[(observation.vendor_id, observation.product_id)] = observation
+        if not try_switch and observed:
+            break
+        time.sleep(interval_seconds)
+    return list(observed.values())
 
 
 def _prepare_device(device: usb.core.Device, selection: EndpointSelection) -> None:

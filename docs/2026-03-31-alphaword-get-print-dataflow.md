@@ -628,19 +628,21 @@ Interpretation:
 For the direct USB case, the current best reconstruction is:
 
 1. User enters `Get/Print AlphaWord Files`.
-2. NeoManager identifies the direct NEO transport and uses the `AsUSBComm*` path.
-3. The direct USB setup path resets the transport and issues `AsUSBCommSwitchToApplet(0)` to enter updater-side mode.
-4. The updater layer issues command `0x04` to enumerate applets and confirms the AlphaWord applet context.
-5. AlphaWord file metadata is fetched through `UpdaterGetRawFileAttributes` using opcode `0x13`, `argument=file_slot`, and `trailing=0xa000`.
-6. Full AlphaWord file contents are fetched through `UpdaterRetrieveAppletFileData` using opcode `0x12` or `0x1c`, `argument=(requested_length << 8) | file_slot`, and `trailing=0xa000`.
-7. The device returns an initial `0x53` response containing the total byte count.
-8. NeoManager repeatedly issues command `0x10`, receives `0x4d` chunk headers, reads each chunk body, and verifies each chunk checksum.
-9. Retrieved bytes are written to a local temporary sink.
-10. `LoadRetrievedTextFileAsCString` opens the temporary file, converts it into `CString` text, normalizes line endings, and returns printable text.
-11. The UI uses:
+2. If the NEO is attached as `081e:bd04` HID keyboard mode, the direct transport setup sends HID output report payloads `e0 e1 e2 e3 e4`.
+3. The NEO re-enumerates as `081e:bd01` direct USB mode. The tested endpoint pair is bulk OUT `0x01`, bulk IN `0x82`.
+4. NeoManager identifies the direct NEO transport and uses the `AsUSBComm*` path.
+5. The direct USB setup path resets the transport and issues `AsUSBCommSwitchToApplet(0)` to enter updater-side mode.
+6. The updater layer issues command `0x04` to enumerate applets and confirms the AlphaWord applet context.
+7. AlphaWord file metadata is fetched through `UpdaterGetRawFileAttributes` using opcode `0x13`, `argument=file_slot`, and `trailing=0xa000`.
+8. Full AlphaWord file contents are fetched through `UpdaterRetrieveAppletFileData` using opcode `0x12` or `0x1c`, `argument=(requested_length << 8) | file_slot`, and `trailing=0xa000`.
+9. The device returns an initial `0x53` response containing the total byte count.
+10. NeoManager repeatedly issues command `0x10`, receives `0x4d` chunk headers, reads each chunk body, and verifies each chunk checksum.
+11. Retrieved bytes are written to a local temporary sink.
+12. `LoadRetrievedTextFileAsCString` opens the temporary file, converts it into `CString` text, normalizes line endings, and returns printable text.
+13. The UI uses:
    - `RetrieveAlphaWordPreviewText` for short preview text capped at `0xb4`
    - `RetrieveFullAlphaWordText` for full retrieval capped at `0x80000`
-12. Higher-level UI code loops over all 8 AlphaWord slots:
+14. Higher-level UI code loops over all 8 AlphaWord slots:
    - preview/session scan callers include `RefreshAlphaWordPreviewCacheForTreeItem` and `ScanAlphaWordPreviewSlots`
    - full retrieval callers include `RetrieveAllAlphaWordSlotsForDevice` and `RetrieveSelectedAlphaWordSlotsForDevice`
 
