@@ -1,5 +1,6 @@
 pub mod app;
 pub mod backup;
+pub mod gui;
 pub mod protocol;
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -64,3 +65,13 @@ pub mod usb {
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod usb_support;
+
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+fn android_main(app: android_activity::AndroidApp) {
+    let mut options = gui::options();
+    options.android_app = Some(app);
+    if let Err(error) = gui::run(options) {
+        tracing::error!(error = ?error, "Alpha GUI exited with an error");
+    }
+}

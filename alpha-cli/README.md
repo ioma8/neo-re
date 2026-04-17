@@ -65,3 +65,15 @@ Validated GUI check targets:
 cargo check --manifest-path alpha-cli/Cargo.toml --target aarch64-apple-darwin --bin alpha-gui
 cargo check --manifest-path alpha-cli/Cargo.toml --target aarch64-linux-android --bin alpha-gui
 ```
+
+Build the Android debug APK:
+
+```bash
+ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo apk build --manifest-path alpha-cli/Cargo.toml --lib
+```
+
+The debug APK is written to:
+
+```text
+alpha-cli/target/debug/apk/alpha-gui.apk
+```
