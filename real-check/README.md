@@ -72,6 +72,21 @@ Download one AlphaWord slot and write it to a file:
 uv run --project real-check real-check get 2 --output slot2.bin
 ```
 
+Export one AlphaWord slot as a host-side text file:
+
+```bash
+mkdir -p exports
+uv run --project real-check real-check get 1 --output exports/alphaword-slot1.raw
+python3 - <<'PY'
+from pathlib import Path
+raw = Path("exports/alphaword-slot1.raw").read_bytes()
+text = raw.replace(b"\x00", b" ").replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+Path("exports/alphaword-slot1.txt").write_text(text.decode("latin-1"), encoding="utf-8")
+PY
+```
+
+The tested slot 1 export produced `22712` raw bytes and a `22712` byte UTF-8 text file after CR-to-LF normalization. Keep `exports/` ignored; these files can contain private device data.
+
 ## Current assumptions
 
 - HID keyboard-mode device match is `VID=0x081e`, `PID=0xbd04`
@@ -89,7 +104,7 @@ uv run --project real-check real-check get 2 --output slot2.bin
 
 The `watch`, `switch-to-direct`, and `probe` commands do not read or modify AlphaWord file contents. `switch-to-direct` only changes USB mode by sending HID output reports. `probe` only inspects the direct USB descriptor/endpoints.
 
-`list` sends read-only AlphaWord file-attribute requests and prints slot names/lengths. `applets` sends a read-only applet-list request and prints installed applet metadata. `verify-get` retrieves AlphaWord bytes but prints only host-side verification summaries, not document contents. `get` retrieves file bytes from a slot and writes only to the host output path if `--output` is provided; without `--output`, it prints the slot contents as hex, so avoid it when the device contains private data.
+`list` sends read-only AlphaWord file-attribute requests and prints slot names/lengths. `applets` sends a read-only applet-list request and prints installed applet metadata. `verify-get` retrieves AlphaWord bytes but prints only host-side verification summaries, not document contents. `get` retrieves file bytes from a slot and writes only to the host output path if `--output` is provided; without `--output`, it prints the slot contents as hex, so avoid it when the device contains private data. Host-side exports under `exports/` are ignored by git.
 
 ## Status
 

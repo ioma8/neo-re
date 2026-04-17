@@ -403,6 +403,15 @@ Fresh decompilation of `LoadRetrievedTextFileAsCString` supports these concrete 
 
 That means the previously assumed generic "newline normalization" should not be treated as a proven property of the full retrieval path. The validated full-path behavior is byte cleanup plus temp-file-to-`CString` conversion.
 
+The local live export probe uses a separate host-side convenience conversion after retrieval:
+
+1. retrieve raw bytes with `real-check get 1 --output exports/alphaword-slot1.raw`
+2. rewrite embedded NUL bytes to spaces
+3. normalize CRLF and CR line endings to LF for normal host text editors
+4. write UTF-8 text to `exports/alphaword-slot1.txt`
+
+This host-side `.txt` conversion is not a device write and should not be confused with NeoManager's exact `CString` path. It is a practical export format for inspecting a retrieved AlphaWord slot on macOS/Linux.
+
 ### Exact Helper Replacement Strings
 
 The data items used by the temp-file helpers are now concrete enough to name:
@@ -639,7 +648,7 @@ For the direct USB case, the current best reconstruction is:
 9. The device returns an initial `0x53` response containing the total byte count.
 10. NeoManager repeatedly issues command `0x10`, receives `0x4d` chunk headers, reads each chunk body, and verifies each chunk checksum.
 11. Retrieved bytes are written to a local temporary sink.
-12. `LoadRetrievedTextFileAsCString` opens the temporary file, converts it into `CString` text, normalizes line endings, and returns printable text.
+12. `LoadRetrievedTextFileAsCString` opens the temporary file, rewrites embedded NUL bytes to spaces, converts it into `CString` text, and returns printable text.
 13. The UI uses:
    - `RetrieveAlphaWordPreviewText` for short preview text capped at `0xb4`
    - `RetrieveFullAlphaWordText` for full retrieval capped at `0x80000`
@@ -670,6 +679,18 @@ Live read-only validation against the tested physical NEO:
   - slot 8: `0`
 
 This confirms that the raw attribute `file_length` field and the initial retrieve response's reported byte count are related but not identical on the tested device. The retrieve response is the authoritative byte count for the live transfer loop.
+
+Slot 1 full export validation:
+
+- raw export command: `uv run --project real-check real-check get 1 --output exports/alphaword-slot1.raw`
+- raw byte count: `22712`
+- raw SHA-256: `8d3d4a6a856070a18012ffeddd51c4dbe45c6f51d98b9005405f4e0bbd5deddd`
+- host-side text export: `exports/alphaword-slot1.txt`
+- text byte count after CR-to-LF normalization: `22712`
+- text line count: `22`
+- text SHA-256: `bdf89c3e5a38e0f561dc55ce1b4b1c622a3109e0f0a66357843a7c038868877c`
+
+The raw and text byte counts matched for this slot because the retrieved content was already all printable bytes or line-control bytes, with `21` carriage returns, `0` line feeds, and `0` NUL bytes.
 
 ## Non-Core Sibling Path
 
