@@ -1,8 +1,9 @@
 import unittest
 
+from neotools.smartapplets import build_list_applets_command
 from neotools.updater_packets import build_updater_command
 
-from real_check.client import AlphaWordFileEntry, NeoAlphaWordClient
+from real_check.client import AlphaWordFileEntry, AlphaWordFileVerification, NeoAlphaWordClient, SmartAppletEntry
 
 
 def _build_response(status: int, argument: int, trailing: int) -> bytes:
@@ -144,6 +145,70 @@ class ClientTests(unittest.TestCase):
                 build_updater_command(command=0x10, argument=0, trailing=0),
                 build_updater_command(command=0x10, argument=0, trailing=0),
             ],
+        )
+
+    def test_list_smart_applets_reads_metadata_records_without_retrieving_binaries(self) -> None:
+        applet_record = bytearray(0x84)
+        applet_record[0x00:0x04] = bytes.fromhex("c0 ff ee ad")
+        applet_record[0x04:0x08] = (0x1234).to_bytes(4, "big")
+        applet_record[0x08:0x0C] = (0x200).to_bytes(4, "big")
+        applet_record[0x0C:0x10] = (0x1000).to_bytes(4, "big")
+        applet_record[0x10:0x14] = (0xFF0000CE).to_bytes(4, "big")
+        applet_record[0x14:0x18] = bytes.fromhex("a0 00 01 00")
+        applet_record[0x18:0x18 + len(b"AlphaWord Plus")] = b"AlphaWord Plus"
+        applet_record[0x3C] = 0x03
+        applet_record[0x3D] = 0x04
+        applet_record[0x3F] = 0x01
+        applet_record[0x80:0x84] = (0x20).to_bytes(4, "big")
+        payload = bytes(applet_record)
+        transport = FakeTransport(
+            [
+                b"Switched",
+                _build_response(0x44, len(payload), sum(payload) & 0xFFFF),
+                payload,
+            ]
+        )
+        client = NeoAlphaWordClient(transport)
+
+        entries = client.list_smart_applets()
+
+        self.assertEqual(
+            entries,
+            [
+                SmartAppletEntry(
+                    applet_id=0xA000,
+                    version_major=3,
+                    version_minor=4,
+                    name="AlphaWord Plus",
+                    file_size=0x1234,
+                    applet_class=0x01,
+                )
+            ],
+        )
+        self.assertEqual(transport.writes[2], build_list_applets_command(page_offset=0, page_size=7))
+
+    def test_verify_alpha_word_file_reports_hashes_without_exposing_payload(self) -> None:
+        transport = FakeTransport(
+            [
+                b"Switched",
+                _build_response(0x53, 5, 0),
+                _build_response(0x4D, 5, sum(b"ABCDE") & 0xFFFF),
+                b"ABCDE",
+            ]
+        )
+        client = NeoAlphaWordClient(transport)
+
+        verification = client.verify_alpha_word_file(slot=2)
+
+        self.assertEqual(
+            verification,
+            AlphaWordFileVerification(
+                slot=2,
+                reported_length=5,
+                bytes_read=5,
+                sum16=0x014F,
+                sha256="f0393febe8baaa55e32f7be2a7cc180bf34e52137d99e056c817a9c07b8f239a",
+            ),
         )
 
     def test_close_closes_transport(self) -> None:

@@ -30,6 +30,10 @@ def main(argv: list[str] | None = None) -> int:
     subparsers.add_parser("switch-to-direct")
     subparsers.add_parser("debug-attributes")
     subparsers.add_parser("list")
+    subparsers.add_parser("applets")
+
+    verify_get_parser = subparsers.add_parser("verify-get")
+    verify_get_parser.add_argument("slot")
 
     get_parser = subparsers.add_parser("get")
     get_parser.add_argument("slot")
@@ -92,6 +96,33 @@ def main(argv: list[str] | None = None) -> int:
                 )
         finally:
             client.close()
+        return 0
+
+    if args.command == "applets":
+        transport = open_direct_usb_transport()
+        client = NeoAlphaWordClient(transport)
+        try:
+            for entry in client.list_smart_applets():
+                print(
+                    f"applet_id=0x{entry.applet_id:04x} version={entry.version_major}.{entry.version_minor} "
+                    f"name={entry.name} file_size={entry.file_size} applet_class=0x{entry.applet_class:02x}"
+                )
+        finally:
+            client.close()
+        return 0
+
+    if args.command == "verify-get":
+        transport = open_direct_usb_transport()
+        client = NeoAlphaWordClient(transport)
+        try:
+            verification = client.verify_alpha_word_file(slot=int(args.slot, 0))
+        finally:
+            client.close()
+        print(
+            f"slot={verification.slot} reported_length={verification.reported_length} "
+            f"bytes_read={verification.bytes_read} "
+            f"sum16=0x{verification.sum16:04x} sha256={verification.sha256}"
+        )
         return 0
 
     if args.command == "debug-attributes":

@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from real_check import main
-from real_check.client import AlphaWordFileEntry
+from real_check.client import AlphaWordFileEntry, AlphaWordFileVerification, SmartAppletEntry
 from real_check.hid_switch import ManagerSwitchResult
 from real_check.live_usb import AlphaSmartDeviceMode, ObservedAlphaSmartDevice
 from real_check.usb_select import EndpointDescriptor, InterfaceDescriptor
@@ -23,6 +23,8 @@ class CLITests(unittest.TestCase):
         self.assertIn("switch-to-direct", stdout.getvalue())
         self.assertIn("debug-attributes", stdout.getvalue())
         self.assertIn("list", stdout.getvalue())
+        self.assertIn("applets", stdout.getvalue())
+        self.assertIn("verify-get", stdout.getvalue())
         self.assertIn("get", stdout.getvalue())
 
     @mock.patch("real_check.probe_direct_usb_device")
@@ -139,6 +141,61 @@ class CLITests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "write reset 3f ff 00 72 65 73 65 74\nslot 1 empty\n")
         open_transport.assert_called_once()
         client.debug_alpha_word_attributes.assert_called_once()
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_applets_command_prints_metadata(self, client_cls: mock.Mock, open_transport: mock.Mock) -> None:
+        client = client_cls.return_value
+        client.list_smart_applets.return_value = [
+            SmartAppletEntry(
+                applet_id=0xA000,
+                version_major=3,
+                version_minor=4,
+                name="AlphaWord Plus",
+                file_size=0x1234,
+                applet_class=0x01,
+            )
+        ]
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["applets"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "applet_id=0xa000 version=3.4 name=AlphaWord Plus file_size=4660 applet_class=0x01\n",
+        )
+        open_transport.assert_called_once()
+        client.list_smart_applets.assert_called_once()
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_verify_get_command_prints_summary_without_payload(
+        self, client_cls: mock.Mock, open_transport: mock.Mock
+    ) -> None:
+        client = client_cls.return_value
+        client.verify_alpha_word_file.return_value = AlphaWordFileVerification(
+            slot=2,
+            reported_length=5,
+            bytes_read=5,
+            sum16=0x014F,
+            sha256="f0393febe8baaa55e32f7be2a7cc180bf34e52137d99e056c817a9c07b8f239a",
+        )
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["verify-get", "2"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "slot=2 reported_length=5 bytes_read=5 sum16=0x014f sha256=f0393febe8baaa55e32f7be2a7cc180bf34e52137d99e056c817a9c07b8f239a\n",
+        )
+        open_transport.assert_called_once()
+        client.verify_alpha_word_file.assert_called_once_with(slot=2)
         client.close.assert_called_once()
 
     @mock.patch("real_check.open_direct_usb_transport")

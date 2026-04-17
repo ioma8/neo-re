@@ -1,7 +1,9 @@
+import hashlib
 from dataclasses import dataclass
 from typing import Protocol
 
 from neotools.alphaword_attributes import parse_file_attributes_record
+from neotools.smartapplets import build_list_applets_command, parse_smartapplet_metadata
 from neotools.switch_packets import SwitchResponse, build_reset_preamble, build_switch_packet, parse_switch_response
 from neotools.updater_packets import (
     build_raw_file_attributes_command,
@@ -25,6 +27,25 @@ class AlphaWordFileEntry:
     name: str
     file_length: int
     reserved_length: int
+
+
+@dataclass(frozen=True)
+class AlphaWordFileVerification:
+    slot: int
+    reported_length: int
+    bytes_read: int
+    sum16: int
+    sha256: str
+
+
+@dataclass(frozen=True)
+class SmartAppletEntry:
+    applet_id: int
+    version_major: int
+    version_minor: int
+    name: str
+    file_size: int
+    applet_class: int
 
 
 class NeoAlphaWordClient:
@@ -106,7 +127,47 @@ class NeoAlphaWordClient:
             )
         return lines
 
-    def download_alpha_word_file(self, *, slot: int, requested_length: int = 0x80000) -> bytes:
+    def list_smart_applets(self) -> list[SmartAppletEntry]:
+        self.enter_updater_mode()
+        entries: list[SmartAppletEntry] = []
+        page_offset = 0
+        page_size = 7
+
+        while True:
+            self._transport.write(build_list_applets_command(page_offset=page_offset, page_size=page_size))
+            response = parse_updater_response(self._transport.read_exact(8, timeout_ms=600))
+            if response.status == 0x90:
+                break
+            if response.status != 0x44:
+                raise ValueError(f"unexpected applet list status 0x{response.status:02x}")
+            if response.argument == 0:
+                break
+            if response.argument % 0x84 != 0:
+                raise ValueError("applet list payload length is not a multiple of 0x84")
+
+            payload = self._transport.read_exact(response.argument, timeout_ms=1000)
+            if (sum(payload) & 0xFFFF) != response.trailing:
+                raise ValueError("applet list payload checksum mismatch")
+
+            records = [payload[offset : offset + 0x84] for offset in range(0, len(payload), 0x84)]
+            for record in records:
+                metadata = parse_smartapplet_metadata(record)
+                entries.append(
+                    SmartAppletEntry(
+                        applet_id=metadata.applet_id,
+                        version_major=metadata.version_major,
+                        version_minor=metadata.version_minor,
+                        name=metadata.name,
+                        file_size=metadata.header.file_size,
+                        applet_class=metadata.applet_class,
+                    )
+                )
+            if len(records) < page_size:
+                break
+            page_offset += len(records)
+        return entries
+
+    def _retrieve_alpha_word_file(self, *, slot: int, requested_length: int) -> tuple[bytes, int]:
         self.enter_updater_mode()
         self._transport.write(
             build_retrieve_file_command(
@@ -132,7 +193,21 @@ class NeoAlphaWordClient:
                 raise ValueError("chunk payload checksum mismatch")
             payload.extend(chunk_payload)
             remaining -= len(chunk_payload)
-        return bytes(payload)
+        return bytes(payload), start.argument
+
+    def download_alpha_word_file(self, *, slot: int, requested_length: int = 0x80000) -> bytes:
+        payload, _reported_length = self._retrieve_alpha_word_file(slot=slot, requested_length=requested_length)
+        return payload
+
+    def verify_alpha_word_file(self, *, slot: int, requested_length: int = 0x80000) -> AlphaWordFileVerification:
+        payload, reported_length = self._retrieve_alpha_word_file(slot=slot, requested_length=requested_length)
+        return AlphaWordFileVerification(
+            slot=slot,
+            reported_length=reported_length,
+            bytes_read=len(payload),
+            sum16=sum(payload) & 0xFFFF,
+            sha256=hashlib.sha256(payload).hexdigest(),
+        )
 
     def close(self) -> None:
         self._transport.close()

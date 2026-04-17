@@ -44,6 +44,22 @@ List AlphaWord files:
 uv run --project real-check real-check list
 ```
 
+List installed SmartApplet metadata records:
+
+```bash
+uv run --project real-check real-check applets
+```
+
+This uses the read-only applet-list opcode `0x04`. It prints only metadata from the device's `0x84`-byte applet records and does not retrieve applet binaries.
+
+Verify that an AlphaWord slot can be retrieved without printing or writing its contents:
+
+```bash
+uv run --project real-check real-check verify-get 2
+```
+
+This uses the same read-only retrieve path as `get`, but prints only `reported_length`, `bytes_read`, `sum16`, and `sha256`.
+
 Download one AlphaWord slot and print the payload as hex:
 
 ```bash
@@ -63,6 +79,7 @@ uv run --project real-check real-check get 2 --output slot2.bin
 - keyboard-to-direct mode switch is confirmed as HID output report payloads `e0 e1 e2 e3 e4`
 - endpoint selection prefers a bulk OUT + bulk IN pair, then falls back to interrupt
 - updater bootstrap is `?\xff\x00reset` then `?Swtch\x00\x00`
+- SmartApplet listing uses opcode `0x04`, response `0x44`, and `0x84`-byte metadata records
 - AlphaWord applet id is `0xa000`
 - file listing is based on raw attribute opcode `0x13` across slots `1..8`
 - file download uses retrieve opcode `0x12` and repeated chunk opcode `0x10`
@@ -72,7 +89,7 @@ uv run --project real-check real-check get 2 --output slot2.bin
 
 The `watch`, `switch-to-direct`, and `probe` commands do not read or modify AlphaWord file contents. `switch-to-direct` only changes USB mode by sending HID output reports. `probe` only inspects the direct USB descriptor/endpoints.
 
-`list` sends read-only AlphaWord file-attribute requests and prints slot names/lengths. `get` retrieves file bytes from a slot and writes only to the host output path if `--output` is provided.
+`list` sends read-only AlphaWord file-attribute requests and prints slot names/lengths. `applets` sends a read-only applet-list request and prints installed applet metadata. `verify-get` retrieves AlphaWord bytes but prints only host-side verification summaries, not document contents. `get` retrieves file bytes from a slot and writes only to the host output path if `--output` is provided; without `--output`, it prints the slot contents as hex, so avoid it when the device contains private data.
 
 ## Status
 
