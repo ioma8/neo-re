@@ -1,0 +1,68 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
+use anyhow::{Context, bail};
+use chrono::Local;
+use directories::BaseDirs;
+
+use crate::protocol::{self, FileEntry};
+
+pub struct SavedFile {
+    pub txt_path: PathBuf,
+    pub raw_path: PathBuf,
+    pub bytes: usize,
+}
+
+pub fn app_dir() -> anyhow::Result<PathBuf> {
+    let dirs = BaseDirs::new().context("resolve home directory")?;
+    Ok(dirs.home_dir().join("alpha-cli"))
+}
+
+pub fn create_backup_dir() -> anyhow::Result<PathBuf> {
+    let dir = app_dir()?
+        .join("backups")
+        .join(Local::now().format("%Y-%m-%d_%H-%M-%S").to_string())
+        .join("contents");
+    fs::create_dir_all(&dir)
+        .with_context(|| format!("create backup directory {}", dir.display()))?;
+    Ok(dir)
+}
+
+pub fn save_file(dir: &Path, entry: &FileEntry, payload: &[u8]) -> anyhow::Result<SavedFile> {
+    if !dir.is_dir() {
+        bail!("backup target is not a directory: {}", dir.display());
+    }
+    let base = format!("slot-{:02}-{}", entry.slot, sanitize_name(&entry.name));
+    let raw_path = dir.join(format!("{base}.raw"));
+    let txt_path = dir.join(format!("{base}.txt"));
+    fs::write(&raw_path, payload).with_context(|| format!("write {}", raw_path.display()))?;
+    fs::write(&txt_path, protocol::normalize_text(payload))
+        .with_context(|| format!("write {}", txt_path.display()))?;
+    Ok(SavedFile {
+        txt_path,
+        raw_path,
+        bytes: payload.len(),
+    })
+}
+
+fn sanitize_name(name: &str) -> String {
+    let clean = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_owned();
+    if clean.is_empty() {
+        "untitled".to_owned()
+    } else {
+        clean
+    }
+}
