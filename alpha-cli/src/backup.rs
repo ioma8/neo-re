@@ -7,11 +7,10 @@ use anyhow::{Context, bail};
 use chrono::Local;
 use directories::BaseDirs;
 
-use crate::protocol::{self, FileEntry};
+use crate::protocol::FileEntry;
 
 pub struct SavedFile {
     pub txt_path: PathBuf,
-    pub raw_path: PathBuf,
     pub bytes: usize,
 }
 
@@ -23,8 +22,7 @@ pub fn app_dir() -> anyhow::Result<PathBuf> {
 pub fn create_backup_dir() -> anyhow::Result<PathBuf> {
     let dir = app_dir()?
         .join("backups")
-        .join(Local::now().format("%Y-%m-%d_%H-%M-%S").to_string())
-        .join("contents");
+        .join(Local::now().format("%Y-%m-%d_%H-%M-%S").to_string());
     fs::create_dir_all(&dir)
         .with_context(|| format!("create backup directory {}", dir.display()))?;
     Ok(dir)
@@ -35,16 +33,32 @@ pub fn save_file(dir: &Path, entry: &FileEntry, payload: &[u8]) -> anyhow::Resul
         bail!("backup target is not a directory: {}", dir.display());
     }
     let base = format!("slot-{:02}-{}", entry.slot, sanitize_name(&entry.name));
-    let raw_path = dir.join(format!("{base}.raw"));
     let txt_path = dir.join(format!("{base}.txt"));
-    fs::write(&raw_path, payload).with_context(|| format!("write {}", raw_path.display()))?;
-    fs::write(&txt_path, protocol::normalize_text(payload))
-        .with_context(|| format!("write {}", txt_path.display()))?;
+    let text = text_export_bytes(payload)?;
+    fs::write(&txt_path, text).with_context(|| format!("write {}", txt_path.display()))?;
     Ok(SavedFile {
         txt_path,
-        raw_path,
         bytes: payload.len(),
     })
+}
+
+fn text_export_bytes(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
+    let text = payload
+        .iter()
+        .map(|byte| match *byte {
+            0 => b' ',
+            b'\r' => b'\n',
+            byte => byte,
+        })
+        .collect::<Vec<_>>();
+    if text.len() != payload.len() {
+        bail!(
+            "text export length mismatch: downloaded {} bytes but converted text is {} bytes",
+            payload.len(),
+            text.len()
+        );
+    }
+    Ok(text)
 }
 
 fn sanitize_name(name: &str) -> String {

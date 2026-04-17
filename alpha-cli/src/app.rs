@@ -1,6 +1,11 @@
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::mpsc::{self, Receiver},
+    thread,
+    time::Duration,
+};
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use tracing::{error, info};
 
 use crate::{
@@ -23,7 +28,37 @@ pub struct App {
     pub main_selected: usize,
     pub file_selected: usize,
     pub files: Vec<FileEntry>,
+    pub download: Option<DownloadProgress>,
     client: Option<NeoClient>,
+    backup_rx: Option<Receiver<BackupEvent>>,
+}
+
+pub struct DownloadProgress {
+    pub spinner_index: usize,
+    pub current: usize,
+    pub total: usize,
+    pub message: String,
+}
+
+enum BackupEvent {
+    Progress {
+        current: usize,
+        total: usize,
+        name: String,
+    },
+    Saved {
+        slot: u8,
+        bytes: usize,
+        txt_path: PathBuf,
+    },
+    Done {
+        client: NeoClient,
+        dir: PathBuf,
+    },
+    Failed {
+        client: NeoClient,
+        message: String,
+    },
 }
 
 impl App {
@@ -36,7 +71,9 @@ impl App {
             main_selected: 0,
             file_selected: 0,
             files: Vec::new(),
+            download: None,
             client: None,
+            backup_rx: None,
         }
     }
 
@@ -76,7 +113,7 @@ impl App {
         Ok(())
     }
 
-    pub fn backup_selected(&mut self) -> anyhow::Result<PathBuf> {
+    pub fn start_backup_selected(&mut self) -> anyhow::Result<()> {
         let dir = backup::create_backup_dir()?;
         let selected_all = self.file_selected >= self.files.len();
         let targets = if selected_all {
@@ -84,26 +121,126 @@ impl App {
         } else {
             vec![self.files[self.file_selected].clone()]
         };
-        for entry in targets {
-            let client = self
-                .client
-                .as_mut()
-                .context("NEO client is not initialized")?;
-            self.status = format!("Downloading {}...", entry.name);
-            let payload = client
-                .download_file(entry.slot)
-                .with_context(|| format!("download slot {}", entry.slot))?;
-            let saved = backup::save_file(&dir, &entry, &payload)?;
-            info!(
-                slot = entry.slot,
-                bytes = saved.bytes,
-                raw = %saved.raw_path.display(),
-                txt = %saved.txt_path.display(),
-                "saved AlphaWord backup"
-            );
+        let mut client = self
+            .client
+            .take()
+            .context("NEO client is not initialized")?;
+        let (tx, rx) = mpsc::channel();
+        let total = targets.len();
+        let dir_for_thread = dir.clone();
+        thread::spawn(move || {
+            for (index, entry) in targets.into_iter().enumerate() {
+                if tx
+                    .send(BackupEvent::Progress {
+                        current: index + 1,
+                        total,
+                        name: entry.name.clone(),
+                    })
+                    .is_err()
+                {
+                    return;
+                }
+                let result = client
+                    .download_file(entry.slot)
+                    .with_context(|| format!("download slot {}", entry.slot))
+                    .and_then(|payload| backup::save_file(&dir_for_thread, &entry, &payload));
+                match result {
+                    Ok(saved) => {
+                        if tx
+                            .send(BackupEvent::Saved {
+                                slot: entry.slot,
+                                bytes: saved.bytes,
+                                txt_path: saved.txt_path,
+                            })
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    Err(error_value) => {
+                        let _ = tx.send(BackupEvent::Failed {
+                            client,
+                            message: format!("{error_value:#}"),
+                        });
+                        return;
+                    }
+                }
+            }
+            let _ = tx.send(BackupEvent::Done {
+                client,
+                dir: dir_for_thread,
+            });
+        });
+        self.backup_rx = Some(rx);
+        self.download = Some(DownloadProgress {
+            spinner_index: 0,
+            current: 0,
+            total,
+            message: format!("Saving backup to {}", dir.display()),
+        });
+        self.status = "Downloading selected file(s)...".to_owned();
+        Ok(())
+    }
+
+    pub fn tick(&mut self) {
+        if let Some(progress) = &mut self.download {
+            progress.spinner_index = progress.spinner_index.wrapping_add(1);
         }
-        self.status = format!("Saved backup to {}", dir.display());
-        Ok(dir)
+        self.drain_backup_events();
+    }
+
+    pub fn is_downloading(&self) -> bool {
+        self.download.is_some()
+    }
+
+    fn drain_backup_events(&mut self) {
+        let Some(rx) = self.backup_rx.take() else {
+            return;
+        };
+        let mut keep_rx = true;
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                BackupEvent::Progress {
+                    current,
+                    total,
+                    name,
+                } => {
+                    if let Some(progress) = &mut self.download {
+                        progress.current = current;
+                        progress.total = total;
+                        progress.message = format!("Downloading {name} ({current}/{total})");
+                    }
+                }
+                BackupEvent::Saved {
+                    slot,
+                    bytes,
+                    txt_path,
+                } => {
+                    info!(
+                        slot = slot,
+                        bytes = bytes,
+                        txt = %txt_path.display(),
+                        "saved AlphaWord text backup"
+                    );
+                    self.status = format!("Saved {}", txt_path.display());
+                }
+                BackupEvent::Done { client, dir } => {
+                    self.client = Some(client);
+                    self.download = None;
+                    self.status = format!("Saved backup to {}", dir.display());
+                    keep_rx = false;
+                }
+                BackupEvent::Failed { client, message } => {
+                    self.client = Some(client);
+                    self.download = None;
+                    keep_rx = false;
+                    self.set_error(anyhow!(message));
+                }
+            }
+        }
+        if keep_rx {
+            self.backup_rx = Some(rx);
+        }
     }
 
     pub fn set_error(&mut self, error_value: anyhow::Error) {

@@ -44,6 +44,8 @@ pub fn draw(frame: &mut Frame<'_>, app: &App) {
 
     if let Some(error) = &app.error {
         draw_error(frame, error);
+    } else if app.download.is_some() {
+        draw_download(frame, app);
     }
 }
 
@@ -98,7 +100,7 @@ fn draw_files(frame: &mut Frame<'_>, area: Rect, app: &App) {
     state.select(Some(app.file_selected));
     frame.render_stateful_widget(menu("Files on device", items), rows[0], &mut state);
 
-    let backup_hint = "Selecting an item downloads it to ~/alpha-cli/backups/{date-time}/contents. Each file is saved as raw bytes plus a host-readable .txt export. This never writes to the NEO.";
+    let backup_hint = "Selecting an item downloads it to ~/alpha-cli/backups/{date-time}. Each file is saved as a length-validated .txt export. This never writes to the NEO.";
     frame.render_widget(
         Paragraph::new(backup_hint).wrap(Wrap { trim: true }).block(
             Block::default()
@@ -135,6 +137,31 @@ fn draw_error(frame: &mut Frame<'_>, error: &str) {
                 .borders(Borders::ALL)
                 .border_style(Color::Red),
         ),
+        area,
+    );
+}
+
+fn draw_download(frame: &mut Frame<'_>, app: &App) {
+    let Some(progress) = &app.download else {
+        return;
+    };
+    let spinner = ["-", "\\", "|", "/"][progress.spinner_index % 4];
+    let area = centered_rect(64, 32, frame.area());
+    frame.render_widget(Clear, area);
+    let body = format!(
+        "{spinner} {}\n\nFile {} of {}\n\nSaving to ~/alpha-cli/backups/{{date-time}}",
+        progress.message, progress.current, progress.total
+    );
+    frame.render_widget(
+        Paragraph::new(body)
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true })
+            .block(
+                Block::default()
+                    .title("Downloading")
+                    .borders(Borders::ALL)
+                    .border_style(Color::Cyan),
+            ),
         area,
     );
 }

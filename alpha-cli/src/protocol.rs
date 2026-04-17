@@ -79,13 +79,3 @@ pub fn parse_file_entry(slot: u8, payload: &[u8]) -> anyhow::Result<FileEntry> {
         attribute_bytes,
     })
 }
-
-pub fn normalize_text(raw: &[u8]) -> String {
-    let cleaned = raw
-        .iter()
-        .map(|byte| if *byte == 0 { b' ' } else { *byte })
-        .collect::<Vec<_>>();
-    String::from_utf8_lossy(&cleaned)
-        .replace("\r\n", "\n")
-        .replace('\r', "\n")
-}

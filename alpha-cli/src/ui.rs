@@ -29,6 +29,7 @@ pub fn run() -> anyhow::Result<()> {
         {
             app.set_error(error);
         }
+        app.tick();
         if event::poll(Duration::from_millis(250))? {
             let Event::Key(key) = event::read()? else {
                 continue;
@@ -36,6 +37,9 @@ pub fn run() -> anyhow::Result<()> {
             match key.code {
                 KeyCode::Char('q') => break,
                 KeyCode::Esc => {
+                    if app.is_downloading() {
+                        continue;
+                    }
                     if app.screen == Screen::Files {
                         app.screen = Screen::MainMenu;
                         app.status = "Choose an action.".to_owned();
@@ -61,10 +65,13 @@ fn setup_terminal() -> anyhow::Result<Term> {
 }
 
 fn activate(app: &mut App) {
+    if app.is_downloading() {
+        return;
+    }
     let result = match app.screen {
         Screen::Waiting => Ok(()),
         Screen::MainMenu => app.open_files(),
-        Screen::Files => app.backup_selected().map(|_path| ()),
+        Screen::Files => app.start_backup_selected(),
     };
     if let Err(error) = result {
         app.set_error(error);
@@ -72,6 +79,9 @@ fn activate(app: &mut App) {
 }
 
 fn move_selection(app: &mut App, delta: isize) {
+    if app.is_downloading() {
+        return;
+    }
     match app.screen {
         Screen::Waiting => {}
         Screen::MainMenu => {
