@@ -437,6 +437,7 @@ The ways found so far to reach a USB device whose descriptor is `081e:bd01` are:
    - Failed follow-up: a v1.21 experiment drew a custom post-switch message and entered the applet idle loop from inside the `0x30001` USB attach callback. That is unsafe because the callback must return a status to the System USB/SmartApplet dispatcher. The physical device later failed boot with `File 127 MaxSize overflow...`, and the v1.21 install had already shown a finalize-response checksum mismatch. Recovery found duplicate `Alpha USB` applet records, consistent with an interrupted or inconsistent install-finalize/catalog state. Do not draw, flush, idle, or block inside the USB attach callback.
    - The device disconnects/re-enumerates as normal `081e:bd01` direct USB mode with bulk OUT `0x01` and bulk IN `0x82`.
    - This path does not require the host to open the initial `081e:bd04` HID keyboard interface, so it is the practical unrooted Android path.
+   - End-to-end Android validation: launching `Alpha USB` v1.20 on the NEO, then connecting it to a physical Android device, lets the Android GUI open the re-enumerated `081e:bd01` direct USB device through `UsbManager` and back up AlphaWord files successfully. This proves the no-root, no-proxy, no-typing-fallback Android path.
 
 Firmware-level candidate sequences adjacent to the HID report descriptor:
 

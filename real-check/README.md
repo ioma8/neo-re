@@ -136,3 +136,8 @@ direct endpoints: OUT 0x01 bulk, IN 0x82 bulk
 ```
 
 For hosts that cannot open the initial HID keyboard interface, install and launch the `Alpha USB` SmartApplet on the NEO before connecting USB. The applet uses the proven ROM HID-completion path from the device side and re-enumerates as the same `081e:bd01` direct-mode device.
+
+This path is now physically validated end to end on Android: with `Alpha USB`
+`0xa130` version `1.20` launched on the NEO before USB attach, the Android GUI
+sees direct USB through `UsbManager` and successfully backs up AlphaWord files.
+That is the validated no-root, no-proxy, no-typing-fallback Android path.

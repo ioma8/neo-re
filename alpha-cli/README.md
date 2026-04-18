@@ -67,6 +67,17 @@ The production workaround is the `Alpha USB` SmartApplet. Launch `Alpha USB` on 
 
 The Android GUI still detects plain HID keyboard mode through `InputDevice` and reports it explicitly instead of spinning forever. If that appears, disconnect USB, launch `Alpha USB` on the NEO, and reconnect USB.
 
+Validated Android result:
+
+- physical Android device with USB Host/OTG
+- physical AlphaSmart NEO with `Alpha USB` `0xa130` version `1.20`
+- user launches `Alpha USB` on the NEO before connecting USB
+- NEO re-enumerates as direct USB `081e:bd01`
+- Android GUI opens the direct-mode USB device through `UsbManager`
+- Android GUI backs up AlphaWord files successfully to the public Documents tree
+
+This is the proven no-root, no-proxy, no-typing-fallback Android backup path.
+
 APK packaging must declare USB Host and storage access, for example:
 
 ```xml

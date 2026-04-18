@@ -1948,6 +1948,22 @@ AlphaQuiz, Calculator, Text2Speech Updater, and SpellCheck Large USA.
 Full details and exact commands are in
 [2026-04-18-neo-recovery-runbook.md](/Users/jakubkolcar/customs/neo-re/docs/2026-04-18-neo-recovery-runbook.md).
 
+## 2026-04-19 Android End-To-End Validation
+
+`Alpha USB` `0xa130` version `1.20` is now validated as the production bridge
+for Android backup:
+
+1. launch `Alpha USB` on the NEO,
+2. connect the NEO to a physical Android device over USB Host/OTG,
+3. the applet switches the NEO from the otherwise Android-hidden `081e:bd04`
+   HID keyboard identity into `081e:bd01` direct USB,
+4. the Android GUI opens the direct device through `UsbManager`,
+5. the Android GUI backs up AlphaWord files successfully.
+
+This closes the Android constraint set: no root, no proxy device, and no
+typewriter/keyboard fallback are needed when the stable `Alpha USB` applet is
+used.
+
 ## Remaining Unknowns
 
 - the exact semantic names of the three proven flag bits in the flags dword at offset `0x10`

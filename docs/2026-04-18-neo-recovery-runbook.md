@@ -226,6 +226,20 @@ The prevention rule can be summarized as: the applet may prepare the user in
 `0x19`, and it may trigger direct USB in `0x30001`, but it must not attempt to
 own the screen or event loop from the USB attach callback.
 
+## Android Validation After Recovery
+
+After the recovery and after reinstalling the stable `Alpha USB` applet, the
+full Android backup path was validated on physical hardware:
+
+- `Alpha USB` `0xa130` version `1.20` was launched on the NEO.
+- The NEO was connected to an Android device over USB Host/OTG.
+- The applet switched the NEO into `081e:bd01` direct USB from the device side.
+- The Android GUI opened the direct USB device through `UsbManager`.
+- The Android GUI successfully backed up AlphaWord files.
+
+This proves the intended Android solution under the original constraints: no
+root access, no proxy device, and no typewriter fallback.
+
 ## Applet Catalog Repair That Worked
 
 After patched OS boot, the NEO returned to HID mode and could be switched to
