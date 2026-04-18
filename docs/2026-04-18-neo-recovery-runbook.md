@@ -146,6 +146,86 @@ The following was specifically unsafe:
   System USB dispatcher. Blocking there correlated with finalize/checksum
   trouble and the later file-catalog boot failures.
 
+## Why The Next Alpha USB Version Broke The System
+
+The last working production applet is `Alpha USB` `0xa130` version `1.20`.
+It does only two visible things:
+
+- menu-open command `0x19`: draw brief instructions, then idle in normal applet
+  UI context
+- USB attach command `0x30001`: run the proven ROM HID-completion path, call the
+  direct-mode status callback, set status `0x11`, and return immediately
+
+The next experimental version attempted to improve the post-switch screen text.
+That crossed an ownership boundary. It tried to draw or idle from inside the
+`0x30001` USB attach callback, which is not normal applet UI context. It is a
+System USB dispatcher callback. The dispatcher expects the applet to write a
+status word and return quickly.
+
+The observed failure chain was:
+
+1. A v1.21-style applet install showed a finalize-response checksum mismatch.
+2. The device later booted with `File 127 MaxSize overflow` and related file
+   catalog errors.
+3. After patched-OS recovery, `debug-applets` showed multiple duplicate
+   `Alpha USB` records in the applet catalog.
+4. Clearing the SmartApplet area removed the duplicates, but the broad restore
+   flow did not complete; incremental one-at-a-time applet install was required.
+
+The most defensible root cause is not that the v1.21 code directly overwrote a
+known file record. The stronger conclusion is that the install/finalize process
+was interrupted or left internally inconsistent after unsafe applet behavior in
+the USB attach path. That produced duplicate applet metadata and a damaged
+writable catalog, which then tripped the OS boot-time filesystem validator.
+
+Important distinction:
+
+- Drawing instructions in `0x19` is safe; this is the normal applet screen.
+- Returning status from `0x30001` is safe; this is the USB attach callback.
+- Drawing, flushing, waiting, or idling from `0x30001` is unsafe; the System owns
+  that call stack and is waiting for a quick status result.
+
+## Future Breakage Prevention
+
+Rules for any future custom SmartApplet that touches USB:
+
+1. Keep USB callbacks non-blocking.
+   - For `0x30001` and related attach/init commands, do the minimum hardware
+     action, write status, and return.
+   - Do not call display traps, flush traps, keyboard loops, or `A25C` idle loops
+     from USB callback context.
+
+2. Keep UI and USB separated.
+   - Draw instructions only in the menu-open `0x19` path.
+   - Treat `0x30001` as an interrupt-like dispatcher callback, not as an applet
+     screen.
+
+3. Install only one custom applet candidate at a time.
+   - Before install: `real-check applets`.
+   - Install the candidate.
+   - Immediately verify: `real-check applets`.
+   - Restart and verify HID/direct mode before further writes.
+
+4. Never continue after an install checksum/finalize anomaly.
+   - If install reports a checksum mismatch, timeout, or unexpected status, stop.
+   - Do not install another applet over it.
+   - Re-read `real-check applets` and document the table before taking action.
+
+5. Prefer version monotonicity and unique test ids.
+   - Stable production applet: `0xa130` version `1.20`.
+   - Experimental probes should use separate ids (`0xa12x`) unless replacing the
+     production applet is the exact test.
+
+6. Use the patched validator-disabled OS as the recovery baseline.
+   - It lets a catalog-damaged device boot far enough to use normal direct USB
+     repair commands.
+   - Do not flash stock OS as a cleanup step while applet/file catalog work is
+     still in progress.
+
+The prevention rule can be summarized as: the applet may prepare the user in
+`0x19`, and it may trigger direct USB in `0x30001`, but it must not attempt to
+own the screen or event loop from the USB attach callback.
+
 ## Applet Catalog Repair That Worked
 
 After patched OS boot, the NEO returned to HID mode and could be switched to

@@ -100,3 +100,5 @@ The recovered device's remaining boot/workspace failure was a dirty SmartApplet/
 Broad restore-stock-applets after catalog corruption can clear the applet area but fail before reinstalling applets, leaving only System installed	proven
 Incremental one-at-a-time stock SmartApplet install with applets validation after each step safely restores the catalog	proven
 Keeping the validator-disabled patched OS is the preferred recovery baseline for this device because it preserves normal USB access while avoiding boot-time catalog validator failures	proven
+Alpha USB v1.21 broke recovery safety by doing UI/idle work inside the 0x30001 USB attach callback, which must return status quickly to the System dispatcher	proven
+The post-v1.21 boot failure is best explained by inconsistent applet catalog/finalize state with duplicate Alpha USB records rather than a proven direct overwrite of a specific file-table slot	proven

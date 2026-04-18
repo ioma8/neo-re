@@ -556,7 +556,15 @@ Live result from v1.17: after launching `USB HID Complete` and connecting USB, t
 
 `Alpha USB` is the production form of this probe. It uses applet id `0xa130`, version `1.20`, and the menu name `Alpha USB`. Its `0x19` menu-open branch draws brief instructions telling the user to connect the NEO to a computer or smartphone via USB. Its `0x30001` branch keeps the proven v1.17 ROM HID-completion sequence unchanged, then calls the normal direct-mode status callback `0x00410b26` before returning status `0x11`. Unlike the diagnostic probes, it has no intentional fault branches; other USB/event branches return quiet status values and avoid UI traps in USB callback context. Build command:
 
-Failed follow-up: v1.21 tried to draw a custom post-switch message and then idle in the applet screen from inside the `0x30001` USB attach callback. That was the wrong ownership boundary. The callback is part of the System USB/SmartApplet dispatcher path and must return a status; blocking there caused a finalize-response checksum mismatch during install, and the next boot reported `File 127 MaxSize overflow...`. Future display experiments must not call `A25C`/idle loops from USB attach callbacks.
+Failed follow-up: v1.21 tried to draw a custom post-switch message and then idle in the applet screen from inside the `0x30001` USB attach callback. That was the wrong ownership boundary. The callback is part of the System USB/SmartApplet dispatcher path and must return a status; blocking there caused a finalize-response checksum mismatch during install, and the next boot reported `File 127 MaxSize overflow...`. After recovery, the applet catalog contained duplicate `Alpha USB` records, so the best-supported failure model is an interrupted/inconsistent install-finalize/catalog state, not a proven direct write by the applet into a specific file table slot. Future display experiments must not call display traps, flush traps, or `A25C`/idle loops from USB attach callbacks.
+
+Hard safety rule for custom USB applets:
+
+- `0x19` may draw UI and idle; it is normal menu-open applet context.
+- `0x30001` must be treated as an interrupt-like USB dispatcher callback.
+- `0x30001` may run the minimal HID-completion/direct-mode sequence, set status `0x11`, and return.
+- `0x30001` must not own the screen, wait for keys, enter an applet idle loop, or perform multi-step UI flows.
+- Any install checksum mismatch or unexpected finalize response is a stop condition; do not install another candidate until `real-check applets` has been read and archived.
 
 ```bash
 uv run --project poc/neotools neotools build-benign-smartapplet \
