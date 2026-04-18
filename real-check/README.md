@@ -108,7 +108,7 @@ The tested slot 1 export produced `22712` raw bytes and a `22712` byte UTF-8 tex
 - HID keyboard-mode device match is `VID=0x081e`, `PID=0xbd04`
 - direct USB device match is `VID=0x081e`, `PID=0xbd01`
 - keyboard-to-direct mode switch is confirmed as HID output report payloads `e0 e1 e2 e3 e4`
-- device-side keyboard-to-direct mode switch is confirmed through the `Alpha USB` SmartApplet (`applet_id=0xa130`, version `1.19`)
+- device-side keyboard-to-direct mode switch is confirmed through the `Alpha USB` SmartApplet (`applet_id=0xa130`, version `1.20`)
 - firmware-adjacent candidate HID sequences are `01 02 04 03 07`, `f0 f1 f2 f3 f4`, and `07 03 01 04 02`; these still need physical-device switch testing
 - endpoint selection prefers a bulk OUT + bulk IN pair, then falls back to interrupt
 - updater bootstrap is `?\xff\x00reset` then `?Swtch\x00\x00`

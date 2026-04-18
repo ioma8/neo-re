@@ -412,7 +412,7 @@ class SmartAppletCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(image.metadata.applet_id, 0xA130)
         self.assertEqual(image.metadata.name, "Alpha USB")
-        self.assertEqual(image.metadata.version_minor, 19)
+        self.assertEqual(image.metadata.version_minor, 20)
         drawn_text = _drawn_ascii_from_moveq_text(image.body)
         self.assertIn(b"Now connect the NEO", drawn_text)
         self.assertIn(b"to your computer or", drawn_text)
@@ -420,6 +420,7 @@ class SmartAppletCliTests(unittest.TestCase):
         self.assertIn(bytes.fromhex("13 fc 00 01 00 01 3c f9"), image.body)
         self.assertIn(bytes.fromhex("4e b9 00 44 04 4e"), image.body)
         self.assertIn(bytes.fromhex("4e b9 00 44 04 7c"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 41 0b 26"), image.body)
         self.assertNotIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
         self.assertNotIn(bytes.fromhex("20 7c 00 58 f0 0d 22 10"), image.body)
 

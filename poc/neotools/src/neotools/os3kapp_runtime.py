@@ -1141,6 +1141,8 @@ def build_minimal_smartapplet_image(
                     code.extend(bytes.fromhex("4e b9 00 42 47 80"))  # jsr delay helper
                     code.extend(bytes.fromhex("4f ef 00 14"))  # lea.l 0x14(a7),a7
                     code.extend(bytes.fromhex("4e b9 00 44 04 7c"))  # jsr HID completion phase 2
+                    if alpha_usb_production:
+                        code.extend(bytes.fromhex("4e b9 00 41 0b 26"))  # jsr direct-mode status callback
                     append_status_return(code, 0x11)
                 elif alphaword_switch_on_init_probe:
                     code.extend(bytes.fromhex("4e b9 00 41 0b 26"))  # jsr direct-mode callback

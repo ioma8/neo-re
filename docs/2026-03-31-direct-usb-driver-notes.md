@@ -431,9 +431,9 @@ The ways found so far to reach a USB device whose descriptor is `081e:bd01` are:
    - It is not currently proven to autonomously enter the normal AlphaWord direct USB protocol without a host-side USB/HID event. Static firmware evidence still points to the lifecycle `0x19` path arming callback `0x00410b26`, then the low-level USB/HID callback firing later.
 4. `Alpha USB` SmartApplet device-side activation path.
    - Dynamically proven on the physical NEO.
-   - Production applet id is `0xa130`, version `1.19`, menu name `Alpha USB`.
+   - Production applet id is `0xa130`, version `1.20`, menu name `Alpha USB`.
    - Its menu-open screen instructs the user to connect the NEO to a computer or smartphone over USB, instead of showing only the applet name.
-   - Launching the applet and then connecting USB invokes the ROM HID-sequence completion path (`0x0044044e` / `0x0044047c`) from the applet's proven `0x30001` USB attach callback.
+   - Launching the applet and then connecting USB invokes the ROM HID-sequence completion path (`0x0044044e` / `0x0044047c`) from the applet's proven `0x30001` USB attach callback, then calls the normal direct-mode status callback `0x00410b26` so the LCD should repaint with the ROM `Connected to NEO Manager.` state instead of leaving the previous keyboard-emulation message visible.
    - The device disconnects/re-enumerates as normal `081e:bd01` direct USB mode with bulk OUT `0x01` and bulk IN `0x82`.
    - This path does not require the host to open the initial `081e:bd04` HID keyboard interface, so it is the practical unrooted Android path.
 

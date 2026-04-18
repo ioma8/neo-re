@@ -443,7 +443,7 @@ class Os3kAppRuntimeTests(unittest.TestCase):
             applet_id=0xA130,
             name="Alpha USB",
             version_major_bcd=0x01,
-            version_minor_bcd=0x19,
+            version_minor_bcd=0x20,
             flags_raw=0xFF0000CE,
             extra_memory_size=0x2000,
             draw_on_menu_command=True,
@@ -456,7 +456,7 @@ class Os3kAppRuntimeTests(unittest.TestCase):
 
         self.assertEqual(image.metadata.applet_id, 0xA130)
         self.assertEqual(image.metadata.name, "Alpha USB")
-        self.assertEqual(image.metadata.version_minor, 19)
+        self.assertEqual(image.metadata.version_minor, 20)
         drawn_text = _drawn_ascii_from_moveq_text(image.body)
         self.assertIn(b"Now connect the NEO", drawn_text)
         self.assertIn(b"to your computer or", drawn_text)
@@ -464,6 +464,7 @@ class Os3kAppRuntimeTests(unittest.TestCase):
         self.assertIn(bytes.fromhex("13 fc 00 01 00 01 3c f9"), image.body)
         self.assertIn(bytes.fromhex("4e b9 00 44 04 4e"), image.body)
         self.assertIn(bytes.fromhex("4e b9 00 44 04 7c"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 41 0b 26"), image.body)
         self.assertIn(bytes.fromhex("72 04 20 81 4e 75"), image.body)
         self.assertIn(bytes.fromhex("72 11 20 81 4e 75"), image.body)
         self.assertNotIn(bytes.fromhex("20 7c 00 58 10 01 22 10"), image.body)
