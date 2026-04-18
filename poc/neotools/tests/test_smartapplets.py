@@ -40,6 +40,8 @@ class SmartAppletTests(unittest.TestCase):
         metadata = parse_smartapplet_metadata(bytes(header))
 
         self.assertEqual(metadata.applet_id, 0xA000)
+        self.assertEqual(metadata.header.header_version, 1)
+        self.assertEqual(metadata.header.file_count, 0)
         self.assertEqual(metadata.version_major, 3)
         self.assertEqual(metadata.version_minor, 4)
         self.assertEqual(metadata.name, "AlphaWord Plus")
@@ -104,7 +106,10 @@ class SmartAppletTests(unittest.TestCase):
                 base_memory_size=0x00000D90,
                 payload_or_code_size=0x00019FA4,
                 flags_and_version=0xFF0000CE,
-                applet_id_and_version=0xA0000100,
+                applet_id_and_header=0xA0000100,
+                applet_id=0xA000,
+                header_version=1,
+                file_count=0,
                 extra_memory_size=0x00002000,
             ),
         )
@@ -116,7 +121,10 @@ class SmartAppletTests(unittest.TestCase):
             base_memory_size=0x00000D90,
             payload_or_code_size=0x00019FA4,
             flags_and_version=0xFF0000CE,
-            applet_id_and_version=0xA0000100,
+            applet_id_and_header=0xA0000100,
+            applet_id=0xA000,
+            header_version=1,
+            file_count=0,
             extra_memory_size=0x00002000,
         )
 

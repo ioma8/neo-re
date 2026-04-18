@@ -8,7 +8,9 @@ class Os3kAppHeaderFields:
     magic: int
     base_memory_size: int
     flags_raw: int
-    applet_id_and_version: int
+    applet_id: int
+    header_version: int
+    file_count: int
     name: str
     version_major_bcd: int
     version_minor_bcd: int
@@ -52,7 +54,9 @@ def build_os3kapp_image(
     header[0x08:0x0C] = header_fields.base_memory_size.to_bytes(4, "big")
     header[0x0C:0x10] = info_table_offset.to_bytes(4, "big")
     header[0x10:0x14] = header_fields.flags_raw.to_bytes(4, "big")
-    header[0x14:0x18] = header_fields.applet_id_and_version.to_bytes(4, "big")
+    header[0x14:0x16] = header_fields.applet_id.to_bytes(2, "big")
+    header[0x16] = header_fields.header_version & 0xFF
+    header[0x17] = header_fields.file_count & 0xFF
     header[0x18:0x40] = header_fields.name.encode("ascii")[:0x28].ljust(0x28, b"\x00")
     header[0x3C] = header_fields.version_major_bcd & 0xFF
     header[0x3D] = header_fields.version_minor_bcd & 0xFF

@@ -103,3 +103,4 @@ Keeping the validator-disabled patched OS is the preferred recovery baseline for
 Alpha USB v1.21 broke recovery safety by doing UI/idle work inside the 0x30001 USB attach callback, which must return status quickly to the System dispatcher	proven
 The post-v1.21 boot failure is best explained by inconsistent applet catalog/finalize state with duplicate Alpha USB records rather than a proven direct overwrite of a specific file-table slot	proven
 Alpha USB v1.20 plus the Android GUI provides a validated no-root no-proxy no-typing-fallback Android AlphaWord backup path	proven
+Betawise confirms SmartApplet header byte 0x17 is file_count, so generated applets must not store version_minor there	proven

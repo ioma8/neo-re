@@ -83,7 +83,8 @@ Mapped shared `0x84` metadata layout:
 - `0x0c..0x0f`: info-table offset inside the full `.OS3KApp` image, or `0` if absent
 - `0x10..0x13`: packed flags dword
 - `0x14..0x15`: applet id
-- `0x16..0x17`: major/minor applet version in the `applet_id_and_version` dword
+- `0x16`: SmartApplet header version, normally `1`
+- `0x17`: file count declared by the applet, normally `0` for applets with no owned files
 - `0x18..0x3f`: NUL-terminated applet name
 - `0x3c`: BCD major version shown in UI
 - `0x3d`: BCD minor version shown in UI
@@ -109,6 +110,54 @@ Important runtime distinction:
 - offset `0x58` is a separate runtime marker set by the remove path `FUN_0043b010`
 - `FUN_0042c190` checks that remove marker before deciding whether an applet still counts as present in the current session
 - offset `0x60`, which initially receives the parsed `0x00010000` bit, is later reused by workflows such as `FUN_004072c0` and `FUN_00407320` as a traversal cursor / current-device index
+
+## Betawise Cross-Check
+
+External reference: `https://github.com/isotherm/betawise/tree/master`.
+
+Betawise independently confirms the core SmartApplet container model:
+
+- SmartApplet files start with a `0x84`-byte header.
+- Header magic is `0xc0ffeead`.
+- Header offset `0x04` is total file/ROM usage.
+- Header offset `0x08` is RAM usage.
+- Header offset `0x0c` is settings/info-table offset.
+- Header offset `0x10` is the packed flags dword.
+- Header offset `0x14..0x15` is the applet id.
+- Header offset `0x16` is header version, normally `1`.
+- Header offset `0x17` is file count, normally `0` for applets that do not own files.
+- Header offset `0x18..0x3b` is the applet name.
+- Header offset `0x3c..0x3e` is the UI-visible version.
+- Header offset `0x3f` is language id / applet class in the shipped-header view.
+- Header offset `0x40..0x7f` is the info/copyright string.
+- Header offset `0x80..0x83` is file usage / extra memory in the shipped-header view.
+- Valid applet files end with footer `0xcafefeed`.
+
+Betawise builds applets with `m68k-elf-gcc`, a linker script, and A-line trap
+stubs. Its `APPLET_HEADER_BEGIN` macro places a C `AppletHeader_t` in a kept
+header section and its linker script keeps the footer at the end. Its runtime
+entry is `BwProcessMessage(Message_e message, uint32_t param, uint32_t *status)`.
+
+Important correction from this cross-check: our early generator incorrectly
+packed the applet version into header bytes `0x16..0x17`. That made `Alpha USB`
+v1.20 declare `file_count=0x20`, even though the real UI version also lived at
+`0x3c..0x3d`. The device accepted that image and Android backup worked, but it
+was not structurally correct and could plausibly stress file/catalog handling.
+
+The generator now emits:
+
+```text
+offset 0x14..0x17 = a1 30 01 00
+```
+
+for `Alpha USB` `0xa130`, meaning applet id `0xa130`, header version `1`, file
+count `0`. The visible version remains:
+
+```text
+offset 0x3c..0x3f = 01 20 00 01
+```
+
+meaning version `1.20`, build byte `0`, language/class byte `1`.
 
 Observed examples:
 

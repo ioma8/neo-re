@@ -12,7 +12,10 @@ class SmartAppletHeader:
     base_memory_size: int
     payload_or_code_size: int
     flags_and_version: int
-    applet_id_and_version: int
+    applet_id_and_header: int
+    applet_id: int
+    header_version: int
+    file_count: int
     extra_memory_size: int
 
 
@@ -106,7 +109,10 @@ def parse_smartapplet_header(raw: bytes) -> SmartAppletHeader:
         base_memory_size=_read_be32(raw, 0x08),
         payload_or_code_size=_read_be32(raw, 0x0C),
         flags_and_version=_read_be32(raw, 0x10),
-        applet_id_and_version=_read_be32(raw, 0x14),
+        applet_id_and_header=_read_be32(raw, 0x14),
+        applet_id=int.from_bytes(raw[0x14:0x16], byteorder="big"),
+        header_version=raw[0x16],
+        file_count=raw[0x17],
         extra_memory_size=_read_be32(raw, 0x80),
     )
 
@@ -115,7 +121,7 @@ def parse_smartapplet_metadata(raw: bytes) -> SmartAppletMetadata:
     header = parse_smartapplet_header(raw)
     return SmartAppletMetadata(
         header=header,
-        applet_id=(header.applet_id_and_version >> 16) & 0xFFFF,
+        applet_id=header.applet_id,
         version_major=_decode_bcd(raw[0x3C]),
         version_minor=_decode_bcd(raw[0x3D]),
         name=_read_c_string(raw, 0x18, 0x28),
