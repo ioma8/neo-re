@@ -979,16 +979,18 @@ def build_minimal_smartapplet_image(
 
         def append_text_screen(code: bytearray, text: bytes) -> None:
             append_stub_call(code, 0xA000)  # clear_text_screen()
-            code.extend(bytes.fromhex("2f 3c 00 00 00 1c"))  # push width 28
-            code.extend(bytes.fromhex("2f 3c 00 00 00 01"))  # push column 1
-            code.extend(bytes.fromhex("2f 3c 00 00 00 02"))  # push row 2
-            append_stub_call(code, 0xA004)  # set_text_row_column_width(row, column, width)
-            code.extend(bytes.fromhex("4f ef 00 0c"))  # lea 12(a7),a7
-            for character in text:
-                code.extend(bytes([0x70, character]))  # moveq #character,d0
-                code.extend(bytes.fromhex("2f 00"))  # move.l d0,-(a7)
-                append_stub_call(code, 0xA010)  # draw character
-                code.extend(bytes.fromhex("58 8f"))  # addq.l #4,a7
+            for row_offset, line in enumerate(text.split(b"\n")):
+                row = 2 + row_offset
+                code.extend(bytes.fromhex("2f 3c 00 00 00 1c"))  # push width 28
+                code.extend(bytes.fromhex("2f 3c 00 00 00 01"))  # push column 1
+                code.extend(bytes.fromhex("2f 3c 00 00 00") + bytes([row]))  # push row
+                append_stub_call(code, 0xA004)  # set_text_row_column_width(row, column, width)
+                code.extend(bytes.fromhex("4f ef 00 0c"))  # lea 12(a7),a7
+                for character in line:
+                    code.extend(bytes([0x70, character]))  # moveq #character,d0
+                    code.extend(bytes.fromhex("2f 00"))  # move.l d0,-(a7)
+                    append_stub_call(code, 0xA010)  # draw character
+                    code.extend(bytes.fromhex("58 8f"))  # addq.l #4,a7
             append_stub_call(code, 0xA098)  # flush_text_frame()
 
         def append_idle_loop(code: bytearray) -> None:
@@ -1094,7 +1096,7 @@ def build_minimal_smartapplet_image(
                 code.extend(bytes.fromhex("4e b9 00 42 4f 66"))  # jsr 0x00424f66
                 code.extend(bytes.fromhex("4f ef 00 10"))  # lea 16(a7),a7
             if alpha_usb_production:
-                append_text_screen(code, b"Alpha USB")
+                append_text_screen(code, b"Now connect the NEO\nto your computer or\nsmartphone via USB.")
             else:
                 append_text_screen(code, b"ARM" if arm_direct_on_menu else b"USB")
             append_idle_loop(code)

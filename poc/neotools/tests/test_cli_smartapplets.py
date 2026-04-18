@@ -11,6 +11,15 @@ from neotools.os3kapp_format import parse_os3kapp_image
 FIXTURE_DIR = Path("/Users/jakubkolcar/customs/neo-re/analysis/cab")
 
 
+def _drawn_ascii_from_moveq_text(body: bytes) -> bytes:
+    return bytes(
+        body[index + 1]
+        for index in range(len(body) - 3)
+        if body[index] == 0x70 and 0x20 <= body[index + 1] <= 0x7E
+        and body[index + 2 : index + 4] == bytes.fromhex("2f 00")
+    )
+
+
 class SmartAppletCliTests(unittest.TestCase):
     def test_build_benign_smartapplet_writes_menu_visible_image(self) -> None:
         output = io.StringIO()
@@ -403,7 +412,11 @@ class SmartAppletCliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(image.metadata.applet_id, 0xA130)
         self.assertEqual(image.metadata.name, "Alpha USB")
-        self.assertEqual(image.metadata.version_minor, 18)
+        self.assertEqual(image.metadata.version_minor, 19)
+        drawn_text = _drawn_ascii_from_moveq_text(image.body)
+        self.assertIn(b"Now connect the NEO", drawn_text)
+        self.assertIn(b"to your computer or", drawn_text)
+        self.assertIn(b"smartphone via USB.", drawn_text)
         self.assertIn(bytes.fromhex("13 fc 00 01 00 01 3c f9"), image.body)
         self.assertIn(bytes.fromhex("4e b9 00 44 04 4e"), image.body)
         self.assertIn(bytes.fromhex("4e b9 00 44 04 7c"), image.body)

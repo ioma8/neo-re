@@ -554,7 +554,7 @@ When a five-byte sequence matches, the first sequence path performs the same com
 
 Live result from v1.17: after launching `USB HID Complete` and connecting USB, the host reported `081e:bd01` direct mode with bulk OUT `0x01` and bulk IN `0x82`. This proves device-side SmartApplet activation is possible without host access to the initial HID keyboard interface. The successful path is not a direct call to `0x00410b26`; it is the ROM HID-sequence completion path (`0x0044044e` / `0x0044047c`) invoked from the applet's `0x30001` USB attach callback.
 
-`Alpha USB` is the production form of this probe. It uses applet id `0xa130`, version `1.18`, and the menu name `Alpha USB`. Its `0x30001` branch keeps the proven v1.17 ROM HID-completion sequence unchanged. Unlike the diagnostic probes, it has no intentional fault branches; other USB/event branches return quiet status values and avoid UI traps in USB callback context. Build command:
+`Alpha USB` is the production form of this probe. It uses applet id `0xa130`, version `1.19`, and the menu name `Alpha USB`. Its `0x19` menu-open branch draws brief instructions telling the user to connect the NEO to a computer or smartphone via USB, while its `0x30001` branch keeps the proven v1.17 ROM HID-completion sequence unchanged. Unlike the diagnostic probes, it has no intentional fault branches; other USB/event branches return quiet status values and avoid UI traps in USB callback context. Build command:
 
 ```bash
 uv run --project poc/neotools neotools build-benign-smartapplet \

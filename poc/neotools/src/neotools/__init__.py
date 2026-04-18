@@ -758,7 +758,7 @@ def main(argv: list[str] | None = None) -> int:
             version_minor_bcd=(
                 0x03
                 if args.stay_open_on_init
-                else 0x18
+                else 0x19
                 if args.alpha_usb_production
                 else 0x17
                 if args.alphaword_hid_complete_switch_probe

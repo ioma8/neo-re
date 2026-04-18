@@ -16,6 +16,15 @@ from neotools.os3kapp_runtime import (
 FIXTURE_DIR = Path("/Users/jakubkolcar/customs/neo-re/analysis/cab")
 
 
+def _drawn_ascii_from_moveq_text(body: bytes) -> bytes:
+    return bytes(
+        body[index + 1]
+        for index in range(len(body) - 3)
+        if body[index] == 0x70 and 0x20 <= body[index + 1] <= 0x7E
+        and body[index + 2 : index + 4] == bytes.fromhex("2f 00")
+    )
+
+
 class Os3kAppRuntimeTests(unittest.TestCase):
     def test_build_minimal_smartapplet_image_emits_parseable_container_and_stub(self) -> None:
         raw = build_minimal_smartapplet_image(
@@ -434,7 +443,7 @@ class Os3kAppRuntimeTests(unittest.TestCase):
             applet_id=0xA130,
             name="Alpha USB",
             version_major_bcd=0x01,
-            version_minor_bcd=0x18,
+            version_minor_bcd=0x19,
             flags_raw=0xFF0000CE,
             extra_memory_size=0x2000,
             draw_on_menu_command=True,
@@ -447,7 +456,11 @@ class Os3kAppRuntimeTests(unittest.TestCase):
 
         self.assertEqual(image.metadata.applet_id, 0xA130)
         self.assertEqual(image.metadata.name, "Alpha USB")
-        self.assertEqual(image.metadata.version_minor, 18)
+        self.assertEqual(image.metadata.version_minor, 19)
+        drawn_text = _drawn_ascii_from_moveq_text(image.body)
+        self.assertIn(b"Now connect the NEO", drawn_text)
+        self.assertIn(b"to your computer or", drawn_text)
+        self.assertIn(b"smartphone via USB.", drawn_text)
         self.assertIn(bytes.fromhex("13 fc 00 01 00 01 3c f9"), image.body)
         self.assertIn(bytes.fromhex("4e b9 00 44 04 4e"), image.body)
         self.assertIn(bytes.fromhex("4e b9 00 44 04 7c"), image.body)
