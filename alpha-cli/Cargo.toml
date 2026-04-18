@@ -50,6 +50,6 @@ label = "Alpha GUI"
 theme = "@android:style/Theme.DeviceDefault.NoActionBar"
 
 [package.metadata.android.application.activity]
-config_changes = "orientation|keyboardHidden|screenSize"
+config_changes = "orientation|keyboard|keyboardHidden|navigation|screenSize"
 label = "Alpha GUI"
 exported = true
