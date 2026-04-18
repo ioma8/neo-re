@@ -23,11 +23,19 @@ Behavior:
 - lists all AlphaWord slots with byte size and approximate word count
 - downloads one selected slot or `All files`
 
-Backups are written directly under:
+On desktop, backups are written directly under:
 
 ```text
 ~/alpha-cli/backups/{date-time}/
 ```
+
+On Android, backups are written to the public Documents tree:
+
+```text
+/sdcard/Documents/alpha-cli/backups/{date-time}/
+```
+
+For Android 11 and newer, the app declares `MANAGE_EXTERNAL_STORAGE` and opens the system "All files access" settings page if that privilege has not been granted yet. Enable access for Alpha GUI, return to the app, and retry the backup. On older Android versions, the app requests `WRITE_EXTERNAL_STORAGE` at runtime.
 
 The app saves only `.txt` files. The downloaded byte stream is converted host-side by replacing NUL bytes with spaces and CR bytes with LF bytes. The converted text length is validated against the downloaded byte length before the file is accepted.
 
@@ -51,10 +59,12 @@ USB support:
 - Android: native USB Host backend through Android `UsbManager` over JNI
 - other targets: compile with a clear USB-not-implemented path
 
-On Android the app enumerates `081e:bd04` HID keyboard mode and `081e:bd01` direct mode devices through `UsbManager`. If Android has not granted access to the connected NEO, the backend requests USB permission with the system dialog and returns an error telling the user to approve it and retry. APK packaging must declare USB Host support, for example:
+On Android the app enumerates `081e:bd04` HID keyboard mode and `081e:bd01` direct mode devices through `UsbManager`. If Android has not granted access to the connected NEO, the backend requests USB permission with the system dialog and returns an error telling the user to approve it and retry. APK packaging must declare USB Host and storage access, for example:
 
 ```xml
 <uses-feature android:name="android.hardware.usb.host" android:required="true" />
+<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 ```
 
 The Android backend sends the same validated HID switch reports and uses the same direct-mode bulk protocol as the desktop backend.

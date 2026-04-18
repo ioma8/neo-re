@@ -20,12 +20,24 @@ pub fn app_dir() -> anyhow::Result<PathBuf> {
 }
 
 pub fn create_backup_dir() -> anyhow::Result<PathBuf> {
-    let dir = app_dir()?
+    let dir = backup_root_dir()?
         .join("backups")
         .join(Local::now().format("%Y-%m-%d_%H-%M-%S").to_string());
     fs::create_dir_all(&dir)
         .with_context(|| format!("create backup directory {}", dir.display()))?;
     Ok(dir)
+}
+
+fn backup_root_dir() -> anyhow::Result<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android_storage::public_documents_app_dir()
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        app_dir()
+    }
 }
 
 pub fn save_file(dir: &Path, entry: &FileEntry, payload: &[u8]) -> anyhow::Result<SavedFile> {

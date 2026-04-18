@@ -3,6 +3,9 @@ pub mod backup;
 pub mod gui;
 pub mod protocol;
 
+#[cfg(target_os = "android")]
+pub mod android_storage;
+
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
 pub mod usb;
 
