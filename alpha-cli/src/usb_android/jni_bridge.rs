@@ -22,6 +22,7 @@ const ACTION_USB_PERMISSION: &str = "cz.jakubkolcar.alpha_cli.USB_PERMISSION";
 pub enum UsbMode {
     Missing,
     Hid,
+    HidUnavailable,
     Direct,
 }
 
@@ -54,6 +55,9 @@ pub fn detect_mode() -> anyhow::Result<UsbMode> {
         }
         if devices.iter().any(|device| device.product_id == PID_HID) {
             return Ok(UsbMode::Hid);
+        }
+        if alphasmart_input_keyboard_present(env)? {
+            return Ok(UsbMode::HidUnavailable);
         }
         Ok(UsbMode::Missing)
     })
@@ -207,6 +211,43 @@ fn alphasmart_devices<'local>(env: &mut Env<'local>) -> anyhow::Result<Vec<Andro
         }
     }
     Ok(devices)
+}
+
+fn alphasmart_input_keyboard_present(env: &mut Env<'_>) -> anyhow::Result<bool> {
+    let ids = env
+        .call_static_method(
+            jni_str!("android/view/InputDevice"),
+            jni_str!("getDeviceIds"),
+            jni_sig!("()[I"),
+            &[],
+        )?
+        .l()?;
+    let ids = unsafe { jni::objects::JIntArray::from_raw(env, ids.into_raw().cast()) };
+    let len = ids.len(env)?;
+    let mut values = vec![0_i32; len];
+    ids.get_region(env, 0, &mut values)?;
+    for id in values {
+        let device = env
+            .call_static_method(
+                jni_str!("android/view/InputDevice"),
+                jni_str!("getDevice"),
+                jni_sig!("(I)Landroid/view/InputDevice;"),
+                &[JValue::Int(id)],
+            )?
+            .l()?;
+        if device.is_null() {
+            continue;
+        }
+        let vendor_id = int_method(env, &device, "getVendorId")?;
+        let product_id = int_method(env, &device, "getProductId")?;
+        if vendor_id == VID && product_id == PID_HID {
+            info!(
+                "AlphaSmart HID keyboard is present through Android InputDevice but denied to UsbManager"
+            );
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn ensure_permission(

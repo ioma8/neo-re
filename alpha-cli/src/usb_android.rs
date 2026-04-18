@@ -10,6 +10,7 @@ mod jni_bridge;
 pub enum NeoMode {
     Missing,
     Hid,
+    HidUnavailable,
     Direct,
 }
 
@@ -21,6 +22,7 @@ pub fn detect_mode() -> anyhow::Result<NeoMode> {
     Ok(match jni_bridge::detect_mode()? {
         jni_bridge::UsbMode::Missing => NeoMode::Missing,
         jni_bridge::UsbMode::Hid => NeoMode::Hid,
+        jni_bridge::UsbMode::HidUnavailable => NeoMode::HidUnavailable,
         jni_bridge::UsbMode::Direct => NeoMode::Direct,
     })
 }

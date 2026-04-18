@@ -16,6 +16,7 @@ const TIMEOUT: Duration = Duration::from_millis(1_000);
 pub enum NeoMode {
     Missing,
     Hid,
+    HidUnavailable,
     Direct,
 }
 

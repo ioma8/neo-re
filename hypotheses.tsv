@@ -7,3 +7,81 @@ macOS raw USB HID control transfer reaches AlphaSmart bd04 but requires elevated
 libusb control_transfer without claiming interface bypasses PyUSB's macOS HID access failure	proven
 the recovered modern 4-byte output report sequence alone switches this connected NEO to bd01	disproven
 the legacy one-byte output report sequence e0 e1 e2 e3 e4 switches this connected NEO to bd01	proven
+Android UsbManager hides the AlphaSmart bd04 HID keyboard because it is a HID boot keyboard claimed by the system input stack	proven
+an Android USB device filter or permission request can expose the AlphaSmart bd04 HID keyboard to the app	disproven
+a normal unrooted Android app cannot access the AlphaSmart bd04 through /dev/hidraw0 or /dev/input/event4	proven
+Android keyboard LED/input APIs can send the AlphaSmart bd04 e0 e1 e2 e3 e4 switch reports without UsbManager access	disproven
+libusb can bypass Android UsbManager for AlphaSmart bd04 from a normal unrooted app	disproven
+stock Android provides a manifest, permission, or public API escape hatch that exposes HID boot-keyboard devices to UsbManager	disproven
+direct USB on stock unrooted Android requires the NEO to be switched to bd01 by something other than the Android app	proven
+NeoManager has an alternate direct-mode entry path before bd04 HID keyboard mode	disproven
+NeoManager first probes bd01 through the AsUsbDrv driver and only falls back to bd04 HID output reports when bd01 is absent	proven
+AsUsbDrv is installed for bd01 direct NEO and 0100 AlphaHub, not bd04 HID keyboard mode	proven
+ADB shell can write EV_LED events to AlphaSmart /dev/input/event4 without root	disproven
+Android framework lock-key events can switch the AlphaSmart to bd01 by causing keyboard LED HID output reports	disproven
+InputDevice.getLightsManager exposes controllable AlphaSmart keyboard LEDs to an app or shell process	disproven
+ADB can grant alpha-cli signature USB/input/light permissions needed for hidden direct access	disproven
+Hidden InputManager light-session calls with synthetic raw LED IDs including exact e0..e4 bit patterns can switch the AlphaSmart to bd01	disproven
+NEO Small ROM/updater boot chord exposes a non-HID direct USB device that Android UsbManager can access	proven
+NeoManager can command Small ROM before direct USB access to create an Android-visible mode	disproven
+NEO Small ROM direct mode supports the same read-only AlphaWord file-list protocol	disproven
+NEO Small ROM slot 1 AlphaWord attributes command returns status 0x92	proven
+Holding left shift and tab while connecting USB exposes a direct NEO Manager mode that still supports AlphaWord read-only commands	needs further investigation
+Current Android shift-tab connection exposes only bd04 HID keyboard and no bd01 UsbManager device	proven
+Public NEO recovery instructions say the primary left-shift-tab path is power-on to the SmartApplet menu before connecting USB, while shift-tab during USB connect is only the Two-Button On fallback	needs further investigation
+The normal direct-mode callback 0x00410b26 can be reached by a local device UI/key path that directly calls it or directly writes status state 5	disproven
+SmartApplet lifecycle event 0x19 is the only static path that registers callback 0x00410b26, and it arms a lower-level hardware/USB callback rather than itself entering direct mode	proven
+Installed/shipped SmartApplets contain another static registration or direct call path to callback 0x00410b26	disproven
+The left-shift-tab power-on sequence is a device-side recovery/manager-ready path into the SmartApplet menu, not proof of an autonomous normal AlphaWord direct-mode activation path	proven
+real-check can retrieve full SmartApplet images from a direct-mode NEO with read-only opcode 0x0f plus repeated opcode 0x10	proven
+The live System 3.15 SmartApplet dump is 401408 bytes and has SHA-256 304a32fb548c8d605351cdef5389976ac2346cace5e9cafcc1e96f7737a37fa6	proven
+System 3.15 uses resource text base 0x269fe and dword offset table 0x3ad72 through FUN_0002cebc	proven
+System 3.15 contains device descriptors for both 081e:bd04 keyboard mode and 081e:bd01 communication-driver mode	proven
+System 3.15 contains literal NeoManager direct-mode command strings such as Swtch or Switched	disproven
+The only e0 e1 e2 e3 e4 byte run found in System 3.15 is adjacent to keyboard/report-descriptor data rather than a decompiled host switch routine	proven
+System 3.15 exposes a Ghidra-identified alternate stock-Android-accessible direct-mode entry path	disproven
+The live System applet and installer ROM contain an identical HID output-report candidate table immediately before the HID report descriptor	proven
+Firmware candidate sequence 01 02 04 03 07 activates 081e:bd01	needs further investigation
+Firmware candidate sequence f0 f1 f2 f3 f4 activates 081e:bd01	needs further investigation
+Firmware candidate sequence 07 03 01 04 02 activates 081e:bd01	needs further investigation
+The Small ROM updater firmware exposes 081e:bd01 without first exposing 081e:bd04 HID keyboard mode	proven
+The firmware ?Swtch command activates 081e:bd01 from 081e:bd04 HID keyboard mode	disproven
+The newer NeoManager sequence 05 02 04 01 06 07 appears in firmware as a direct activation table	disproven
+Generated SmartApplet files must end with trailer 0xcaffeeed to be accepted as valid by NeoManager	proven
+NeoManager applet chunk completion passes command 0xff to its helper as a read-only sentinel, not as an actual packet write	proven
+Status 0x81 from add-applet begin corresponds to the NEO screen error ROM not erased and triggers NeoManager's compaction retry path	proven
+Updater remove command 0x05 uses an internal listen/slot-table index rather than an applet id or visible direct-mode applet-list row	proven
+NeoManager clears the broad SmartApplet area with updater command 0x11 and response 0x4f during compaction	proven
+NeoManager sends applet program command 0x0b after each staged 0x400-byte chunk, before final command 0x07	proven
+Correct per-chunk 0x0b sequencing can restore backed-up stock applets after factory reset leaves only System installed	proven
+Launching a custom SmartApplet that absolute-calls ROM callback 0x00410b26 on init switches USB to 081e:bd01	disproven
+Selecting the current custom SmartApplet invokes its entry point with command 0x19	proven
+The generated custom SmartApplet exits immediately because it treats command 0x19 as shutdown-only, while Calculator uses 0x19 to run its interactive menu before cleanup	needs further investigation
+Handling command 0x19 as the interactive entry keeps the custom applet active and returnable from the Applets menu	proven
+The first menu-command screen probe was blank because inline A014 C-string drawing is sufficient for generated custom applet text output	disproven
+Calculator-style BSR calls into local A-line trap stubs render visible text in generated custom SmartApplets	proven
+AlphaWord displays external-transfer/USB-specific text from its low-command 0x21 event path rather than its menu-open 0x19 path	proven
+A custom applet can force 081e:bd01 by calling ROM callback 0x00410b26 from a USB event-command handler	disproven
+System USB attach bypasses the custom applet 0x20/0x21 event handler and shows the stock emulated-keyboard UI	proven
+A custom applet can arm direct mode by replicating the System lifecycle 0x19 callback-registration sequence before USB attach	disproven
+The stock emulated-keyboard USB attach path uses higher-level applet command namespaces 0x00010003 and 0x00020002 that a custom applet can handle for a custom visible message	needs further investigation
+AlphaWord advertises keyboard-send/write capability through info-table records 0x0105/0x100b and 0xc001/0x8011..0x8018 containing the text write	proven
+AlphaWord accepts namespace initialization commands 0x10001 and 0x20001 before the keyboard-send transfer commands and returns status 0x11	proven
+A custom applet with AlphaWord-style write metadata and namespace init handlers receives USB keyboard-send attach routing	disproven
+System-only hardcoded routing explains AlphaWord's distinct Attached-to-MAC keyboard-send message	disproven
+AlphaWord owns the distinct Attached-to-MAC/PC keyboard-send UI through its own string resources and entry-dispatcher state machine	proven
+The custom probe failed because it emulates AlphaWord command ids statelessly but not AlphaWord's A5+0xba stream state and A5+0x143 Mac/PC flag path	needs further investigation
+USB AW Probe v1.12 can test whether seeding AlphaWord-like A5+0x138/A5+0x142/A5+0x143/A5+0xbc state is sufficient for custom keyboard-send attach UI	needs further investigation
+USB AW Probe v1.12 proves USB attach reaches the custom Mac-side init branch, but direct A5-relative state writes fault at A5+0x138	proven
+USB Init Probe v1.13 still faults at A5+0x138 despite containing no A5-relative write instructions	needs further investigation
+USB Init Probe v1.13 faults because UI traps are unsafe in the USB attach callback context, not because the installed applet contains A5 writes	needs further investigation
+USB Fault Probe v1.14 can encode the reached USB attach command as bus-error address 0x581001, 0x583001, 0x582001, or 0x58f00d	needs further investigation
+USB Fault Probe v1.14 proves the live Mac-side USB attach init command for the custom applet is 0x30001	proven
+USB Silent Probe v1.15 can test what command follows a successful silent 0x30001 status 0x11 response	needs further investigation
+USB Silent Probe v1.15 accepts 0x30001 enough to hold the NEO at Making USB connection while USB enumerates as 081e:bd04 HID, not direct mode	proven
+USB Switch Probe v1.16 proves calling ROM direct-mode callback 0x00410b26 from the proven 0x30001 attach command does not enter 081e:bd01 and falls through to HID keyboard mode	disproven
+AlphaWord low-command surface includes identity query 0x26 and USB/event commands 0x20/0x21 before external-transfer UI can be reached	proven
+A custom applet must answer AlphaWord low identity/event commands, not only metadata and namespace commands, to receive USB keyboard attach UI	needs further investigation
+NeoManager's own documentation says direct USB is reliable only from AlphaWord Plus or the SmartApplets menu, not arbitrary running SmartApplets	proven
+USB HID Complete v1.17 proves invoking the ROM HID-sequence completion path 0x44044e/0x44047c from the proven 0x30001 attach command enters 081e:bd01	proven
+Alpha USB v1.18 is the production SmartApplet form of the proven v1.17 device-side direct USB activation path	proven

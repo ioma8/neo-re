@@ -116,6 +116,9 @@ impl App {
                 }
                 self.init_direct()?;
             }
+            NeoMode::HidUnavailable => {
+                self.status = hid_unavailable_message();
+            }
             NeoMode::Direct => {
                 self.status = "NEO already in direct USB mode. Initializing...".to_owned();
                 self.init_direct()?;
@@ -336,6 +339,10 @@ fn poll_connection_worker(tx: &mpsc::Sender<ConnectionEvent>) -> anyhow::Result<
             let client = NeoClient::open_and_init().context("initialize direct USB NEO")?;
             tx.send(ConnectionEvent::Connected(client))?;
         }
+        NeoMode::HidUnavailable => {
+            info!("NEO HID keyboard is present but unavailable to Android UsbManager");
+            tx.send(ConnectionEvent::Status(hid_unavailable_message()))?;
+        }
         NeoMode::Direct => {
             info!("NEO direct mode found; initializing");
             tx.send(ConnectionEvent::Status(
@@ -357,6 +364,18 @@ fn missing_device_message() -> String {
     #[cfg(not(target_os = "android"))]
     {
         "Connect the NEO with USB. It should appear as HID keyboard mode first.".to_owned()
+    }
+}
+
+fn hid_unavailable_message() -> String {
+    #[cfg(target_os = "android")]
+    {
+        "NEO is connected as an Android keyboard. Android blocks apps from opening boot keyboards through USB Host, so this app cannot switch it to direct mode without root or an external switch/proxy.".to_owned()
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        "NEO HID keyboard mode is present but unavailable to this process.".to_owned()
     }
 }
 

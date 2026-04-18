@@ -3,7 +3,17 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from neotools.alphaword_attributes import parse_file_attributes_record
-from neotools.smartapplets import build_list_applets_command, parse_smartapplet_metadata
+from neotools.smartapplets import (
+    build_add_applet_begin_command,
+    build_finalize_applet_update_command,
+    build_list_applets_command,
+    build_program_applet_command,
+    build_retrieve_applet_command,
+    build_retrieve_chunk_command,
+    derive_add_applet_start_fields,
+    parse_smartapplet_header,
+    parse_smartapplet_metadata,
+)
 from neotools.switch_packets import SwitchResponse, build_reset_preamble, build_switch_packet, parse_switch_response
 from neotools.updater_packets import (
     build_raw_file_attributes_command,
@@ -53,6 +63,9 @@ class NeoAlphaWordClient:
         self._transport = transport
         self._alphaword_applet_id = alphaword_applet_id
         self._updater_entered = False
+
+    def assume_updater_mode(self) -> None:
+        self._updater_entered = True
 
     def enter_updater_mode(self) -> None:
         if self._updater_entered:
@@ -167,6 +180,39 @@ class NeoAlphaWordClient:
             page_offset += len(records)
         return entries
 
+    def debug_smart_applet_records(self) -> list[str]:
+        self.enter_updater_mode()
+        lines: list[str] = []
+        page_offset = 0
+        page_size = 7
+        row = 0
+
+        while True:
+            self._transport.write(build_list_applets_command(page_offset=page_offset, page_size=page_size))
+            response = parse_updater_response(self._transport.read_exact(8, timeout_ms=600))
+            lines.append(
+                f"page_offset={page_offset} status=0x{response.status:02x} "
+                f"argument={response.argument} trailing=0x{response.trailing:04x}"
+            )
+            if response.status == 0x90 or response.argument == 0:
+                break
+            if response.status != 0x44:
+                break
+            payload = self._transport.read_exact(response.argument, timeout_ms=1000)
+            lines.append(f"payload_sum16=0x{sum(payload) & 0xffff:04x}")
+            records = [payload[offset : offset + 0x84] for offset in range(0, len(payload), 0x84)]
+            for record in records:
+                metadata = parse_smartapplet_metadata(record)
+                lines.append(
+                    f"row={row} applet_id=0x{metadata.applet_id:04x} name={metadata.name} "
+                    f"record={record.hex(' ')}"
+                )
+                row += 1
+            if len(records) < page_size:
+                break
+            page_offset += len(records)
+        return lines
+
     def _retrieve_alpha_word_file(self, *, slot: int, requested_length: int) -> tuple[bytes, int]:
         self.enter_updater_mode()
         self._transport.write(
@@ -198,6 +244,87 @@ class NeoAlphaWordClient:
     def download_alpha_word_file(self, *, slot: int, requested_length: int = 0x80000) -> bytes:
         payload, _reported_length = self._retrieve_alpha_word_file(slot=slot, requested_length=requested_length)
         return payload
+
+    def download_smart_applet(self, *, applet_id: int) -> bytes:
+        self.enter_updater_mode()
+        self._transport.write(build_retrieve_applet_command(applet_id=applet_id))
+        start = parse_updater_response(self._transport.read_exact(8, timeout_ms=10000))
+        if start.status != 0x53:
+            raise ValueError(f"unexpected applet retrieve start status 0x{start.status:02x}")
+
+        remaining = start.argument
+        payload = bytearray()
+        while remaining > 0:
+            self._transport.write(build_retrieve_chunk_command())
+            chunk = parse_updater_response(self._transport.read_exact(8, timeout_ms=1000))
+            if chunk.status != 0x4D:
+                raise ValueError(f"unexpected applet retrieve chunk status 0x{chunk.status:02x}")
+            chunk_payload = self._transport.read_exact(chunk.argument, timeout_ms=1000)
+            if (sum(chunk_payload) & 0xFFFF) != chunk.trailing:
+                raise ValueError("applet chunk payload checksum mismatch")
+            payload.extend(chunk_payload)
+            remaining -= len(chunk_payload)
+        return bytes(payload)
+
+    def install_smart_applet(self, image: bytes) -> SmartAppletEntry:
+        if len(image) < 0x84:
+            raise ValueError("SmartApplet image is shorter than its header")
+        metadata = parse_smartapplet_metadata(image[:0x84])
+        if metadata.header.file_size != len(image):
+            raise ValueError("SmartApplet image length does not match header file size")
+
+        self.enter_updater_mode()
+        start_argument, trailing = derive_add_applet_start_fields(parse_smartapplet_header(image[:0x84]))
+        self._transport.write(build_add_applet_begin_command(argument=start_argument, trailing=trailing))
+        self._require_status(0x46, timeout_ms=2000, operation="add-applet begin")
+
+        for offset in range(0, len(image), 0x400):
+            chunk = image[offset : offset + 0x400]
+            self._transport.write(
+                build_updater_command(
+                    command=0x02,
+                    argument=len(chunk),
+                    trailing=sum(chunk) & 0xFFFF,
+                )
+            )
+            self._require_status(0x42, timeout_ms=2000, operation="add-applet chunk handshake")
+            self._transport.write(chunk)
+            self._require_status(0x43, timeout_ms=5000, operation="add-applet chunk commit")
+            self._transport.write(build_program_applet_command())
+            self._require_status(0x47, timeout_ms=10000, operation="program applet")
+
+        self._transport.write(build_finalize_applet_update_command())
+        self._require_status(0x48, timeout_ms=10000, operation="finalize applet update")
+        return SmartAppletEntry(
+            applet_id=metadata.applet_id,
+            version_major=metadata.version_major,
+            version_minor=metadata.version_minor,
+            name=metadata.name,
+            file_size=metadata.header.file_size,
+            applet_class=metadata.applet_class,
+        )
+
+    def remove_smart_applet_by_index(self, *, index: int) -> None:
+        self.enter_updater_mode()
+        self._transport.write(build_updater_command(command=0x05, argument=5, trailing=index))
+        self._require_status(0x45, timeout_ms=1000, operation="remove applet")
+
+    def clear_smart_applet_area(self) -> None:
+        self.enter_updater_mode()
+        self._transport.write(build_updater_command(command=0x11, argument=0, trailing=0))
+        self._require_status(0x4F, timeout_ms=90000, operation="clear SmartApplet area")
+
+    def restart_device(self) -> None:
+        self.enter_updater_mode()
+        self._transport.write(build_updater_command(command=0x08, argument=0, trailing=0))
+        self._require_status(0x52, timeout_ms=1000, operation="restart device")
+
+    def _require_status(self, expected_status: int, *, timeout_ms: int, operation: str) -> None:
+        response = parse_updater_response(self._transport.read_exact(8, timeout_ms=timeout_ms))
+        if response.status != expected_status:
+            raise ValueError(
+                f"unexpected {operation} status 0x{response.status:02x}, expected 0x{expected_status:02x}"
+            )
 
     def verify_alpha_word_file(self, *, slot: int, requested_length: int = 0x80000) -> AlphaWordFileVerification:
         payload, reported_length = self._retrieve_alpha_word_file(slot=slot, requested_length=requested_length)

@@ -412,6 +412,161 @@ The `0xa004` call evidence is especially useful for custom applet work. The calc
 
 That makes `0xa004` the first concrete host layout primitive we can describe beyond a trap number.
 
+Live custom-applet validation tightened the drawing ABI further:
+
+- the first visible custom applet is `USB Menu Probe`, applet id `0xa129`, version `1.8`
+- selecting it from the Applets menu invokes the entry point with command `0x19`
+- a direct inline `A014` C-string draw probe opened a blank, returnable applet screen
+- a Calculator-style call pattern works: call local `bsr.w` stubs that contain the A-line trap opcodes, rather than embedding the traps inline in the drawing routine
+- the working probe draws `USB` by clearing the text screen with `A000`, setting `(row=2, column=1, width=28)` with `A004`, drawing ASCII codes `0x55`, `0x53`, `0x42` through `A010`, flushing with `A098`, then idling through `A25C`
+- the local stub table at the end of the generated payload is exactly `a000 a004 a010 a098 a25c`
+
+The current authoring rule for minimal visible applets is therefore conservative:
+
+- dispatch command `0x19` as the menu-open command for custom applets
+- draw short status text with `A010` character-by-character through local `bsr.w` trap stubs
+- flush with `A098`
+- keep the applet returnable by idling in `A25C` instead of spinning without the runtime yield helper
+
+### AlphaWord USB/Event Handler
+
+AlphaWord Plus also shows that USB/external-transfer screens are not reached from the same branch as a normal Applets-menu launch.
+
+The low command/event table in AlphaWord maps these lifecycle/event commands:
+
+- `0x19` -> normal interactive menu open
+- `0x20` -> applet event/dispatch path
+- `0x21` -> applet event/dispatch path
+- `0x26` -> identity query; AlphaWord writes status `0xa000`
+
+The external-transfer UI helper `HandleAlphaWordExternalTransferRequest` is called from inside the `0x21` event path after the runtime has decoded event words. That helper receives a word whose high bits identify transfer class:
+
+- `(event & 0xfc00) == 0x8000`: local/current-file transfer prompt path
+- `(event & 0xfc00) == 0x4000`: wireless/alternate external-transfer prompt path
+- anything else: writes status `0x0b` and returns
+
+This explains why AlphaWord can show different text when a USB/external-transfer event arrives than when AlphaWord is opened from the applet menu: the visible applet entry is `0x19`, while the transfer UI is reached later through event commands and a decoded high-bit event word.
+
+The custom `USB Menu Probe` version `1.8` mirrored this at the safest level available before the live USB attach observation:
+
+- `0x19`: draws `USB` and idles with `A25C`
+- `0x20` or `0x21`: draws `DIR`, calls the ROM direct-mode callback `0x00410b26`, then idles with `A25C`
+- the callback path is intentionally only on the event-command side, not on normal menu open
+
+The generated event-handler bytes disassemble as:
+
+```asm
+cmpi.l  #0x20,d0
+beq.w   draw_direct
+cmpi.l  #0x21,d0
+beq.w   draw_direct
+...
+draw_direct:
+  ; A000/A004/A010/A098 through local BSR trap stubs draws "DIR"
+  jsr     0x00410b26
+  ; A25C idle loop
+```
+
+Live result: with version `1.8` open, connecting USB still entered the stock `Attached to Mac/PC, emulating keyboard.` screen. The NEO did not draw `DIR`, so stock USB attach does not appear to dispatch custom applet `0x20`/`0x21` handlers the way AlphaWord reaches its external-transfer helper.
+
+The next probe is `USB Menu Probe` version `1.9`. Its `0x19` menu-open path replicates the System lifecycle callback-registration side effects inline, then draws `ARM` and idles:
+
+```asm
+clr.l   -(a7)
+jsr     0x00426bb0
+move.b  #0,0x00000444
+jsr     0x00412c82
+jsr     0x004109ca
+pea.l   0x00011111
+pea.w   0x2580
+jsr     0x00424fb0
+pea.l   0x00410b26
+jsr     0x00424f66
+lea     16(a7),a7
+```
+
+This deliberately avoids `jsr 0x0041016e`: that System routine branches into its dispatcher epilogue and expects the System stack frame. Version `1.9` only copies the registration work, then stays inside the custom applet runtime contract.
+
+Further AlphaWord comparison showed that the keyboard-send path is not reached only by matching the later transfer command ids. AlphaWord advertises the capability through its info table:
+
+- `0x0105/0x100b = "write"`
+- `0xc001/0x8011..0x8018 = "write"`
+
+AlphaWord also accepts namespace initialization before transfer:
+
+- `0x10001`: reset namespace 1 and return status `0x11`
+- `0x20001`: reset namespace 2 and return status `0x11`
+
+`USB Menu Probe` version `1.11` now mirrors those parts: it includes the AlphaWord-style write metadata, uses flags `0xff0000ce` and extra memory `0x2000`, draws `LINK` and returns `0x11` for namespace init, then draws `HOST` and returns `4` for the observed keyboard-send transfer command ids. This is the current probe for determining whether keyboard-send routing is metadata-based or hardcoded to AlphaWord applet id `0xa000`.
+
+The current `1.11` build also mirrors the low command surface seen in AlphaWord's entry dispatcher:
+
+- `0x20` / `0x21`: draw `HOST`, return status `4`
+- `0x26`: return this probe's applet id (`0xa129`) through the status pointer
+
+This matters because the previous metadata-only `1.11` build still reached the stock System `Attached to Mac/PC, emulating keyboard.` screen. The active hypothesis is now narrower: either System probes this low command surface before routing the attach UI, or the attach UI is hardcoded to AlphaWord/startup-app state rather than generic SmartApplet metadata.
+
+NeoManager's shipped readme supports the second possibility: it warns that direct USB connection/update problems occur when the NEO is running an applet other than AlphaWord Plus or the SmartApplets menu, and when startup is not AlphaWord Plus.
+
+The next probe is `USB AW Probe` version `1.12`, applet id `0xa12a`. It is intentionally separate from the earlier `USB Menu Probe` records because the NEO rejected visible applet-list row `14` for remove command `0x05` with status `0x8a`; removing by visible row is still not a safe replacement mechanism. Version `1.12` keeps the same write metadata and namespace handlers, but now declares base memory `0x240` and writes the AlphaWord-like local state bytes before returning namespace init status:
+
+- `0x10001` and `0x30001`: set `A5+0x138 = 1`, clear `A5+0x142`, set `A5+0x143 = 1`, clear `A5+0xbc`, draw `LINK`, return status `0x11`.
+- `0x20001`: set `A5+0x138 = 1`, clear `A5+0x142`, clear `A5+0x143`, clear `A5+0xbc`, draw `PC`, return status `0x11`.
+
+This is a narrow test of the current AlphaWord-state hypothesis. It still does not clone the real `A5+0xba` command-stream helper routines; it only seeds the specific state bytes proven from AlphaWord's dispatcher before the next attach path is observed.
+
+Live result: `USB AW Probe` v1.12 reached the custom attach branch but bus-faulted at `0x423044` before drawing. The address equals the attempted `A5+0x138` write, proving the attach path reached the applet but that writing AlphaWord-private A5 offsets from the custom applet's USB callback context is unsafe.
+
+`USB Init Probe` v1.13 removed every A5-relative write. A read-back dump of applet `0xa12b` exactly matched `exports/usb-init-probe.os3kapp` and contained no `1b bc 00 01 48 00`, `42 35 48 00`, `28 3c 00 00 01 38`, or `28 3c 00 00 01 43` instruction bytes. It still faulted at `0x423044`; the likely cause is now the text/UI trap sequence (`A000`/`A004`/`A010`/`A098`) being unsafe in the USB attach callback context.
+
+`USB Fault Probe` v1.14, applet id `0xa12c`, therefore avoids all UI drawing in USB attach handlers. It intentionally faults with command-encoded addresses:
+
+- `0x10001` -> access `0x00581001`
+- `0x30001` -> access `0x00583001`
+- `0x20001` -> access `0x00582001`
+- later transfer/event commands -> access `0x0058f00d`
+
+The normal Applets-menu `0x19` path still draws `USB`, so the applet remains selectable before connecting USB.
+
+Live result from v1.14: USB attach faulted at `0x00583001`, proving the System calls the running custom applet with command `0x30001` on this Mac-side attach path.
+
+`USB Silent Probe` v1.15, applet id `0xa12d`, now returns status `0x11` for `0x30001` without drawing and without intentional faulting. All other attach/test branches still fault with command-encoded addresses. The installed device state was cleaned to stock applets plus only `USB Silent Probe` because keeping multiple probe applets caused add-begin timeouts even though read-only applet listing stayed healthy.
+
+Live result from v1.15: after selecting the applet and connecting USB, the NEO stayed on `Making USB connection...`. The host nevertheless saw `081e:bd04` HID keyboard mode, not `081e:bd01`. So a silent successful `0x30001 -> 0x11` response is accepted enough to alter the UI/control flow, but it does not itself activate direct USB mode and did not visibly advance to a later command-fault branch.
+
+`USB Switch Probe` v1.16, applet id `0xa12e`, is the next narrow test. It keeps the same AlphaWord-style write metadata and the same no-UI USB callback discipline as v1.15, but its proven `0x30001` branch now calls the ROM callback at `0x00410b26` before returning status `0x11`:
+
+- `0x30001` -> `jsr 0x00410b26`, write `0x11` to the status pointer, return.
+- `0x10001`, `0x20001`, and later transfer/event commands still intentionally fault with command-encoded addresses.
+
+The callback address is the same one NeoManager reaches through the HID report sequence when switching `081e:bd04` keyboard mode to `081e:bd01` direct USB mode. The device was cleaned to stock applets plus only `USB Switch Probe` v1.16, then restarted; the host reported normal HID mode (`081e:bd04`) before the live applet-side USB attach test. This probe tests whether the callback can be safely invoked from the custom applet's `0x30001` attach callback, not just from the firmware's HID-switch path.
+
+Live result from v1.16: after selecting the applet and connecting USB, the NEO showed the stock `emulating keyboard.` path and the host reported `081e:bd04`. This disproves the bare-callback hypothesis: `0x00410b26` is the connected-status/direct-packet callback, not the low-level HID identity-switch primitive.
+
+ROM tracing of `analysis/cab/os3kneorom.os3kos` found the real HID unlock sequence handler around runtime `0x00440b8e`. The validated sequence table starts at runtime `0x0044f6a8`:
+
+- `e0 e1 e2 e3 e4`
+- `01 02 04 03 07`
+- `f0 f1 f2 f3 f4`
+- `07 03 01 04 02`
+
+When a five-byte sequence matches, the first sequence path performs the same completion sequence NeoManager triggers indirectly from host HID reports: writes a one-byte control transfer through `0x0041f9a0`, waits through `0x00424780`, sets byte `0x00013cf9 = 1`, calls runtime `0x0044044e`, waits again, then calls runtime `0x0044047c`. `USB HID Complete` v1.17, applet id `0xa12f`, invokes that HID-completion path from the proven `0x30001` branch without UI drawing, then returns status `0x11`. It was installed as the only custom probe after restoring the stock applets, and the NEO was restarted back to normal `081e:bd04` HID mode for live testing.
+
+Live result from v1.17: after launching `USB HID Complete` and connecting USB, the host reported `081e:bd01` direct mode with bulk OUT `0x01` and bulk IN `0x82`. This proves device-side SmartApplet activation is possible without host access to the initial HID keyboard interface. The successful path is not a direct call to `0x00410b26`; it is the ROM HID-sequence completion path (`0x0044044e` / `0x0044047c`) invoked from the applet's `0x30001` USB attach callback.
+
+`Alpha USB` is the production form of this probe. It uses applet id `0xa130`, version `1.18`, and the menu name `Alpha USB`. Its `0x30001` branch keeps the proven v1.17 ROM HID-completion sequence unchanged. Unlike the diagnostic probes, it has no intentional fault branches; other USB/event branches return quiet status values and avoid UI traps in USB callback context. Build command:
+
+```bash
+uv run --project poc/neotools neotools build-benign-smartapplet \
+  --output exports/alpha-usb.os3kapp \
+  --applet-id 0xa130 \
+  --name "Alpha USB" \
+  --draw-on-menu-command \
+  --host-usb-message-handler \
+  --alphaword-write-metadata \
+  --alpha-usb-production
+```
+
 The PoC now carries those prototype fragments explicitly:
 
 ```bash
@@ -1255,6 +1410,22 @@ The generated minimal entry stub does exactly this:
 
 That is enough to produce a parseable, structurally valid SmartApplet image and proves that custom authoring is not blocked on the outer container format anymore. The remaining blocker for sophisticated custom applets is semantic coverage of the runtime trap services, not the container or entry ABI.
 
+The first generated benign applet for direct-mode experiments is intentionally lifecycle-only. It has applet id `0xa123`, menu name `Direct USB Test`, no runtime trap imports, and no direct-mode calls. It is meant only to prove that a custom applet can appear in the NEO SmartApplets menu and launch/exit safely before any direct-mode patch is attempted.
+
+Build it locally:
+
+```bash
+uv run --project poc/neotools neotools build-benign-smartapplet --output exports/direct-usb-test.os3kapp
+```
+
+The generated host-side file is ignored by git under `exports/`. Installing it on a physical NEO would modify the device's SmartApplet storage, so the current implementation stops at producing and validating the `.os3kapp` image.
+
+Live/Ghidra correction: valid SmartApplet images must also end with the 4-byte trailer `0xca 0xfe 0xfe 0xed`. NeoManager's file classifier reads the first `0x84` bytes, checks magic `0xc0ffeead`, then seeks to `file_size - 4`; only a trailing `0xcaffeeed` returns SmartApplet type `0x11`. The benign `Direct USB Test` generator now emits a 176-byte image whose executable stub still ends in `4e 75`, followed by the `ca fe fe ed` trailer.
+
+Live lifecycle correction: selecting a generated custom applet from the physical NEO Applets menu first invoked the applet entry point with command `0x19`, not `0x18`. A deliberate fault probe encoded that command as the visible bus-error address `0x580019`. This matches Calculator better than the original minimal stub did: Calculator uses command `0x19` to run its interactive menu loop, then performs cleanup and returns status `7`. A generated probe that handled `0x19` as menu entry stayed active and the NEO could return to the Applets menu, proving the lifecycle path is reachable.
+
+Live custom UI correction: the blank `0x19` probe failed because the drawing path did not match the Calculator-style trap-call ABI closely enough. The working visible probes use local `bsr.w` calls into A-line trap stubs, set `(row=2, column=1, width=28)` with `A004`, draw ASCII bytes through `A010`, flush with `A098`, and idle through `A25C`. The physical NEO accepted and listed `USB Menu Probe` `0xa129` version `1.8` at `364` bytes, and then accepted version `1.9` at `328` bytes after the direct-callback arming sequence replaced the older USB-event experiment.
+
 ### Host Runtime Boundary
 
 The applet payloads are not fully self-contained binaries. They call out to the NEO SmartApplet runtime through embedded Motorola 68k A-line trap opcodes.
@@ -1311,6 +1482,150 @@ The minimal direct USB session is therefore:
 3. `0x0f` retrieve-applet command
 4. repeated `0x10` chunk requests until the announced size is satisfied
 
+### Live System 3.15 Dump
+
+The retrieve-applet path is now validated against the physical NEO for applet id `0x0000`:
+
+```bash
+uv run --project real-check real-check dump-applet 0x0000 --output analysis/device-dumps/neo-system-3.15.os3kapp
+```
+
+Validated output:
+
+- bytes read: `401408` (`0x62000`)
+- SHA-256: `304a32fb548c8d605351cdef5389976ac2346cace5e9cafcc1e96f7737a37fa6`
+- header magic: `0xc0ffeead`
+- header file size: `0x00062000`
+- base memory size: `0x00015098`
+- header offset `0x0c`: `0x0003968a`
+- flags/version field: `0x00000011`
+- applet id/version field: `0x00000100`
+- name: `System`
+- copyright: `TESTING VERSION. DO NOT DISTRIBUTE. (c) 2012 AlphaSmart, Inc.`
+- extra memory size at header offset `0x80`: `0`
+- live applet-list display version: `3.15`
+
+The System applet is special compared with normal `.os3kapp` files. The generic parser reads a body size of `0x39606` and no normal info-table records. In Ghidra, loading the dump as a flat Motorola 68k big-endian image at base `0` gives a single segment `0x00000000..0x00061fff`.
+
+Ghidra found the System string-resource resolver at `FUN_0002cebc`:
+
+```c
+undefined * FUN_0002cebc(ushort resource_id) {
+  return &DAT_000269fe + *(int *)(&DAT_0003ad72 + (uint)resource_id * 4);
+}
+```
+
+Confirmed bases:
+
+- resource text/data base: `0x269fe`
+- dword offset table: `0x3ad72`
+
+USB/user-visible resource ids pinned from that table:
+
+- `0x04c`: `Attached to Mac, emulating keyboard.`
+- `0x04d`: `Attached to PC, emulating keyboard.`
+- `0x04e..0x053`: send-file prompts and "Sending file" status
+- `0x054..0x055`: Get Utility connected / keys inactive status
+- `0x056..0x057`: AlphaHub connected / keys inactive status
+- `0x058`: `Receiving file `
+- `0x059`: `Connected to computer (infrared mode).`
+- `0x0fe..0x104`: multi-line Mac/PC send and suspended-format strings
+
+Correction from the AlphaWord Plus applet itself: the distinct AlphaWord screen is not only a System fallback. `analysis/cab/alphawordplus.os3kapp` contains its own copies of the exact attach strings. The applet's resource lookup function at `0x064be` indexes the pointer table at `0x14374`, and Ghidra xrefs confirm the table entries:
+
+- pointer table entry `0x04c` at `0x144a4` -> string `0x153e1`: `Attached to Mac, emulating keyboard.`
+- pointer table entry `0x04d` -> string `0x15406`: `Attached to PC, emulating keyboard.`
+- pointer table entry `0x0fe` at `0x1476c` -> string `0x19829`: `Attached to MAC, emulating keyboard.` plus the send-file instructions and current filename format.
+- pointer table entry `0x0ff` -> string `0x198a3`: `Attached to PC, emulating keyboard.` plus the PC-side send-file instructions and current filename format.
+- pointer table entries `0x100..0x104` -> `MAC`, `PC`, `Attached to %s.\nSending "%s".`, `Attached to %s.\nAborting send of  "%s".`, and `Attached to %s.\nUSB connection suspended.`
+
+The short strings are rendered by the namespace handlers:
+
+- `HandleAlphaWordNamespace1Commands` at `0x07a44` handles `0x10001`, returns status `0x11`, calls `ResetAlphaWordCommandStreamState`, sets the applet-local Mac flag byte at `A5+0x143` to `1`, then redraws `0x04c`, `0x04e`, `0x052`, and `0x053`.
+- `HandleAlphaWordNamespace2Commands` at `0x08210` handles `0x20001`, returns status `0x11`, resets the same command stream, and redraws `0x04d`, `0x04e`, `0x04f`, and `0x050` on the PC-side path.
+
+The uppercase `Attached to MAC/PC...` message is driven by AlphaWord's main entry dispatcher, not by a trivial one-command draw handler. The executable entry at `0x0094` dispatches namespace commands first, then calls the command-stream helpers around the applet-local state block at `A5+0xba`. The important local bytes are:
+
+- `A5+0xba+2`: command-stream state byte used as an index into the dispatcher jump table at `0x02e0`.
+- `A5+0x143`: Mac/PC selector. Command `0x10001` sets it to `1`; command `0x30001` also sets it when its input payload is non-empty; the generic `command low byte == 1` path otherwise clears it.
+
+When the stream state reaches case `0`, the dispatcher builds the formatted attach screen. If `A5+0x143` is nonzero it formats resource `0x0fe`; otherwise it formats resource `0x0ff`. Later state cases format `0x102`, `0x103`, and `0x104` for sending, aborting, and suspended USB states. This explains why our custom probe can advertise AlphaWord-like write metadata and answer namespace ids but still fall through to the stock `Connected to computer, emulating keyboard.` UI: the proven AlphaWord behavior depends on its private command-stream state machine, not only on the metadata records or direct `0x10001`/`0x20001` handlers.
+
+Relevant System-side handlers located so far:
+
+- `FUN_0002e442`: Mac/keyboard-send command handler; displays resources `0x04c`, `0x04e`, `0x051`, `0x052`, and `0x053`.
+- `FUN_0002ec0e`: PC/keyboard-send peer path; displays resources `0x04d`, `0x04e`, `0x04f`, `0x050`, `0x051`, and `0x058`.
+- `FUN_0002f242`: Get Utility handler; displays `0x054` and `0x055`.
+- `FUN_0002f464`: infrared computer mode handler; displays `0x059`, handles `0xbc` command subcodes, and routes some receive/status paths through `0x058`.
+- `FUN_00042404`: on-device attached-computer UI loop; it renders the attached Mac/PC/send prompts and handles return/control bytes such as `0x40`, `0x48`, `0x4b`, `0x06`, and `0x0d`.
+
+The System dump also contains a USB descriptor/data blob near `0x60a6..0x6211`.
+
+Important descriptor offsets:
+
+- `0x60c2`: HID report descriptor, length `0x3f`; it includes the normal keyboard modifier usage range `0xe0..0xe7` and LED output usages.
+- `0x6102`: `081e:bd04` device descriptor.
+  - bcdUSB `1.00`
+  - device class/subclass/protocol `0/0/0`
+  - max packet `64`
+  - VID/PID `0x081e:0xbd04`
+  - bcdDevice `0x0002`
+  - manufacturer string id `1`
+  - product string id `2` (`AlphaSmart`)
+- `0x6114`: `081e:bd01` device descriptor.
+  - bcdUSB `1.00`
+  - device class/subclass/protocol `2/0/0`
+  - max packet `64`
+  - VID/PID `0x081e:0xbd01`
+  - bcdDevice `0x0002`
+  - manufacturer string id `1`
+  - product string id `3` (`AlphaSmart Communication Driver`)
+- `0x6126`: configuration descriptor with total length `0x22`, matching the HID keyboard-side interface set.
+- `0x6130`: configuration descriptor with total length `0x20`, matching the direct communication-driver side.
+- `0x613a`: HID boot-keyboard interface descriptor.
+- `0x6143`: communication-driver interface descriptor with two endpoints.
+- `0x614c`: HID descriptor pointing at the `0x3f`-byte report descriptor.
+- `0x6156`: endpoint `0x82`, interrupt IN, max packet `64`, interval `10`.
+- `0x615e`: endpoint `0x82`, bulk IN, max packet `64`.
+- `0x6166`: endpoint `0x01`, bulk OUT, max packet `64`.
+- `0x6172`: UTF-16 string `AlphaSmart, Inc.`
+- `0x6194`: UTF-16 string `AlphaSmart`
+- `0x61aa`: UTF-16 string `AlphaSmart Communication Driver`
+- `0x61ea`: UTF-16 string `AlphaSmart Keyboard`
+
+Immediately before the HID report descriptor, the System dump contains this candidate HID output-report sequence table:
+
+- `0x60a6`: `e0 e1 e2 e3 e4`
+- `0x60ab`: `01 02 04 03 07`
+- `0x60b0`: `f0 f1 f2 f3 f4`
+- `0x60b5`: `07 03 01 04 02`
+- `0x60ba`: `00 02 03 04 01 02 03 04`
+
+The same table appears in the installer ROM image `analysis/cab/os3kneorom.os3kos` at file offsets `0x3f6a8`, `0x3f6ad`, `0x3f6b2`, `0x3f6b7`, and `0x3f6bc`. The first sequence, `e0 e1 e2 e3 e4`, is dynamically proven on the physical NEO as the `081e:bd04` keyboard-mode to `081e:bd01` direct-mode activation sequence. The other adjacent sequences are firmware candidates that still need live switching tests.
+
+The separate Small ROM updater image `analysis/cab/smallos3kneorom.os3kos` contains a `081e:bd01` descriptor at file offset `0x5458`, no `081e:bd04` descriptor, and no HID report descriptor. That supports the second proven route to a direct USB identity: booting into the Small ROM/updater path. Live testing showed that this mode is not equivalent to the normal AlphaWord direct path; the AlphaWord file-attribute command `0x13` returned status `0x92`.
+
+The normal direct-mode LCD message `Connected to NEO Manager.` is in the installer ROM, not in the live System applet dump. In `analysis/cab/os3kneorom.os3kos`, the relevant ROM area maps as `runtime = file offset + 0x410000`. The state-5 callback is runtime `0x00410b26` / file offset `0x0b26`; it writes `0x05` to global status byte `0x444`, calls the direct-mode global initializer at runtime `0x00412c82`, then repaints through the status renderer at runtime `0x004109ca`. Renderer state `5` uses string resource `0x8c`, whose pointer-table entry at file offset `0x3b26c` resolves to file offset `0x3693b`, the exact `Connected to NEO Manager.` bytes.
+
+Static ROM inventory found only one immediate write of `0x05` to global `0x444` and only one registration of the state-5 callback (`pea.l 0x410b26` followed by `jsr 0x424f66` at file offsets `0x0194..0x019a`). Duplicate copies of `Connected to NEO Manager.` in the ROM are therefore not by themselves evidence of additional HID-to-direct activation paths.
+
+Control-flow trace: the System/ROM dispatcher at runtime `0x004100a0` routes lifecycle event `0x19` through its jump table to runtime `0x0041016e`; that path initializes the USB/direct globals, calls runtime `0x00424fb0`, then registers callback `0x00410b26` with runtime `0x00424f66`. The registration helper stores the callback pointer in RAM global `0x5d9c`; low-level hardware/USB handlers later call through that pointer. No installed SmartApplet, shipped SmartApplet, Small ROM image, or alternate ROM site has been found that directly calls `0x00410b26`, registers it a second time, or directly writes visible state `5` to global `0x444`.
+
+Implication for device-side activation: a local key/menu action can plausibly force the System applet through lifecycle `0x19` and therefore arm the direct-mode callback, but that is not the same as autonomously entering the normal AlphaWord direct protocol. The currently documented local recovery workflow is left-shift+tab during power-on to reach the SmartApplet menu before connecting USB; the actual `Connected to NEO Manager.` state still appears to require the lower-level USB/HID callback to fire.
+
+Strings that were explicitly searched and not present as ASCII in the System dump:
+
+- `NEO Manager`
+- `NeoManager`
+- `Swtch`
+- `Switched`
+- `bd01` / `BD01`
+- `bd04` / `BD04`
+
+The only `Manager` hit is the unrelated wireless-file-transfer message `disabled in AlphaSmart Manager.`. The direct USB descriptor data is present, but this dump has not revealed an alternate Android-accessible switch path beyond the already validated HID-output-report transition.
+
+Ghidra caveat: auto-analysis creates false functions inside late data/descriptor regions, including the `0x5f80..0x62000` area. Treat apparent functions in that range as suspect unless they have clear code flow and sane callers.
+
 ## Send Applet To Device
 
 `UpdaterAddApplet` is the host-to-device SmartApplet install routine.
@@ -1323,13 +1638,15 @@ What is confirmed:
 - response must be `0x46`
 - chunk handshake command `0x02`
 - chunk handshake response must be `0x42`
-- post-chunk completion poll command `0xff`
+- post-chunk completion response is read after the raw chunk payload
 - completion response must be `0x43`
 - program-applet command `0x0b`
 - program response must be `0x47`
 - finalize command `0x07`
 - finalize response must be `0x48`
 - payload chunk size is capped at `0x400`
+
+Important correction from `UpdaterSendCommandAndGetResponse`: NeoManager calls the helper with command byte `0xff` after writing each chunk, but the helper treats `0xff` as a sentinel and skips `BuildUpdaterCommandPacket` / `TransportWriteExact`. In other words, post-chunk completion is a read-only wait for status `0x43`; it is not an actual `ff 00 00 00 00 00 00 ff` packet on the direct USB transport.
 
 The add-begin fields are now mapped precisely from the first `0x84` bytes of the `.OS3KApp` file:
 
@@ -1369,12 +1686,23 @@ Send path:
 8. send `0x02` with `arg32 = chunk_length`, `trailing = sum16(chunk)`
 9. expect `0x42`
 10. write the chunk payload bytes
-11. send `0xff`
+11. read the post-chunk completion response
 12. expect `0x43`
-13. after all bytes are staged, send `0x0b`
+13. send `0x0b` for the just-staged chunk
 14. expect `0x47`
-15. send `0x07`
+15. after all chunks have been staged and programmed, send `0x07`
 16. expect `0x48`
+
+Validated correction: NeoManager sends the `0x0b` program command inside the `0x400`-byte chunk loop, immediately after the read-only `0x43` chunk-completion wait. Sending all chunks first and only one `0x0b` at the end can leave the device waiting or fail during applet restore.
+
+Live failure note from the first custom applet install attempt:
+
+- A malformed 172-byte generated applet without the `0xcaffeeed` trailer was staged and then rejected at program time.
+- The NEO displayed `Error: ROM not Erased`; the direct response to a later `0x06` add-begin was status `0x81`.
+- NeoManager's higher-level retry path treats `0x81` as a compaction-needed condition.
+- The remove command is `0x05` with `arg32=5`, expecting response `0x45`. It is not applet-id-based. Later Ghidra tracing indicates the trailing value is an internal listen/slot-table index, not the visible direct-mode applet-list row; sending both `0xa123` and visible row `7` produced `Error: Invalid SmartApplet index`/status `0x8a`.
+- The broad applet-area clear command used by NeoManager's compaction path is `0x11`, expecting response `0x4f`, with a 90-second timeout. That is not a narrow custom-applet repair command; it clears the SmartApplet area and NeoManager's UI flow backs up/restores applets around it.
+- After a factory reset left only `System`, the backed-up stock applets were successfully restored from `exports/smartapplet-backups/20260418-145415` using the corrected per-chunk `0x0b` sequencing.
 
 ## Save Retrieved Applet File Data
 

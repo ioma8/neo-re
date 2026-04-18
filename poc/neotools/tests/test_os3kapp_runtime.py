@@ -34,8 +34,463 @@ class Os3kAppRuntimeTests(unittest.TestCase):
         self.assertEqual(image.body_prefix_words, (0x94, 0, 1, 2))
         self.assertEqual(image.body[0x10:0x14], bytes.fromhex("20 6f 00 0c"))
         self.assertEqual(image.body[0x16:0x1a], bytes.fromhex("20 2f 00 04"))
-        self.assertEqual(image.body[-2:], bytes.fromhex("4e 75"))
+        self.assertEqual(image.body[-6:-4], bytes.fromhex("4e 75"))
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
         self.assertEqual(abi.shutdown_status, 7)
+
+    def test_build_minimal_smartapplet_image_can_emit_direct_mode_callback_experiment(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA123,
+            name="Direct USB Test",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x01,
+            direct_mode_callback=0x00410B26,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.version_major, 1)
+        self.assertEqual(image.metadata.version_minor, 1)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 18"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 41 0b 26"), image.body)
+        self.assertEqual(image.body[-6:-4], bytes.fromhex("4e 75"))
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
+
+    def test_build_minimal_smartapplet_image_can_emit_direct_mode_command_handler(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA124,
+            name="USB Direct",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x02,
+            direct_mode_callback=0x00410B26,
+            direct_mode_command_handler=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA124)
+        self.assertEqual(image.metadata.version_minor, 2)
+        self.assertIn(bytes.fromhex("02 81 00 ff 00 00"), image.body)
+        self.assertIn(bytes.fromhex("0c 81 00 04 00 00"), image.body)
+        self.assertIn(bytes.fromhex("a0 00"), image.body)
+        self.assertIn(bytes.fromhex("a0 04"), image.body)
+        self.assertIn(bytes.fromhex("a0 14"), image.body)
+        self.assertIn(bytes.fromhex("a0 98"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 41 0b 26"), image.body)
+        self.assertIn(b"Opening direct USB...\x00", image.body)
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
+
+    def test_build_minimal_smartapplet_image_can_emit_stay_open_init_screen(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA124,
+            name="USB Direct",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x03,
+            stay_open_on_init=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.version_minor, 3)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 18"), image.body)
+        self.assertIn(bytes.fromhex("a0 00"), image.body)
+        self.assertIn(bytes.fromhex("a0 04"), image.body)
+        self.assertIn(bytes.fromhex("a0 14"), image.body)
+        self.assertIn(bytes.fromhex("a0 98"), image.body)
+        self.assertIn(bytes.fromhex("a2 5c 60 fc"), image.body)
+        self.assertIn(b"USB Direct open\x00", image.body)
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
+
+    def test_build_minimal_smartapplet_image_can_emit_calculator_style_menu_handler(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA126,
+            name="USB Calc Test",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x04,
+            calculator_style_menu=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA126)
+        self.assertEqual(image.metadata.version_minor, 4)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 01"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 02"), image.body)
+        self.assertIn(bytes.fromhex("72 01 20 81"), image.body)
+        self.assertIn(bytes.fromhex("72 04 24 81 20 81"), image.body)
+        self.assertIn(b"USB Direct open\x00", image.body)
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
+
+    def test_build_minimal_smartapplet_image_can_emit_draw_on_any_command_probe(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA127,
+            name="USB Any Cmd",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x05,
+            draw_on_any_command=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA127)
+        self.assertEqual(image.metadata.version_minor, 5)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 18"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 19"), image.body)
+        self.assertIn(bytes.fromhex("66 08 72 07 20 81 4e 75"), image.body)
+        self.assertIn(bytes.fromhex("a0 00"), image.body)
+        self.assertIn(bytes.fromhex("a0 04"), image.body)
+        self.assertIn(bytes.fromhex("70 55 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 53 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 42 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("a0 10 a0 98 a2 5c"), image.body)
+        self.assertIn(bytes.fromhex("a0 98"), image.body)
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
+
+    def test_build_minimal_smartapplet_image_can_emit_menu_command_screen_probe(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA129,
+            name="USB Menu Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x08,
+            draw_on_menu_command=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA129)
+        self.assertEqual(image.metadata.version_minor, 8)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 19"), image.body)
+        self.assertIn(bytes.fromhex("a0 00"), image.body)
+        self.assertIn(bytes.fromhex("70 55 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 53 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 42 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("a0 10 a0 98 a2 5c"), image.body)
+        self.assertIn(bytes.fromhex("60 fa"), image.body)
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
+
+    def test_menu_command_screen_probe_can_emit_usb_event_direct_handler(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA129,
+            name="USB Menu Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x08,
+            draw_on_menu_command=True,
+            direct_mode_callback=0x00410B26,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 20"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 21"), image.body)
+        self.assertIn(bytes.fromhex("70 44 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 49 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 52 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 41 0b 26"), image.body)
+
+    def test_menu_command_screen_probe_can_arm_system_direct_callback(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA129,
+            name="USB Menu Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x09,
+            draw_on_menu_command=True,
+            arm_direct_on_menu=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.version_minor, 9)
+        self.assertIn(bytes.fromhex("42 a7"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 42 6b b0"), image.body)
+        self.assertIn(bytes.fromhex("13 fc 00 00 00 00 04 44"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 41 2c 82"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 41 09 ca"), image.body)
+        self.assertIn(bytes.fromhex("48 79 00 01 11 11"), image.body)
+        self.assertIn(bytes.fromhex("48 78 25 80"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 42 4f b0"), image.body)
+        self.assertIn(bytes.fromhex("48 79 00 41 0b 26"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 42 4f 66"), image.body)
+        self.assertIn(bytes.fromhex("4f ef 00 10"), image.body)
+        self.assertIn(bytes.fromhex("70 41 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 52 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4d 2f 00 61 00"), image.body)
+
+    def test_menu_command_screen_probe_can_emit_host_usb_message_handler(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA129,
+            name="USB Menu Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x10,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.version_minor, 10)
+        for command in (
+            0x00000020,
+            0x00000021,
+            0x00000026,
+            0x00010001,
+            0x00020001,
+            0x00010003,
+            0x00010006,
+            0x00020002,
+            0x00020006,
+            0x0002011F,
+        ):
+            self.assertIn(bytes.fromhex("0c 80") + command.to_bytes(4, "big"), image.body)
+        self.assertIn(bytes.fromhex("70 48 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4f 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 53 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 54 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4c 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 49 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4e 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4b 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("72 11 20 81"), image.body)
+        self.assertIn(bytes.fromhex("72 04 20 81"), image.body)
+        self.assertIn(bytes.fromhex("22 3c 00 00 a1 29 20 81 4e 75"), image.body)
+
+    def test_menu_command_screen_probe_can_emit_alphaword_write_metadata(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA129,
+            name="USB Menu Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x11,
+            flags_raw=0xFF0000CE,
+            extra_memory_size=0x2000,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+            alphaword_write_metadata=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.version_minor, 11)
+        self.assertEqual(image.metadata.flags_raw, 0xFF0000CE)
+        self.assertEqual(image.metadata.extra_memory_size, 0x2000)
+        self.assertNotEqual(image.info_table_offset, 0)
+        self.assertEqual(raw[-4:], bytes.fromhex("ca fe fe ed"))
+        self.assertEqual(
+            [(record.group, record.key, record.text) for record in image.info_records],
+            [(0x0105, 0x100B, "write")]
+            + [(0xC001, key, "write") for key in range(0x8011, 0x8019)],
+        )
+
+    def test_menu_command_screen_probe_can_emit_alphaword_state_machine_probe(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA129,
+            name="USB Menu Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x12,
+            flags_raw=0xFF0000CE,
+            base_memory_size=0x240,
+            extra_memory_size=0x2000,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+            alphaword_write_metadata=True,
+            alphaword_state_machine_probe=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.version_minor, 12)
+        self.assertEqual(image.metadata.header.base_memory_size, 0x240)
+        self.assertEqual(image.metadata.extra_memory_size, 0x2000)
+        self.assertIn(bytes.fromhex("0c 80 00 03 00 01"), image.body)
+        self.assertIn(bytes.fromhex("28 3c 00 00 01 43 1b bc 00 01 48 00"), image.body)
+        self.assertIn(bytes.fromhex("28 3c 00 00 01 43 42 35 48 00"), image.body)
+        self.assertIn(bytes.fromhex("28 3c 00 00 00 bc 42 35 48 00"), image.body)
+
+    def test_menu_command_screen_probe_can_emit_safe_alphaword_init_command_probe(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA12B,
+            name="USB Init Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x13,
+            flags_raw=0xFF0000CE,
+            extra_memory_size=0x2000,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+            alphaword_write_metadata=True,
+            alphaword_init_command_probe=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA12B)
+        self.assertEqual(image.metadata.version_minor, 13)
+        self.assertIn(bytes.fromhex("0c 80 00 01 00 01"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 03 00 01"), image.body)
+        self.assertIn(bytes.fromhex("70 4e 2f 00"), image.body)
+        self.assertIn(bytes.fromhex("70 31 2f 00"), image.body)
+        self.assertIn(bytes.fromhex("70 33 2f 00"), image.body)
+        self.assertNotIn(bytes.fromhex("1b bc 00 01 48 00"), image.body)
+        self.assertNotIn(bytes.fromhex("42 35 48 00"), image.body)
+
+    def test_menu_command_screen_probe_can_emit_alphaword_init_fault_probe(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA12C,
+            name="USB Fault Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x14,
+            flags_raw=0xFF0000CE,
+            extra_memory_size=0x2000,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+            alphaword_write_metadata=True,
+            alphaword_init_fault_probe=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA12C)
+        self.assertEqual(image.metadata.version_minor, 14)
+        self.assertIn(bytes.fromhex("20 7c 00 58 10 01 22 10"), image.body)
+        self.assertIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
+        self.assertIn(bytes.fromhex("20 7c 00 58 20 01 22 10"), image.body)
+        self.assertIn(bytes.fromhex("20 7c 00 58 f0 0d 22 10"), image.body)
+        self.assertNotIn(bytes.fromhex("1b bc 00 01 48 00"), image.body)
+
+    def test_menu_command_screen_probe_can_emit_silent_30001_probe(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA12D,
+            name="USB Silent Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x15,
+            flags_raw=0xFF0000CE,
+            extra_memory_size=0x2000,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+            alphaword_write_metadata=True,
+            alphaword_init_fault_probe=True,
+            alphaword_silent_init_probe=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA12D)
+        self.assertEqual(image.metadata.version_minor, 15)
+        self.assertIn(bytes.fromhex("0c 80 00 03 00 01"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
+        self.assertIn(bytes.fromhex("20 7c 00 58 10 01 22 10"), image.body)
+        self.assertIn(bytes.fromhex("20 7c 00 58 f0 0d 22 10"), image.body)
+        self.assertIn(bytes.fromhex("72 11 20 81 4e 75"), image.body)
+
+    def test_menu_command_screen_probe_can_call_direct_callback_on_30001(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA12E,
+            name="USB Switch Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x16,
+            flags_raw=0xFF0000CE,
+            extra_memory_size=0x2000,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+            alphaword_write_metadata=True,
+            alphaword_init_fault_probe=True,
+            alphaword_switch_on_init_probe=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA12E)
+        self.assertEqual(image.metadata.version_minor, 16)
+        self.assertIn(bytes.fromhex("0c 80 00 03 00 01"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 41 0b 26 72 11 20 81 4e 75"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
+        self.assertIn(bytes.fromhex("20 7c 00 58 10 01 22 10"), image.body)
+        self.assertIn(bytes.fromhex("20 7c 00 58 f0 0d 22 10"), image.body)
+
+    def test_menu_command_screen_probe_can_call_hid_completion_path_on_30001(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA12F,
+            name="USB HID Complete",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x17,
+            flags_raw=0xFF0000CE,
+            extra_memory_size=0x2000,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+            alphaword_write_metadata=True,
+            alphaword_init_fault_probe=True,
+            alphaword_hid_complete_switch_probe=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA12F)
+        self.assertEqual(image.metadata.version_minor, 17)
+        self.assertIn(bytes.fromhex("4e b9 00 41 f9 a0"), image.body)
+        self.assertIn(bytes.fromhex("13 fc 00 01 00 01 3c f9"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 44 04 4e"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 44 04 7c"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
+
+    def test_menu_command_screen_probe_can_emit_alpha_usb_production_applet(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA130,
+            name="Alpha USB",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x18,
+            flags_raw=0xFF0000CE,
+            extra_memory_size=0x2000,
+            draw_on_menu_command=True,
+            host_usb_message_handler=True,
+            alphaword_write_metadata=True,
+            alpha_usb_production=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA130)
+        self.assertEqual(image.metadata.name, "Alpha USB")
+        self.assertEqual(image.metadata.version_minor, 18)
+        self.assertIn(bytes.fromhex("13 fc 00 01 00 01 3c f9"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 44 04 4e"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 44 04 7c"), image.body)
+        self.assertIn(bytes.fromhex("72 04 20 81 4e 75"), image.body)
+        self.assertIn(bytes.fromhex("72 11 20 81 4e 75"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 10 01 22 10"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 f0 0d 22 10"), image.body)
+
+    def test_build_minimal_smartapplet_image_can_emit_command_fault_probe(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA128,
+            name="USB Cmd Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x06,
+            command_fault_probe=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.applet_id, 0xA128)
+        self.assertEqual(image.metadata.version_minor, 6)
+        self.assertIn(bytes.fromhex("20 2f 00 04"), image.body)
+        self.assertIn(bytes.fromhex("02 81 00 00 ff ff"), image.body)
+        self.assertIn(bytes.fromhex("00 81 00 58 00 00"), image.body)
+        self.assertIn(bytes.fromhex("22 10"), image.body)
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
+
+    def test_build_minimal_smartapplet_image_can_emit_post_shutdown_command_fault_probe(self) -> None:
+        raw = build_minimal_smartapplet_image(
+            applet_id=0xA128,
+            name="USB Cmd Probe",
+            version_major_bcd=0x01,
+            version_minor_bcd=0x07,
+            command_fault_after_shutdown_probe=True,
+        )
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(image.metadata.version_minor, 7)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 19 66 06 72 07 20 81 4e 75"), image.body)
+        self.assertIn(bytes.fromhex("00 81 00 58 00 00"), image.body)
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
 
     def test_calculator_entry_abi_matches_recovered_dispatch_contract(self) -> None:
         image = parse_os3kapp_image((FIXTURE_DIR / "calculator.os3kapp").read_bytes())

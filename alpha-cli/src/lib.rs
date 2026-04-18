@@ -30,6 +30,7 @@ pub mod usb {
     pub enum NeoMode {
         Missing,
         Hid,
+        HidUnavailable,
         Direct,
     }
 

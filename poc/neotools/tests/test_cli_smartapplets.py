@@ -1,15 +1,415 @@
 import io
 from pathlib import Path
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 
 from neotools import main
+from neotools.os3kapp_format import parse_os3kapp_image
 
 
 FIXTURE_DIR = Path("/Users/jakubkolcar/customs/neo-re/analysis/cab")
 
 
 class SmartAppletCliTests(unittest.TestCase):
+    def test_build_benign_smartapplet_writes_menu_visible_image(self) -> None:
+        output = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "direct-usb-test.os3kapp"
+            with redirect_stdout(output):
+                exit_code = main(["build-benign-smartapplet", "--output", str(output_path)])
+
+            raw = output_path.read_bytes()
+
+        image = parse_os3kapp_image(raw)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA123)
+        self.assertEqual(image.metadata.name, "Direct USB Test")
+        self.assertEqual(image.entry_offset, 0x94)
+        self.assertEqual(image.body_prefix_words, (0x94, 0, 1, 2))
+        self.assertEqual(image.body[-6:-4], bytes.fromhex("4e 75"))
+        self.assertEqual(image.body[-4:], bytes.fromhex("ca fe fe ed"))
+        self.assertIn("applet_id=0xa123 name=Direct USB Test\n", output.getvalue())
+
+    def test_build_benign_smartapplet_can_emit_direct_callback_experiment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "direct-usb-test.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--direct-mode-callback",
+                    "0x00410b26",
+                ]
+            )
+
+            image = parse_os3kapp_image(output_path.read_bytes())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.version_minor, 1)
+        self.assertIn(bytes.fromhex("4e b9 00 41 0b 26"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_direct_command_handler_experiment(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-direct.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa124",
+                    "--name",
+                    "USB Direct",
+                    "--direct-mode-callback",
+                    "0x00410b26",
+                    "--direct-mode-command-handler",
+                ]
+            )
+
+            image = parse_os3kapp_image(output_path.read_bytes())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA124)
+        self.assertEqual(image.metadata.name, "USB Direct")
+        self.assertEqual(image.metadata.version_minor, 2)
+        self.assertIn(bytes.fromhex("0c 81 00 04 00 00"), image.body)
+        self.assertIn(b"Opening direct USB...\x00", image.body)
+
+    def test_build_benign_smartapplet_can_emit_menu_command_screen_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-menu.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa129",
+                    "--name",
+                    "USB Menu Probe",
+                    "--draw-on-menu-command",
+                ]
+            )
+
+            image = parse_os3kapp_image(output_path.read_bytes())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA129)
+        self.assertEqual(image.metadata.name, "USB Menu Probe")
+        self.assertEqual(image.metadata.version_minor, 8)
+        self.assertIn(bytes.fromhex("70 55 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 53 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 42 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("a0 10 a0 98 a2 5c"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_direct_arm_menu_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-menu.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa129",
+                    "--name",
+                    "USB Menu Probe",
+                    "--draw-on-menu-command",
+                    "--arm-direct-on-menu",
+                ]
+            )
+
+            image = parse_os3kapp_image(output_path.read_bytes())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA129)
+        self.assertEqual(image.metadata.name, "USB Menu Probe")
+        self.assertEqual(image.metadata.version_minor, 9)
+        self.assertIn(bytes.fromhex("4e b9 00 42 4f 66"), image.body)
+        self.assertIn(bytes.fromhex("48 79 00 41 0b 26"), image.body)
+        self.assertIn(bytes.fromhex("70 41 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 52 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4d 2f 00 61 00"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_host_usb_message_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-menu.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa129",
+                    "--name",
+                    "USB Menu Probe",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                ]
+            )
+
+            image = parse_os3kapp_image(output_path.read_bytes())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA129)
+        self.assertEqual(image.metadata.name, "USB Menu Probe")
+        self.assertEqual(image.metadata.version_minor, 10)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 20"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 21"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 00 00 26"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 01 00 01"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 02 00 01"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 01 00 03"), image.body)
+        self.assertIn(bytes.fromhex("0c 80 00 02 00 02"), image.body)
+        self.assertIn(bytes.fromhex("70 48 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4f 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 53 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 54 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4c 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 49 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4e 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("70 4b 2f 00 61 00"), image.body)
+        self.assertIn(bytes.fromhex("22 3c 00 00 a1 29 20 81 4e 75"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_alphaword_write_metadata_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-menu.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa129",
+                    "--name",
+                    "USB Menu Probe",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                    "--alphaword-write-metadata",
+                ]
+            )
+
+            raw = output_path.read_bytes()
+            image = parse_os3kapp_image(raw)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.version_minor, 11)
+        self.assertEqual(image.metadata.flags_raw, 0xFF0000CE)
+        self.assertEqual(image.metadata.extra_memory_size, 0x2000)
+        self.assertEqual(raw[-4:], bytes.fromhex("ca fe fe ed"))
+        self.assertEqual(len(image.info_records), 9)
+        self.assertIn((0xC001, 0x8011, "write"), [(r.group, r.key, r.text) for r in image.info_records])
+        self.assertIn((0xC001, 0x8018, "write"), [(r.group, r.key, r.text) for r in image.info_records])
+
+    def test_build_benign_smartapplet_can_emit_alphaword_state_machine_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-menu.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa129",
+                    "--name",
+                    "USB Menu Probe",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                    "--alphaword-write-metadata",
+                    "--alphaword-state-machine-probe",
+                ]
+            )
+
+            raw = output_path.read_bytes()
+            image = parse_os3kapp_image(raw)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.version_minor, 12)
+        self.assertEqual(image.metadata.header.base_memory_size, 0x240)
+        self.assertEqual(image.metadata.extra_memory_size, 0x2000)
+        self.assertIn(bytes.fromhex("0c 80 00 03 00 01"), image.body)
+        self.assertIn(bytes.fromhex("28 3c 00 00 01 43 1b bc 00 01 48 00"), image.body)
+        self.assertEqual(raw[-4:], bytes.fromhex("ca fe fe ed"))
+
+    def test_build_benign_smartapplet_can_emit_safe_alphaword_init_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-init.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa12b",
+                    "--name",
+                    "USB Init Probe",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                    "--alphaword-write-metadata",
+                    "--alphaword-init-command-probe",
+                ]
+            )
+
+            raw = output_path.read_bytes()
+            image = parse_os3kapp_image(raw)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA12B)
+        self.assertEqual(image.metadata.version_minor, 13)
+        self.assertEqual(image.metadata.extra_memory_size, 0x2000)
+        self.assertIn(bytes.fromhex("0c 80 00 03 00 01"), image.body)
+        self.assertNotIn(bytes.fromhex("1b bc 00 01 48 00"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_alphaword_init_fault_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-fault.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa12c",
+                    "--name",
+                    "USB Fault Probe",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                    "--alphaword-write-metadata",
+                    "--alphaword-init-fault-probe",
+                ]
+            )
+
+            raw = output_path.read_bytes()
+            image = parse_os3kapp_image(raw)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA12C)
+        self.assertEqual(image.metadata.version_minor, 14)
+        self.assertIn(bytes.fromhex("20 7c 00 58 10 01 22 10"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_silent_alphaword_init_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-silent.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa12d",
+                    "--name",
+                    "USB Silent Probe",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                    "--alphaword-write-metadata",
+                    "--alphaword-init-fault-probe",
+                    "--alphaword-silent-init-probe",
+                ]
+            )
+
+            raw = output_path.read_bytes()
+            image = parse_os3kapp_image(raw)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA12D)
+        self.assertEqual(image.metadata.version_minor, 15)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
+        self.assertIn(bytes.fromhex("20 7c 00 58 f0 0d 22 10"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_switch_on_init_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-switch.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa12e",
+                    "--name",
+                    "USB Switch Probe",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                    "--alphaword-write-metadata",
+                    "--alphaword-init-fault-probe",
+                    "--alphaword-switch-on-init-probe",
+                ]
+            )
+
+            raw = output_path.read_bytes()
+            image = parse_os3kapp_image(raw)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA12E)
+        self.assertEqual(image.metadata.version_minor, 16)
+        self.assertEqual(image.metadata.extra_memory_size, 0x2000)
+        self.assertIn(bytes.fromhex("4e b9 00 41 0b 26 72 11 20 81 4e 75"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_hid_completion_switch_probe(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "usb-hid-complete.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa12f",
+                    "--name",
+                    "USB HID Complete",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                    "--alphaword-write-metadata",
+                    "--alphaword-init-fault-probe",
+                    "--alphaword-hid-complete-switch-probe",
+                ]
+            )
+
+            image = parse_os3kapp_image(output_path.read_bytes())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA12F)
+        self.assertEqual(image.metadata.version_minor, 17)
+        self.assertIn(bytes.fromhex("13 fc 00 01 00 01 3c f9"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 44 04 4e"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 44 04 7c"), image.body)
+
+    def test_build_benign_smartapplet_can_emit_alpha_usb_production_applet(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "alpha-usb.os3kapp"
+            exit_code = main(
+                [
+                    "build-benign-smartapplet",
+                    "--output",
+                    str(output_path),
+                    "--applet-id",
+                    "0xa130",
+                    "--name",
+                    "Alpha USB",
+                    "--draw-on-menu-command",
+                    "--host-usb-message-handler",
+                    "--alphaword-write-metadata",
+                    "--alpha-usb-production",
+                ]
+            )
+
+            image = parse_os3kapp_image(output_path.read_bytes())
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(image.metadata.applet_id, 0xA130)
+        self.assertEqual(image.metadata.name, "Alpha USB")
+        self.assertEqual(image.metadata.version_minor, 18)
+        self.assertIn(bytes.fromhex("13 fc 00 01 00 01 3c f9"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 44 04 4e"), image.body)
+        self.assertIn(bytes.fromhex("4e b9 00 44 04 7c"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 30 01 22 10"), image.body)
+        self.assertNotIn(bytes.fromhex("20 7c 00 58 f0 0d 22 10"), image.body)
+
     def test_smartapplet_header_prints_derived_add_applet_fields(self) -> None:
         output = io.StringIO()
         header_hex = (

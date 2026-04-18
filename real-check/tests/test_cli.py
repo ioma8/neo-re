@@ -1,5 +1,6 @@
 import contextlib
 import io
+import tempfile
 import unittest
 from unittest import mock
 
@@ -21,9 +22,15 @@ class CLITests(unittest.TestCase):
         self.assertIn("probe", stdout.getvalue())
         self.assertIn("watch", stdout.getvalue())
         self.assertIn("switch-to-direct", stdout.getvalue())
+        self.assertIn("switch-hid-sequence", stdout.getvalue())
         self.assertIn("debug-attributes", stdout.getvalue())
         self.assertIn("list", stdout.getvalue())
         self.assertIn("applets", stdout.getvalue())
+        self.assertIn("debug-applets", stdout.getvalue())
+        self.assertIn("install-applet", stdout.getvalue())
+        self.assertIn("remove-applet-index", stdout.getvalue())
+        self.assertIn("clear-applet-area", stdout.getvalue())
+        self.assertIn("restart-device", stdout.getvalue())
         self.assertIn("verify-get", stdout.getvalue())
         self.assertIn("get", stdout.getvalue())
 
@@ -173,6 +180,149 @@ class CLITests(unittest.TestCase):
 
     @mock.patch("real_check.open_direct_usb_transport")
     @mock.patch("real_check.NeoAlphaWordClient")
+    def test_debug_applets_command_prints_raw_trace(self, client_cls: mock.Mock, open_transport: mock.Mock) -> None:
+        client = client_cls.return_value
+        client.debug_smart_applet_records.return_value = ["page_offset=0 status=0x44", "row=0 record=..."]
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["debug-applets"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "page_offset=0 status=0x44\nrow=0 record=...\n")
+        open_transport.assert_called_once()
+        client.debug_smart_applet_records.assert_called_once()
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_dump_applet_command_writes_payload_file_and_prints_summary(
+        self, client_cls: mock.Mock, open_transport: mock.Mock
+    ) -> None:
+        client = client_cls.return_value
+        client.download_smart_applet.return_value = b"ABCDE"
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = f"{tmpdir}/system.os3kapp"
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["dump-applet", "0x0", "--output", output_path])
+            with open(output_path, "rb") as handle:
+                written = handle.read()
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(written, b"ABCDE")
+        self.assertEqual(stdout.getvalue(), f"applet_id=0x0000 bytes_read=5 output={output_path}\n")
+        open_transport.assert_called_once()
+        client.download_smart_applet.assert_called_once_with(applet_id=0)
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_install_applet_command_reads_image_and_prints_summary(
+        self, client_cls: mock.Mock, open_transport: mock.Mock
+    ) -> None:
+        client = client_cls.return_value
+        client.install_smart_applet.return_value = SmartAppletEntry(
+            applet_id=0xA123,
+            version_major=1,
+            version_minor=0,
+            name="Direct USB Test",
+            file_size=176,
+            applet_class=0x01,
+        )
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = f"{tmpdir}/direct-usb-test.os3kapp"
+            with open(input_path, "wb") as handle:
+                handle.write(b"APPLET")
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["install-applet", input_path])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            stdout.getvalue(),
+            "installed applet_id=0xa123 version=1.0 name=Direct USB Test file_size=176 applet_class=0x01\n",
+        )
+        open_transport.assert_called_once()
+        client.install_smart_applet.assert_called_once_with(b"APPLET")
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_install_applet_command_can_skip_updater_bootstrap(
+        self, client_cls: mock.Mock, open_transport: mock.Mock
+    ) -> None:
+        client = client_cls.return_value
+        client.install_smart_applet.return_value = SmartAppletEntry(
+            applet_id=0xA123,
+            version_major=1,
+            version_minor=0,
+            name="Direct USB Test",
+            file_size=176,
+            applet_class=0x01,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            input_path = f"{tmpdir}/direct-usb-test.os3kapp"
+            with open(input_path, "wb") as handle:
+                handle.write(b"APPLET")
+            exit_code = main(["install-applet", input_path, "--assume-updater"])
+
+        self.assertEqual(exit_code, 0)
+        open_transport.assert_called_once()
+        client.assume_updater_mode.assert_called_once()
+        client.install_smart_applet.assert_called_once_with(b"APPLET")
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_remove_applet_index_command_prints_summary(self, client_cls: mock.Mock, open_transport: mock.Mock) -> None:
+        client = client_cls.return_value
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["remove-applet-index", "7"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "removed applet_index=7\n")
+        open_transport.assert_called_once()
+        client.remove_smart_applet_by_index.assert_called_once_with(index=7)
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_clear_applet_area_command_prints_summary(self, client_cls: mock.Mock, open_transport: mock.Mock) -> None:
+        client = client_cls.return_value
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["clear-applet-area"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "cleared SmartApplet area\n")
+        open_transport.assert_called_once()
+        client.clear_smart_applet_area.assert_called_once()
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_restart_device_command_prints_summary(self, client_cls: mock.Mock, open_transport: mock.Mock) -> None:
+        client = client_cls.return_value
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["restart-device"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(stdout.getvalue(), "sent restart command\n")
+        open_transport.assert_called_once()
+        client.restart_device.assert_called_once()
+        client.close.assert_called_once()
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
     def test_verify_get_command_prints_summary_without_payload(
         self, client_cls: mock.Mock, open_transport: mock.Mock
     ) -> None:
@@ -237,6 +387,34 @@ class CLITests(unittest.TestCase):
         self.assertEqual(exit_code, 1)
         send_manager_switch_sequence.assert_called_once()
         self.assertEqual(stderr.getvalue(), "USB HID GET_REPORT failed\n")
+
+    @mock.patch("real_check.send_hid_output_report_sequence", return_value=ManagerSwitchResult(reports_sent=5))
+    def test_switch_hid_sequence_command_prints_sent_report_count(
+        self, send_hid_output_report_sequence: mock.Mock
+    ) -> None:
+        stdout = io.StringIO()
+
+        with contextlib.redirect_stdout(stdout):
+            exit_code = main(["switch-hid-sequence", "e0,e1", "e2", "e3", "e4", "--wait", "0"])
+
+        self.assertEqual(exit_code, 0)
+        send_hid_output_report_sequence.assert_called_once_with(
+            (0xE0, 0xE1, 0xE2, 0xE3, 0xE4),
+            delay_seconds=2.0,
+            wait_for_direct_seconds=0.0,
+        )
+        self.assertEqual(stdout.getvalue(), "sent_hid_reports=5\n")
+
+    @mock.patch("real_check.send_hid_output_report_sequence")
+    def test_switch_hid_sequence_command_prints_parse_error(self, send_hid_output_report_sequence: mock.Mock) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            exit_code = main(["switch-hid-sequence", "100"])
+
+        self.assertEqual(exit_code, 1)
+        send_hid_output_report_sequence.assert_not_called()
+        self.assertEqual(stderr.getvalue(), "invalid HID report byte: 0x100\n")
 
 
 if __name__ == "__main__":

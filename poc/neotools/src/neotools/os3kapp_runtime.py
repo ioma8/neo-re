@@ -879,8 +879,26 @@ def build_minimal_smartapplet_image(
     base_memory_size: int = 0x100,
     extra_memory_size: int = 0,
     copyright: str = "Custom SmartApplet",
+    direct_mode_callback: int | None = None,
+    direct_mode_command_handler: bool = False,
+    stay_open_on_init: bool = False,
+    calculator_style_menu: bool = False,
+    draw_on_any_command: bool = False,
+    draw_on_menu_command: bool = False,
+    arm_direct_on_menu: bool = False,
+    host_usb_message_handler: bool = False,
+    alphaword_write_metadata: bool = False,
+    alphaword_state_machine_probe: bool = False,
+    alphaword_init_command_probe: bool = False,
+    alphaword_init_fault_probe: bool = False,
+    alphaword_silent_init_probe: bool = False,
+    alphaword_switch_on_init_probe: bool = False,
+    alphaword_hid_complete_switch_probe: bool = False,
+    alpha_usb_production: bool = False,
+    command_fault_probe: bool = False,
+    command_fault_after_shutdown_probe: bool = False,
 ) -> bytes:
-    # Entry code:
+    # Benign entry code:
     #   movea.l 0x0c(a7),a0
     #   clr.l   (a0)
     #   move.l  0x04(a7),d0
@@ -890,23 +908,515 @@ def build_minimal_smartapplet_image(
     #   move.l  d1,(a0)
     # return:
     #   rts
-    entry_code = bytes.fromhex(
-        "20 6f 00 0c"
-        " 42 90"
-        " 20 2f 00 04"
-        " 0c 80 00 00 00 19"
-        " 66 04"
-        " 72 07"
-        " 20 81"
-        " 4e 75"
-    )
-    payload = (
-        (0x94).to_bytes(4, "big")
-        + (0).to_bytes(4, "big")
-        + (1).to_bytes(4, "big")
-        + (2).to_bytes(4, "big")
-        + entry_code
-    )
+    def branch_short(opcode: int, from_offset: int, target_offset: int) -> bytes:
+        displacement = target_offset - (from_offset + 2)
+        if not -128 <= displacement <= 127:
+            raise ValueError("short branch target is out of range")
+        return bytes([opcode, displacement & 0xFF])
+
+    def patch_branch_word(code: bytearray, from_offset: int, target_offset: int) -> None:
+        displacement = target_offset - (from_offset + 2)
+        if not -32768 <= displacement <= 32767:
+            raise ValueError("word branch target is out of range")
+        code[from_offset + 2 : from_offset + 4] = displacement.to_bytes(2, "big", signed=True)
+
+    def build_info_record(group: int, key: int, payload: bytes) -> bytes:
+        record = (
+            group.to_bytes(2, "big")
+            + key.to_bytes(2, "big")
+            + len(payload).to_bytes(2, "big")
+            + payload
+        )
+        if len(payload) & 1:
+            record += b"\x00"
+        return record
+
+    def build_alphaword_write_info_table() -> bytes:
+        write_payload = b"write\x00"
+        records = [build_info_record(0x0105, 0x100B, write_payload)]
+        records.extend(build_info_record(0xC001, key, write_payload) for key in range(0x8011, 0x8019))
+        return b"".join(records) + bytes.fromhex("00 00 00 00 00 00 00 00 ca fe fe ed")
+
+    if command_fault_after_shutdown_probe:
+        entry_code = bytes.fromhex(
+            "20 6f 00 0c"  # movea.l 0x0c(a7),a0 ; status_out
+            "42 90"  # clr.l (a0)
+            "20 2f 00 04"  # move.l 0x04(a7),d0 ; command
+            "0c 80 00 00 00 19"  # cmpi.l #0x19,d0
+            "66 06"  # bne.s fault
+            "72 07"  # moveq #7,d1
+            "20 81"  # move.l d1,(a0)
+            "4e 75"  # rts
+            "22 00"  # move.l d0,d1
+            "02 81 00 00 ff ff"  # andi.l #0x0000ffff,d1
+            "00 81 00 58 00 00"  # ori.l #0x00580000,d1
+            "20 41"  # movea.l d1,a0
+            "22 10"  # move.l (a0),d1 ; intentional fault
+            "4e 75"  # rts
+        )
+    elif command_fault_probe:
+        entry_code = bytes.fromhex(
+            "20 2f 00 04"  # move.l 0x04(a7),d0 ; command
+            "22 00"  # move.l d0,d1
+            "02 81 00 00 ff ff"  # andi.l #0x0000ffff,d1
+            "00 81 00 58 00 00"  # ori.l #0x00580000,d1
+            "20 41"  # movea.l d1,a0
+            "22 10"  # move.l (a0),d1 ; intentional fault, address encodes command low word
+            "4e 75"  # rts
+        )
+    elif draw_on_menu_command or draw_on_any_command:
+        stub_calls: list[tuple[int, int]] = []
+
+        def append_stub_call(code: bytearray, opcode: int) -> None:
+            call_offset = len(code)
+            code.extend(bytes.fromhex("61 00 00 00"))  # bsr.w trap_stub, patched after stubs are emitted
+            stub_calls.append((call_offset, opcode))
+
+        def append_branch_word(code: bytearray, opcode: int) -> int:
+            branch_offset = len(code)
+            code.extend(bytes([opcode, 0x00, 0x00, 0x00]))
+            return branch_offset
+
+        def append_text_screen(code: bytearray, text: bytes) -> None:
+            append_stub_call(code, 0xA000)  # clear_text_screen()
+            code.extend(bytes.fromhex("2f 3c 00 00 00 1c"))  # push width 28
+            code.extend(bytes.fromhex("2f 3c 00 00 00 01"))  # push column 1
+            code.extend(bytes.fromhex("2f 3c 00 00 00 02"))  # push row 2
+            append_stub_call(code, 0xA004)  # set_text_row_column_width(row, column, width)
+            code.extend(bytes.fromhex("4f ef 00 0c"))  # lea 12(a7),a7
+            for character in text:
+                code.extend(bytes([0x70, character]))  # moveq #character,d0
+                code.extend(bytes.fromhex("2f 00"))  # move.l d0,-(a7)
+                append_stub_call(code, 0xA010)  # draw character
+                code.extend(bytes.fromhex("58 8f"))  # addq.l #4,a7
+            append_stub_call(code, 0xA098)  # flush_text_frame()
+
+        def append_idle_loop(code: bytearray) -> None:
+            append_stub_call(code, 0xA25C)  # yield_until_event()
+            code.extend(bytes.fromhex("60 fa"))  # bra.s yield loop
+
+        def append_alphaword_attach_state(code: bytearray, *, mac_side: bool) -> None:
+            code.extend(bytes.fromhex("28 3c 00 00 01 38"))  # move.l #0x138,d4
+            code.extend(bytes.fromhex("1b bc 00 01 48 00"))  # move.b #1,(a5,d4.l)
+            code.extend(bytes.fromhex("28 3c 00 00 01 42"))  # move.l #0x142,d4
+            code.extend(bytes.fromhex("42 35 48 00"))  # clr.b (a5,d4.l)
+            code.extend(bytes.fromhex("28 3c 00 00 01 43"))  # move.l #0x143,d4
+            if mac_side:
+                code.extend(bytes.fromhex("1b bc 00 01 48 00"))  # move.b #1,(a5,d4.l)
+            else:
+                code.extend(bytes.fromhex("42 35 48 00"))  # clr.b (a5,d4.l)
+            code.extend(bytes.fromhex("28 3c 00 00 00 bc"))  # move.l #0xbc,d4
+            code.extend(bytes.fromhex("42 35 48 00"))  # clr.b (a5,d4.l)
+
+        def append_intentional_fault(code: bytearray, address: int) -> None:
+            code.extend(bytes.fromhex("20 7c"))  # movea.l #address,a0
+            code.extend(address.to_bytes(4, "big"))
+            code.extend(bytes.fromhex("22 10"))  # move.l (a0),d1
+            code.extend(bytes.fromhex("4e 75"))  # rts, normally unreachable
+
+        def append_status_return(code: bytearray, status: int) -> None:
+            code.extend(bytes.fromhex("72"))
+            code.extend(bytes([status & 0xFF]))  # moveq #status,d1
+            code.extend(bytes.fromhex("20 81"))  # move.l d1,(a0)
+            code.extend(bytes.fromhex("4e 75"))  # rts
+
+        code = bytearray(
+            bytes.fromhex(
+                "20 6f 00 0c"  # movea.l 0x0c(a7),a0 ; status_out
+                " 42 90"  # clr.l (a0)
+                " 20 2f 00 04"  # move.l 0x04(a7),d0 ; command
+                " 0c 80 00 00 00 18"  # cmpi.l #0x18,d0
+            )
+        )
+        beq_init_return_offset = append_branch_word(code, 0x67)  # beq.w return
+        if draw_on_menu_command:
+            code.extend(
+                bytes.fromhex(
+                    " 0c 80 00 00 00 19"  # cmpi.l #0x19,d0
+                )
+            )
+            beq_menu_offset = append_branch_word(code, 0x67)  # beq.w draw_menu
+            beq_usb_offsets: list[int] = []
+            if direct_mode_callback is not None:
+                if not 0 <= direct_mode_callback <= 0xFFFFFFFF:
+                    raise ValueError("direct mode callback address must fit in 32 bits")
+                for event_command in (0x20, 0x21):
+                    code.extend(bytes.fromhex("0c 80") + event_command.to_bytes(4, "big"))  # cmpi.l #event,d0
+                    beq_usb_offsets.append(append_branch_word(code, 0x67))  # beq.w draw_usb
+            beq_host_usb_offsets: list[int] = []
+            beq_host_mac_init_offsets: list[int] = []
+            beq_host_alt_mac_init_offsets: list[int] = []
+            beq_host_pc_init_offsets: list[int] = []
+            beq_identity_offsets: list[int] = []
+            if host_usb_message_handler:
+                for event_command in (0x20, 0x21):
+                    code.extend(bytes.fromhex("0c 80") + event_command.to_bytes(4, "big"))
+                    beq_host_usb_offsets.append(append_branch_word(code, 0x67))  # beq.w draw_host_usb
+                code.extend(bytes.fromhex("0c 80 00 00 00 26"))  # cmpi.l #0x26,d0
+                beq_identity_offsets.append(append_branch_word(code, 0x67))  # beq.w identity
+                code.extend(bytes.fromhex("0c 80 00 01 00 01"))  # cmpi.l #0x10001,d0
+                beq_host_mac_init_offsets.append(append_branch_word(code, 0x67))  # beq.w draw_host_mac_init
+                code.extend(bytes.fromhex("0c 80 00 03 00 01"))  # cmpi.l #0x30001,d0
+                beq_host_alt_mac_init_offsets.append(append_branch_word(code, 0x67))  # beq.w draw_host_alt_mac_init
+                code.extend(bytes.fromhex("0c 80 00 02 00 01"))  # cmpi.l #0x20001,d0
+                beq_host_pc_init_offsets.append(append_branch_word(code, 0x67))  # beq.w draw_host_pc_init
+                for event_command in (0x00010003, 0x00010006, 0x00020002, 0x00020006, 0x0002011F):
+                    code.extend(bytes.fromhex("0c 80") + event_command.to_bytes(4, "big"))
+                    beq_host_usb_offsets.append(append_branch_word(code, 0x67))  # beq.w draw_host_usb
+            bra_return_offset = append_branch_word(code, 0x60)  # bra.w return
+        else:
+            compare_shutdown_offset = len(code)
+            code.extend(
+                bytes.fromhex(
+                    " 0c 80 00 00 00 19"  # cmpi.l #0x19,d0
+                    " 66 00"  # bne.s draw
+                    " 72 07"  # moveq #7,d1
+                    " 20 81"  # move.l d1,(a0)
+                    " 4e 75"  # rts
+                )
+            )
+            shutdown_return_offset = len(code) - 2
+            bne_draw_offset = compare_shutdown_offset + 6
+        return_offset = len(code)
+        code.extend(bytes.fromhex("4e 75"))  # rts
+        if draw_on_menu_command:
+            draw_menu_offset = len(code)
+            if arm_direct_on_menu:
+                code.extend(bytes.fromhex("42 a7"))  # clr.l -(a7)
+                code.extend(bytes.fromhex("4e b9 00 42 6b b0"))  # jsr 0x00426bb0
+                code.extend(bytes.fromhex("13 fc 00 00 00 00 04 44"))  # clr.b-like absolute state reset
+                code.extend(bytes.fromhex("4e b9 00 41 2c 82"))  # jsr 0x00412c82
+                code.extend(bytes.fromhex("4e b9 00 41 09 ca"))  # jsr 0x004109ca
+                code.extend(bytes.fromhex("48 79 00 01 11 11"))  # pea.l 0x00011111
+                code.extend(bytes.fromhex("48 78 25 80"))  # pea.l 0x2580.w
+                code.extend(bytes.fromhex("4e b9 00 42 4f b0"))  # jsr 0x00424fb0
+                code.extend(bytes.fromhex("48 79 00 41 0b 26"))  # pea.l 0x00410b26
+                code.extend(bytes.fromhex("4e b9 00 42 4f 66"))  # jsr 0x00424f66
+                code.extend(bytes.fromhex("4f ef 00 10"))  # lea 16(a7),a7
+            if alpha_usb_production:
+                append_text_screen(code, b"Alpha USB")
+            else:
+                append_text_screen(code, b"ARM" if arm_direct_on_menu else b"USB")
+            append_idle_loop(code)
+            draw_usb_offset = len(code)
+            if direct_mode_callback is not None:
+                append_text_screen(code, b"DIR")
+                code.extend(bytes.fromhex("4e b9"))  # jsr direct_mode_callback
+                code.extend(direct_mode_callback.to_bytes(4, "big"))
+                append_idle_loop(code)
+            draw_host_usb_offset = len(code)
+            if host_usb_message_handler:
+                if alpha_usb_production:
+                    append_status_return(code, 0x04)
+                elif alphaword_init_fault_probe:
+                    append_intentional_fault(code, 0x0058F00D)
+                else:
+                    append_text_screen(code, b"HOST")
+                    append_status_return(code, 0x04)
+            draw_host_mac_init_offset = len(code)
+            if host_usb_message_handler:
+                if alpha_usb_production:
+                    append_status_return(code, 0x11)
+                elif alphaword_init_fault_probe:
+                    append_intentional_fault(code, 0x00581001)
+                else:
+                    if alphaword_state_machine_probe:
+                        append_alphaword_attach_state(code, mac_side=True)
+                    append_text_screen(code, b"N1" if alphaword_init_command_probe else b"LINK")
+                    append_status_return(code, 0x11)
+            draw_host_alt_mac_init_offset = len(code)
+            if host_usb_message_handler:
+                if alphaword_hid_complete_switch_probe or alpha_usb_production:
+                    code.extend(bytes.fromhex("42 a7"))  # clr.l -(a7)
+                    code.extend(bytes.fromhex("42 a7"))  # clr.l -(a7)
+                    code.extend(bytes.fromhex("48 78 00 01"))  # pea.l 1
+                    code.extend(bytes.fromhex("4e b9 00 41 f9 a0"))  # jsr HID/control write helper
+                    code.extend(bytes.fromhex("48 78 00 64"))  # pea.l 100
+                    code.extend(bytes.fromhex("4e b9 00 42 47 80"))  # jsr delay helper
+                    code.extend(bytes.fromhex("13 fc 00 01 00 01 3c f9"))  # move.b #1,$13cf9
+                    code.extend(bytes.fromhex("4e b9 00 44 04 4e"))  # jsr HID completion phase 1
+                    code.extend(bytes.fromhex("48 78 00 64"))  # pea.l 100
+                    code.extend(bytes.fromhex("4e b9 00 42 47 80"))  # jsr delay helper
+                    code.extend(bytes.fromhex("4f ef 00 14"))  # lea.l 0x14(a7),a7
+                    code.extend(bytes.fromhex("4e b9 00 44 04 7c"))  # jsr HID completion phase 2
+                    append_status_return(code, 0x11)
+                elif alphaword_switch_on_init_probe:
+                    code.extend(bytes.fromhex("4e b9 00 41 0b 26"))  # jsr direct-mode callback
+                    append_status_return(code, 0x11)
+                elif alphaword_silent_init_probe:
+                    append_status_return(code, 0x11)
+                elif alphaword_init_fault_probe:
+                    append_intentional_fault(code, 0x00583001)
+                else:
+                    if alphaword_state_machine_probe:
+                        append_alphaword_attach_state(code, mac_side=True)
+                    append_text_screen(code, b"N3" if alphaword_init_command_probe else b"LINK")
+                    append_status_return(code, 0x11)
+            draw_host_pc_init_offset = len(code)
+            if host_usb_message_handler:
+                if alpha_usb_production:
+                    append_status_return(code, 0x11)
+                elif alphaword_init_fault_probe:
+                    append_intentional_fault(code, 0x00582001)
+                else:
+                    if alphaword_state_machine_probe:
+                        append_alphaword_attach_state(code, mac_side=False)
+                    append_text_screen(code, b"PC")
+                    append_status_return(code, 0x11)
+            identity_offset = len(code)
+            if host_usb_message_handler:
+                code.extend(bytes.fromhex("22 3c"))  # move.l #applet_id,d1
+                code.extend(applet_id.to_bytes(4, "big"))
+                code.extend(bytes.fromhex("20 81"))  # move.l d1,(a0)
+                code.extend(bytes.fromhex("4e 75"))  # rts
+            patch_branch_word(code, beq_menu_offset, draw_menu_offset)
+            for beq_usb_offset in beq_usb_offsets:
+                patch_branch_word(code, beq_usb_offset, draw_usb_offset)
+            for beq_host_usb_offset in beq_host_usb_offsets:
+                patch_branch_word(code, beq_host_usb_offset, draw_host_usb_offset)
+            for beq_host_mac_init_offset in beq_host_mac_init_offsets:
+                patch_branch_word(code, beq_host_mac_init_offset, draw_host_mac_init_offset)
+            for beq_host_alt_mac_init_offset in beq_host_alt_mac_init_offsets:
+                patch_branch_word(code, beq_host_alt_mac_init_offset, draw_host_alt_mac_init_offset)
+            for beq_host_pc_init_offset in beq_host_pc_init_offsets:
+                patch_branch_word(code, beq_host_pc_init_offset, draw_host_pc_init_offset)
+            for beq_identity_offset in beq_identity_offsets:
+                patch_branch_word(code, beq_identity_offset, identity_offset)
+            patch_branch_word(code, bra_return_offset, return_offset)
+        else:
+            draw_offset = len(code)
+            code[bne_draw_offset : bne_draw_offset + 2] = branch_short(0x66, bne_draw_offset, draw_offset)
+            append_text_screen(code, b"USB")
+            append_idle_loop(code)
+        patch_branch_word(code, beq_init_return_offset, return_offset)
+        stub_offsets: dict[int, int] = {}
+        for opcode in (0xA000, 0xA004, 0xA010, 0xA098, 0xA25C):
+            stub_offsets[opcode] = len(code)
+            code.extend(opcode.to_bytes(2, "big"))
+        for call_offset, opcode in stub_calls:
+            displacement = stub_offsets[opcode] - (call_offset + 2)
+            code[call_offset + 2 : call_offset + 4] = displacement.to_bytes(2, "big", signed=True)
+        entry_code = bytes(code)
+    elif calculator_style_menu:
+        message = b"USB Direct open\x00"
+        code = bytearray(
+            bytes.fromhex(
+                "20 6f 00 0c"  # movea.l 0x0c(a7),a0 ; status_out
+                " 42 90"  # clr.l (a0)
+                " 22 6f 00 08"  # movea.l 0x08(a7),a1 ; call_block
+                " 20 2f 00 04"  # move.l 0x04(a7),d0 ; command
+                " 0c 80 00 00 00 19"  # cmpi.l #0x19,d0
+                " 66 00"  # bne.s not_shutdown
+                " 72 07"  # moveq #7,d1
+                " 20 81"  # move.l d1,(a0)
+                " 4e 75"  # rts
+            )
+        )
+        code[20:22] = branch_short(0x66, 20, len(code))
+        code.extend(
+            bytes.fromhex(
+                " 0c 80 00 00 00 18"  # cmpi.l #0x18,d0
+                " 67 00"  # beq.s return_zero
+                " 0c 80 00 00 00 01"  # cmpi.l #1,d0
+                " 67 00"  # beq.s command_1
+                " 0c 80 00 00 00 02"  # cmpi.l #2,d0
+                " 67 00"  # beq.s command_2
+                " 72 01"  # moveq #1,d1
+                " 20 81"  # move.l d1,(a0)
+                " 4e 75"  # rts
+            )
+        )
+        return_zero_offset = len(code)
+        code.extend(bytes.fromhex("4e 75"))
+        command_1_offset = len(code)
+        code.extend(
+            bytes.fromhex(
+                " 24 69 00 10"  # movea.l 0x10(a1),a2 ; output buffer
+                " 42 12"  # clr.b (a2)
+                " 24 69 00 0c"  # movea.l 0x0c(a1),a2 ; &output length
+                " 72 01"  # moveq #1,d1
+                " 24 81"  # move.l d1,(a2)
+                " 20 81"  # move.l d1,(a0)
+                " 4e 75"  # rts
+            )
+        )
+        command_2_offset = len(code)
+        lea_offset = len(code) + 4
+        code.extend(
+            bytes.fromhex(
+                " 26 69 00 10"  # movea.l 0x10(a1),a3 ; output buffer
+                " 45 fa 00 00"  # lea message(pc),a2 ; patched below
+                " 26 8a"  # move.l a2,(a3)
+                " 24 69 00 0c"  # movea.l 0x0c(a1),a2 ; &output length
+                " 72 04"  # moveq #4,d1
+                " 24 81"  # move.l d1,(a2)
+                " 20 81"  # move.l d1,(a0)
+                " 4e 75"  # rts
+            )
+        )
+        code[34:36] = branch_short(0x67, 34, return_zero_offset)
+        code[42:44] = branch_short(0x67, 42, command_1_offset)
+        code[50:52] = branch_short(0x67, 50, command_2_offset)
+        message_offset = len(code)
+        displacement = message_offset - (lea_offset + 4)
+        code[lea_offset + 2 : lea_offset + 4] = displacement.to_bytes(2, "big", signed=True)
+        code.extend(message)
+        entry_code = bytes(code)
+    elif stay_open_on_init:
+        message = b"USB Direct open\x00"
+        code = bytearray(
+            bytes.fromhex(
+                "20 6f 00 0c"  # movea.l 0x0c(a7),a0 ; status_out
+                " 42 90"  # clr.l (a0)
+                " 20 2f 00 04"  # move.l 0x04(a7),d0 ; command
+                " 0c 80 00 00 00 19"  # cmpi.l #0x19,d0
+                " 66 00"  # bne.s not_shutdown
+                " 72 07"  # moveq #7,d1
+                " 20 81"  # move.l d1,(a0)
+                " 4e 75"  # rts
+            )
+        )
+        code[16:18] = branch_short(0x66, 16, len(code))
+        code.extend(
+            bytes.fromhex(
+                " 0c 80 00 00 00 18"  # cmpi.l #0x18,d0
+                " 66 00"  # bne.s return
+                " a0 00"  # clear_text_screen()
+                " 2f 3c 00 00 00 28"  # push width 40
+                " 2f 3c 00 00 00 00"  # push column 0
+                " 2f 3c 00 00 00 00"  # push row 0
+                " a0 04"  # set_text_row_column_width(row, column, width)
+                " 4f ef 00 0c"  # lea 12(a7),a7
+                " 48 7a 00 00"  # pea message(pc), patched below
+                " a0 14"  # draw_c_string_at_current_position(message)
+                " 4f ef 00 04"  # lea 4(a7),a7
+                " a0 98"  # flush_text_frame()
+                " a2 5c"  # yield_until_event()
+                " 60 fc"  # bra.s yield loop
+                " 4e 75"  # rts for non-init commands
+            )
+        )
+        return_offset = len(code) - 2
+        bne_return_offset = 30
+        code[bne_return_offset : bne_return_offset + 2] = branch_short(0x66, bne_return_offset, return_offset)
+        pea_offset = 58
+        message_offset = len(code)
+        displacement = message_offset - (pea_offset + 4)
+        code[pea_offset + 2 : pea_offset + 4] = displacement.to_bytes(2, "big", signed=True)
+        code.extend(message)
+        entry_code = bytes(code)
+    elif direct_mode_callback is None:
+        if direct_mode_command_handler:
+            raise ValueError("direct mode command handler requires a callback address")
+        entry_code = bytes.fromhex(
+            "20 6f 00 0c"
+            " 42 90"
+            " 20 2f 00 04"
+            " 0c 80 00 00 00 19"
+            " 66 04"
+            " 72 07"
+            " 20 81"
+            " 4e 75"
+        )
+    elif direct_mode_command_handler:
+        if not 0 <= direct_mode_callback <= 0xFFFFFFFF:
+            raise ValueError("direct mode callback address must fit in 32 bits")
+        message = b"Opening direct USB...\x00"
+
+        code = bytearray(
+            bytes.fromhex(
+                "20 6f 00 0c"  # movea.l 0x0c(a7),a0 ; status_out
+                " 42 90"  # clr.l (a0)
+                " 20 2f 00 04"  # move.l 0x04(a7),d0 ; command
+                " 0c 80 00 00 00 19"  # cmpi.l #0x19,d0
+                " 66 00"  # bne.s not_shutdown
+                " 72 07"  # moveq #7,d1
+                " 20 81"  # move.l d1,(a0)
+                " 4e 75"  # rts
+            )
+        )
+        code[16:18] = branch_short(0x66, 16, len(code))
+        # Handle applet-private selector namespace 4, including commands such as
+        # 0x00040001 and wider launcher forms whose selector byte is still 0x04.
+        code.extend(
+            bytes.fromhex(
+                " 22 00"  # move.l d0,d1
+                " 02 81 00 ff 00 00"  # andi.l #0x00ff0000,d1
+                " 0c 81 00 04 00 00"  # cmpi.l #0x00040000,d1
+                " 66 00"  # bne.s return
+                " a0 00"  # clear_text_screen()
+                " 2f 3c 00 00 00 28"  # push width 40
+                " 2f 3c 00 00 00 00"  # push column 0
+                " 2f 3c 00 00 00 00"  # push row 0
+                " a0 04"  # set_text_row_column_width(row, column, width)
+                " 4f ef 00 0c"  # lea 12(a7),a7
+                " 48 7a 00 00"  # pea message(pc), patched below
+                " a0 14"  # draw_c_string_at_current_position(message)
+                " 4f ef 00 04"  # lea 4(a7),a7
+                " a0 98"  # flush_text_frame()
+                " 4e b9"  # jsr direct_mode_callback
+            )
+        )
+        code.extend(direct_mode_callback.to_bytes(4, "big"))
+        code.extend(
+            bytes.fromhex(
+                " 70 11"  # moveq #0x11,d0
+                " 20 80"  # move.l d0,(a0)
+                " 4e 75"  # rts
+            )
+        )
+        return_offset = len(code) - 2
+        bne_return_offset = 38
+        code[bne_return_offset : bne_return_offset + 2] = branch_short(0x66, bne_return_offset, return_offset)
+        pea_offset = 66
+        message_offset = len(code)
+        displacement = message_offset - (pea_offset + 4)
+        code[pea_offset + 2 : pea_offset + 4] = displacement.to_bytes(2, "big", signed=True)
+        code.extend(message)
+        entry_code = bytes(code)
+    else:
+        if not 0 <= direct_mode_callback <= 0xFFFFFFFF:
+            raise ValueError("direct mode callback address must fit in 32 bits")
+        # Experimental direct-mode entry code:
+        #   movea.l 0x0c(a7),a0
+        #   clr.l   (a0)
+        #   move.l  0x04(a7),d0
+        #   cmpi.l  #0x18,d0
+        #   bne.s   shutdown_check
+        #   jsr     direct_mode_callback
+        #   bra.s   return
+        # shutdown_check:
+        #   cmpi.l  #0x19,d0
+        #   bne.s   return
+        #   moveq   #7,d1
+        #   move.l  d1,(a0)
+        # return:
+        #   rts
+        entry_code = (
+            bytes.fromhex(
+                "20 6f 00 0c"
+                " 42 90"
+                " 20 2f 00 04"
+                " 0c 80 00 00 00 18"
+                " 66 08"
+                " 4e b9"
+            )
+            + direct_mode_callback.to_bytes(4, "big")
+            + bytes.fromhex(
+                " 60 0c"
+                " 0c 80 00 00 00 19"
+                " 66 04"
+                " 72 07"
+                " 20 81"
+                " 4e 75"
+            )
+        )
+    payload = (0x94).to_bytes(4, "big") + (0).to_bytes(4, "big") + (1).to_bytes(4, "big") + (2).to_bytes(4, "big") + entry_code
+    info_table_bytes = b""
+    if alphaword_write_metadata:
+        info_table_bytes = build_alphaword_write_info_table()
+    else:
+        payload += bytes.fromhex("ca fe fe ed")
     return build_os3kapp_image(
         header_fields=Os3kAppHeaderFields(
             magic=0xC0FFEEAD,
@@ -922,4 +1432,5 @@ def build_minimal_smartapplet_image(
             extra_memory_size=extra_memory_size,
         ),
         payload=payload,
+        info_table_bytes=info_table_bytes,
     )

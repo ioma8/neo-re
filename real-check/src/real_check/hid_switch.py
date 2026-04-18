@@ -290,6 +290,27 @@ def send_manager_switch_sequence(
     delay_seconds: float = 2.0,
     wait_for_direct_seconds: float = 5.0,
 ) -> ManagerSwitchResult:
+    return send_hid_output_report_sequence(
+        MANAGER_SWITCH_SEQUENCE,
+        backend=backend,
+        delay_seconds=delay_seconds,
+        wait_for_direct_seconds=wait_for_direct_seconds,
+    )
+
+
+def send_hid_output_report_sequence(
+    sequence: tuple[int, ...],
+    *,
+    backend: HidBackend | None = None,
+    delay_seconds: float = 2.0,
+    wait_for_direct_seconds: float = 5.0,
+) -> ManagerSwitchResult:
+    if not sequence:
+        raise ValueError("empty HID output-report sequence")
+    for value in sequence:
+        if value < 0 or value > 0xFF:
+            raise ValueError(f"invalid HID report byte: 0x{value:x}")
+
     hid_backend = backend if backend is not None else _default_backend()
     try:
         handle = hid_backend.open_alphasmart_keyboard()
@@ -297,7 +318,7 @@ def send_manager_switch_sequence(
         return ManagerSwitchResult(reports_sent=0)
     reports_sent = 0
     try:
-        for value in MANAGER_SWITCH_SEQUENCE:
+        for value in sequence:
             hid_backend.write_output_report(handle, bytes([0x00, value]))
             reports_sent += 1
         if delay_seconds > 0:

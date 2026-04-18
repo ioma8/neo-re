@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 from neotools.asusbcomm import (
     build_hid_fallback_init_plan,
@@ -50,6 +51,7 @@ from neotools.smartapplets import (
 )
 from neotools.os3kapp_format import parse_os3kapp_image
 from neotools.os3kapp_runtime import (
+    build_minimal_smartapplet_image,
     build_os3kapp_entry_abi,
     describe_known_applet_command_prototype,
     describe_known_applet_payload_subcommand_prototype,
@@ -243,6 +245,29 @@ def main(argv: list[str] | None = None) -> int:
     os3kapp_payload_subcommand_parser.add_argument("applet_name")
     os3kapp_payload_subcommand_parser.add_argument("parent_command")
     os3kapp_payload_subcommand_parser.add_argument("first_input_byte")
+
+    build_benign_smartapplet_parser = subparsers.add_parser("build-benign-smartapplet")
+    build_benign_smartapplet_parser.add_argument("--output", required=True)
+    build_benign_smartapplet_parser.add_argument("--applet-id", default="0xa123")
+    build_benign_smartapplet_parser.add_argument("--name", default="Direct USB Test")
+    build_benign_smartapplet_parser.add_argument("--direct-mode-callback", default=None)
+    build_benign_smartapplet_parser.add_argument("--direct-mode-command-handler", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--stay-open-on-init", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--calculator-style-menu", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--draw-on-any-command", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--draw-on-menu-command", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--arm-direct-on-menu", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--host-usb-message-handler", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--alphaword-write-metadata", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--alphaword-state-machine-probe", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--alphaword-init-command-probe", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--alphaword-init-fault-probe", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--alphaword-silent-init-probe", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--alphaword-switch-on-init-probe", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--alphaword-hid-complete-switch-probe", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--alpha-usb-production", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--command-fault-probe", action="store_true")
+    build_benign_smartapplet_parser.add_argument("--command-fault-after-shutdown-probe", action="store_true")
 
     smartapplet_string_parser = subparsers.add_parser("smartapplet-string")
     smartapplet_string_parser.add_argument("resource_id")
@@ -723,6 +748,95 @@ def main(argv: list[str] | None = None) -> int:
             f"response_length={prototype.response_length}"
         )
         print(f"notes={prototype.notes}")
+        return 0
+
+    if args.command == "build-benign-smartapplet":
+        raw = build_minimal_smartapplet_image(
+            applet_id=int(args.applet_id, 0),
+            name=args.name,
+            version_major_bcd=0x01,
+            version_minor_bcd=(
+                0x03
+                if args.stay_open_on_init
+                else 0x18
+                if args.alpha_usb_production
+                else 0x17
+                if args.alphaword_hid_complete_switch_probe
+                else 0x16
+                if args.alphaword_switch_on_init_probe
+                else 0x15
+                if args.alphaword_silent_init_probe
+                else 0x14
+                if args.alphaword_init_fault_probe
+                else 0x13
+                if args.alphaword_init_command_probe
+                else 0x12
+                if args.alphaword_state_machine_probe
+                else 0x11
+                if args.alphaword_write_metadata
+                else 0x10
+                if args.host_usb_message_handler
+                else 0x09
+                if args.arm_direct_on_menu
+                else 0x08
+                if args.draw_on_menu_command
+                else 0x05
+                if args.draw_on_any_command
+                else 0x07
+                if args.command_fault_after_shutdown_probe
+                else 0x06
+                if args.command_fault_probe
+                else 0x04
+                if args.calculator_style_menu
+                else 0x02
+                if args.direct_mode_command_handler
+                else 0x01
+                if args.direct_mode_callback is not None
+                else 0x00
+            ),
+            flags_raw=0xFF0000CE if args.alphaword_write_metadata else 0xFF000000,
+            base_memory_size=0x240 if args.alphaword_state_machine_probe else 0x100,
+            extra_memory_size=0x2000
+            if args.alphaword_write_metadata
+            or args.alphaword_state_machine_probe
+            or args.alphaword_init_command_probe
+            or args.alphaword_init_fault_probe
+            or args.alphaword_silent_init_probe
+            or args.alphaword_switch_on_init_probe
+            or args.alphaword_hid_complete_switch_probe
+            or args.alpha_usb_production
+            else 0,
+            copyright="neo-re benign SmartApplet probe",
+            direct_mode_callback=(
+                None if args.direct_mode_callback is None else int(args.direct_mode_callback, 0)
+            ),
+            direct_mode_command_handler=args.direct_mode_command_handler,
+            stay_open_on_init=args.stay_open_on_init,
+            calculator_style_menu=args.calculator_style_menu,
+            draw_on_any_command=args.draw_on_any_command,
+            draw_on_menu_command=args.draw_on_menu_command,
+            arm_direct_on_menu=args.arm_direct_on_menu,
+            host_usb_message_handler=args.host_usb_message_handler,
+            alphaword_write_metadata=args.alphaword_write_metadata,
+            alphaword_state_machine_probe=args.alphaword_state_machine_probe,
+            alphaword_init_command_probe=args.alphaword_init_command_probe,
+            alphaword_init_fault_probe=args.alphaword_init_fault_probe,
+            alphaword_silent_init_probe=args.alphaword_silent_init_probe,
+            alphaword_switch_on_init_probe=args.alphaword_switch_on_init_probe,
+            alphaword_hid_complete_switch_probe=args.alphaword_hid_complete_switch_probe,
+            alpha_usb_production=args.alpha_usb_production,
+            command_fault_probe=args.command_fault_probe,
+            command_fault_after_shutdown_probe=args.command_fault_after_shutdown_probe,
+        )
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(raw)
+        print(
+            f"wrote={output_path} "
+            f"bytes={len(raw)} "
+            f"applet_id=0x{int(args.applet_id, 0):04x} "
+            f"name={args.name}"
+        )
         return 0
 
     if args.command == "smartapplet-string":

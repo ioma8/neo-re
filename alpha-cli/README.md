@@ -56,18 +56,24 @@ The GUI uses `eframe`/`egui` with the lighter `glow` renderer. It shares the sam
 USB support:
 
 - macOS, Linux, Windows: desktop USB backend through `rusb`
-- Android: native USB Host backend through Android `UsbManager` over JNI
+- Android: native USB Host backend through Android `UsbManager` over JNI for direct mode
 - other targets: compile with a clear USB-not-implemented path
 
-On Android the app enumerates `081e:bd04` HID keyboard mode and `081e:bd01` direct mode devices through `UsbManager`. If Android has not granted access to the connected NEO, the backend requests USB permission with the system dialog and returns an error telling the user to approve it and retry. APK packaging must declare USB Host and storage access, for example:
+Android startup path:
+
+The NEO starts in `081e:bd04` HID boot-keyboard mode. Desktop OSes let the app send the validated `e0 e1 e2 e3 e4` HID output-report sequence to switch it into `081e:bd01` direct mode. Stock Android does not: AOSP `UsbHostManager` deny-lists HID boot mouse/keyboard devices before they enter the `UsbManager.getDeviceList()` map. On the tested Pixel, the NEO appears in Android's input stack as `AlphaSmart, Inc. AlphaSmart` with `vendor=0x081e product=0xbd04`, but not in `UsbManager`; `/dev/hidraw0`, `/dev/input/event4`, and `/dev/bus/usb/*` are also not writable by a normal app.
+
+The production workaround is the `Alpha USB` SmartApplet. Launch `Alpha USB` on the NEO first, then connect the NEO to Android by USB. The applet invokes the validated ROM HID-completion path from the device side and re-enumerates as `081e:bd01`, so the Android backend can request normal USB Host permission and use the same direct-mode bulk protocol as the desktop backend.
+
+The Android GUI still detects plain HID keyboard mode through `InputDevice` and reports it explicitly instead of spinning forever. If that appears, disconnect USB, launch `Alpha USB` on the NEO, and reconnect USB.
+
+APK packaging must declare USB Host and storage access, for example:
 
 ```xml
 <uses-feature android:name="android.hardware.usb.host" android:required="true" />
 <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
 ```
-
-The Android backend sends the same validated HID switch reports and uses the same direct-mode bulk protocol as the desktop backend.
 
 Validated GUI check targets:
 
