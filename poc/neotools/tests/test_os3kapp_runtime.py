@@ -456,7 +456,10 @@ class Os3kAppRuntimeTests(unittest.TestCase):
 
         self.assertEqual(image.metadata.applet_id, 0xA130)
         self.assertEqual(image.metadata.name, "Alpha USB")
+        self.assertEqual(image.metadata.header.header_version, 1)
+        self.assertEqual(image.metadata.header.file_count, 0)
         self.assertEqual(image.metadata.version_minor, 20)
+        self.assertEqual(image.body_prefix_words, (0x94, 0, 1, 2))
         drawn_text = _drawn_ascii_from_moveq_text(image.body)
         self.assertIn(b"Now connect the NEO", drawn_text)
         self.assertIn(b"to your computer or", drawn_text)
