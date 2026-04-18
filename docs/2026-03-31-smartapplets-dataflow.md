@@ -135,8 +135,33 @@ Betawise independently confirms the core SmartApplet container model:
 
 Betawise builds applets with `m68k-elf-gcc`, a linker script, and A-line trap
 stubs. Its `APPLET_HEADER_BEGIN` macro places a C `AppletHeader_t` in a kept
-header section and its linker script keeps the footer at the end. Its runtime
-entry is `BwProcessMessage(Message_e message, uint32_t param, uint32_t *status)`.
+header section and its linker script keeps the footer at the end.
+
+Important layout correction: Betawise's full `AppletHeader_t` is `0x94` bytes,
+not only `0x84` bytes. The first `0x84` bytes are the same metadata record that
+NeoManager lists and parses. The next 16 bytes are the entry pointer and fixed
+ABI markers:
+
+- `0x84..0x87`: `entryPoint`, normally `&BwProcessMessage`
+- `0x88..0x8b`: marker dword `0`
+- `0x8c..0x8f`: marker dword `1`
+- `0x90..0x93`: marker dword `2`
+
+That is exactly the layout this project had already inferred as a `0x84`-byte
+metadata header followed by a four-dword payload prefix. Betawise therefore
+confirms the generated-applet split:
+
+```text
+0x0000..0x0083  metadata parsed by NeoManager and the device list command
+0x0084..0x0093  entry pointer plus 0, 1, 2 ABI markers
+0x0094..        executable 68k code and data
+EOF-4..EOF      ca fe fe ed footer
+```
+
+The Betawise linker script forces this ordering by keeping `os3k_header`, then
+`BwProcessMessage`, then the remaining text/rodata, then `os3k_footer`.
+`romUsage` is the linked binary size including header and footer. `ramUsage` is
+the linked `.bss` size, not the size of the ROM payload.
 
 Important correction from this cross-check: our early generator incorrectly
 packed the applet version into header bytes `0x16..0x17`. That made `Alpha USB`
@@ -164,6 +189,95 @@ Observed examples:
 - `alphawordplus.os3kapp`: applet id `0xa000`, version `3.4`, class `0x01`
 - `calculator.os3kapp`: applet id `0xa002`, version `3.0`, class `0x01`
 - `keywordswireless.os3kapp`: applet id `0xa004`, version `4.0`, class `0x01`
+
+## Betawise ABI, Stubs, And Callback Model
+
+Betawise's public applet callback ABI is:
+
+```c
+void ProcessMessage(Message_e message, uint32_t param, uint32_t *status);
+```
+
+Compiled Betawise applets usually export a user `ProcessMessage`. The library
+entry `BwProcessMessage` performs common setup for a few lifecycle messages and
+then calls the user callback. Minimal or special applets can override
+`BwProcessMessage` directly, as `NeoFontTerminal` does for font-private
+messages.
+
+Betawise message constants line up with the live NEO behavior we observed:
+
+- `0x00`: `MSG_IDLE`
+- `0x18`: `MSG_INIT`
+- `0x19`: `MSG_SETFOCUS`, the menu-open/screen ownership path used by the
+  working custom drawing probes
+- `0x1a`: `MSG_KILLFOCUS`
+- `0x20`: `MSG_CHAR`
+- `0x21`: `MSG_KEY`
+- `0x30001`: `MSG_USB_PLUG`, the USB attach callback used by `Alpha USB`
+- `0x3000c`: `MSG_USB_UNPLUG`
+- `0x30007`, `0x3001e`, `0x3001f`: other USB-family events with unknown exact
+  meanings
+- `0x1000000`: synthetic/private-message modifier namespace
+
+Operational rules from Betawise plus live tests:
+
+- Clear or set `*status` on entry. Most Betawise applets start by writing
+  `*status = 0`.
+- Draw normal applet UI from `MSG_SETFOCUS`, not from USB attach callbacks.
+- Treat `MSG_USB_PLUG` (`0x30001`) as dispatcher-owned context. The stable
+  `Alpha USB` path performs only the proven direct-mode switch sequence, writes
+  the expected status, and returns immediately.
+- Private applet messages are normal. The font applet `0xa1f0` answers
+  `0x1000001..0x1000006`; the shared wrapper asks it for a font pointer through
+  `AppletFindById(0xa1f0)` plus `AppletSendMessage(..., 0x1000002, ...)`.
+
+Betawise's syscall layer is also direct and simple. `os3k/syscall.c` emits one
+function per OS service, and each function body is a single Motorola 68k A-line
+trap word:
+
+```c
+DEFINE_SYSCALL(index, name) => .word 0xA000 + 4 * index
+```
+
+Useful confirmed stubs:
+
+- index `0`, trap `0xa000`: clear screen
+- index `1`, trap `0xa004`: set cursor
+- index `3`, trap `0xa00c`: centered string
+- index `4`, trap `0xa010`: put character
+- index `5`, trap `0xa014`: put raw string
+- index `6`, trap `0xa018`: set cursor mode
+- index `12`, trap `0xa030`: put string
+- index `18`, trap `0xa048`: draw bitmap
+- index `19`, trap `0xa04c`: raster operation
+- index `34`, trap `0xa088`: wait for key
+- index `37`, trap `0xa094`: get key
+- index `39`, trap `0xa09c`: key/event ready
+- index `41`, trap `0xa0a4`: scan keyboard / pump events
+- index `53`, trap `0xa0d4`: sleep centiseconds
+- index `54`, trap `0xa0d8`: sleep centimilliseconds
+- index `102`, trap `0xa198`: file write buffer
+- index `103`, trap `0xa19c`: file read buffer
+- index `142`, trap `0xa238`: find applet by name
+- index `143`, trap `0xa23c`: find applet by id
+- index `144`, trap `0xa240`: get applet name
+- index `145`, trap `0xa244`: send applet message
+- index `151`, trap `0xa25c`: System dispatcher/yield helper
+- index `174`, trap `0xa2b8`: internal system-info call
+
+The Betawise build flags are part of the ABI contract:
+
+- `-mpcrel` and assembler `--pcrel`: generated code must be position-relative.
+- `-ffixed-a5`: do not let compiled code use A5 as a general register. Live
+  experiments already showed AlphaWord-private A5-relative writes are unsafe
+  outside AlphaWord.
+- `-ffixed-d7`: reserve D7 for the OS/runtime dispatcher.
+- `-fshort-enums`: enum argument size follows the firmware's expectations.
+
+This explains why the hand-built applets in this repo work when they call local
+BSR stubs containing A-line words and avoid clobbering OS-owned registers. It
+also explains why future C-compiled applets should either use Betawise's flags
+and linker script directly or replicate those constraints exactly.
 
 ## On-Disk `.OS3KApp` Container Layout
 

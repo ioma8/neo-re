@@ -104,3 +104,7 @@ Alpha USB v1.21 broke recovery safety by doing UI/idle work inside the 0x30001 U
 The post-v1.21 boot failure is best explained by inconsistent applet catalog/finalize state with duplicate Alpha USB records rather than a proven direct overwrite of a specific file-table slot	proven
 Alpha USB v1.20 plus the Android GUI provides a validated no-root no-proxy no-typing-fallback Android AlphaWord backup path	proven
 Betawise confirms SmartApplet header byte 0x17 is file_count, so generated applets must not store version_minor there	proven
+Betawise confirms the 0x84 payload prefix is actually the tail of a 0x94-byte AppletHeader_t containing entryPoint plus marker dwords 0,1,2	proven
+Betawise confirms the public SmartApplet callback ABI is ProcessMessage(message,param,status*) and that USB attach is message 0x30001	proven
+Betawise confirms OS services are direct Motorola 68k A-line trap stubs encoded as 0xA000 + 4*index, not a relocation/import table	proven
+Betawise confirms compiled SmartApplets must reserve A5 and D7 and use PC-relative code, matching the live failures from unsafe A5-relative experiments	proven
