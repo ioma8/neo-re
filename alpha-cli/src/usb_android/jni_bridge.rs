@@ -7,6 +7,7 @@ use jni::{
     refs::Reference,
     sys::{jbyte, jobjectArray},
 };
+use tracing::{info, warn};
 
 const VID: i32 = 0x081E;
 const PID_DIRECT: i32 = 0xBD01;
@@ -44,6 +45,10 @@ struct EndpointSelection<'local> {
 pub fn detect_mode() -> anyhow::Result<UsbMode> {
     with_env(|env| {
         let devices = alphasmart_devices(env)?;
+        info!(
+            count = devices.len(),
+            "Android AlphaSmart USB scan complete"
+        );
         if devices.iter().any(|device| device.product_id == PID_DIRECT) {
             return Ok(UsbMode::Direct);
         }
@@ -61,12 +66,19 @@ pub fn switch_hid_to_direct() -> anyhow::Result<()> {
             .into_iter()
             .find(|device| device.product_id == PID_HID)
         else {
+            warn!("AlphaSmart HID mode device not found during switch attempt");
             bail!("AlphaSmart HID keyboard mode device not found");
         };
+        info!("requesting Android USB permission for HID switch");
         ensure_permission(env, &manager, &device.device)?;
         let connection = open_device(env, &manager, &device.device)?;
         for report in HID_SWITCH_REPORTS {
             let written = control_transfer(env, &connection, 0x21, 0x09, 0x0200, 0, &[report])?;
+            info!(
+                report = report,
+                written = written,
+                "sent Android HID switch report"
+            );
             if written != 1 {
                 bail!("short HID switch report write: {written}");
             }
@@ -84,8 +96,10 @@ impl AndroidUsb {
                 .into_iter()
                 .find(|device| device.product_id == PID_DIRECT)
             else {
+                warn!("AlphaSmart direct mode device not found during open");
                 bail!("AlphaSmart direct USB device not found");
             };
+            info!("requesting Android USB permission for direct mode");
             ensure_permission(env, &manager, &device.device)?;
             let selection = select_bulk_endpoints(env, &device.device)?;
             let connection = open_device(env, &manager, &device.device)?;
@@ -209,10 +223,12 @@ fn ensure_permission(
         )?
         .z()?;
     if has_permission {
+        info!("Android USB permission already granted");
         return Ok(());
     }
 
     let permission_intent = permission_intent(env)?;
+    info!("requesting Android USB permission dialog");
     env.call_method(
         manager,
         jni_str!("requestPermission"),

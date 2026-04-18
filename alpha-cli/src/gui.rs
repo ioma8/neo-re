@@ -2,12 +2,13 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use eframe::egui::{self, Align, Color32, Layout, RichText, Stroke, Vec2};
-use tracing_subscriber::{fmt, prelude::*};
+#[cfg(not(target_os = "android"))]
+use tracing_subscriber::fmt;
+use tracing_subscriber::{filter::LevelFilter, prelude::*};
 
-use crate::{
-    app::{self, App, Screen},
-    backup,
-};
+use crate::app::{self, App, Screen};
+#[cfg(not(target_os = "android"))]
+use crate::backup;
 
 pub fn run(options: eframe::NativeOptions) -> eframe::Result {
     if let Err(error) = init_logging() {
@@ -35,15 +36,29 @@ pub fn options() -> eframe::NativeOptions {
 }
 
 fn init_logging() -> anyhow::Result<()> {
-    let log_dir = backup::app_dir()?.join("logs");
-    std::fs::create_dir_all(&log_dir).context("create log directory")?;
-    let log_file =
-        std::fs::File::create(log_dir.join("alpha-gui.log")).context("create GUI log file")?;
-    tracing_subscriber::registry()
-        .with(fmt::layer().with_writer(log_file).with_ansi(false))
-        .try_init()
-        .context("initialize GUI tracing subscriber")?;
-    Ok(())
+    #[cfg(target_os = "android")]
+    {
+        tracing_subscriber::registry()
+            .with(LevelFilter::INFO)
+            .with(tracing_android::layer("AlphaGUI").context("initialize logcat tracing")?)
+            .try_init()
+            .context("initialize Android GUI tracing subscriber")?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let log_dir = backup::app_dir()?.join("logs");
+        std::fs::create_dir_all(&log_dir).context("create log directory")?;
+        let log_file =
+            std::fs::File::create(log_dir.join("alpha-gui.log")).context("create GUI log file")?;
+        tracing_subscriber::registry()
+            .with(LevelFilter::INFO)
+            .with(fmt::layer().with_writer(log_file).with_ansi(false))
+            .try_init()
+            .context("initialize GUI tracing subscriber")?;
+        Ok(())
+    }
 }
 
 fn configure_style(ctx: &egui::Context) {
@@ -97,9 +112,7 @@ impl eframe::App for AlphaGui {
             && self.last_poll.elapsed() >= Duration::from_millis(650)
         {
             self.last_poll = Instant::now();
-            if let Err(error) = self.app.poll_connection() {
-                self.app.set_error(error);
-            }
+            self.app.begin_connection_poll();
         }
         ctx.request_repaint_after(Duration::from_millis(120));
     }
@@ -107,9 +120,15 @@ impl eframe::App for AlphaGui {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let compact = ui.available_width() < 640.0;
         let margin = if compact { 14 } else { 24 };
+        let top_margin = margin + android_status_bar_padding();
 
         egui::Frame::central_panel(ui.style())
-            .inner_margin(egui::Margin::same(margin))
+            .inner_margin(egui::Margin {
+                left: margin,
+                right: margin,
+                top: top_margin,
+                bottom: margin,
+            })
             .fill(SURFACE)
             .show(ui, |ui| {
                 let height = ui.available_height();
@@ -144,6 +163,18 @@ impl eframe::App for AlphaGui {
         } else if self.app.download.is_some() {
             self.progress_window(ui.ctx());
         }
+    }
+}
+
+fn android_status_bar_padding() -> i8 {
+    #[cfg(target_os = "android")]
+    {
+        28
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        0
     }
 }
 

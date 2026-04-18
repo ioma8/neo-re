@@ -23,6 +23,7 @@ rusb = "0.9.4"
 android-activity = "0.6.1"
 jni = "0.22.4"
 ndk-context = "0.1.1"
+tracing-android = "0.2.0"
 
 [package.metadata.android]
 package = "cz.jakubkolcar.alpha_cli"

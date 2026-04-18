@@ -1,6 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::mpsc::{self, Receiver},
+    sync::mpsc::{self, Receiver, TryRecvError},
     thread,
     time::Duration,
 };
@@ -31,6 +31,7 @@ pub struct App {
     pub download: Option<DownloadProgress>,
     client: Option<NeoClient>,
     backup_rx: Option<Receiver<BackupEvent>>,
+    connection_rx: Option<Receiver<ConnectionEvent>>,
 }
 
 pub struct DownloadProgress {
@@ -61,6 +62,12 @@ enum BackupEvent {
     },
 }
 
+enum ConnectionEvent {
+    Status(String),
+    Connected(NeoClient),
+    Failed(String),
+}
+
 impl App {
     pub fn new() -> Self {
         Self {
@@ -74,7 +81,24 @@ impl App {
             download: None,
             client: None,
             backup_rx: None,
+            connection_rx: None,
         }
+    }
+
+    pub fn begin_connection_poll(&mut self) {
+        if self.connection_rx.is_some() || self.screen != Screen::Waiting {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        self.connection_rx = Some(rx);
+        self.status = "Checking USB devices...".to_owned();
+        thread::spawn(move || {
+            info!("connection poll started");
+            let result = poll_connection_worker(&tx);
+            if let Err(error_value) = result {
+                let _ = tx.send(ConnectionEvent::Failed(format!("{error_value:#}")));
+            }
+        });
     }
 
     pub fn poll_connection(&mut self) -> anyhow::Result<()> {
@@ -186,6 +210,7 @@ impl App {
         if let Some(progress) = &mut self.download {
             progress.spinner_index = progress.spinner_index.wrapping_add(1);
         }
+        self.drain_connection_events();
         self.drain_backup_events();
     }
 
@@ -255,6 +280,83 @@ impl App {
         self.screen = Screen::MainMenu;
         self.status = "NEO initialized. Choose an action.".to_owned();
         Ok(())
+    }
+
+    fn drain_connection_events(&mut self) {
+        let Some(rx) = self.connection_rx.take() else {
+            return;
+        };
+        let mut keep_rx = true;
+        loop {
+            match rx.try_recv() {
+                Ok(ConnectionEvent::Status(message)) => {
+                    self.status = message;
+                }
+                Ok(ConnectionEvent::Connected(client)) => {
+                    self.client = Some(client);
+                    self.screen = Screen::MainMenu;
+                    self.status = "NEO initialized. Choose an action.".to_owned();
+                    keep_rx = false;
+                }
+                Ok(ConnectionEvent::Failed(message)) => {
+                    keep_rx = false;
+                    self.set_error(anyhow!(message));
+                }
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    keep_rx = false;
+                    break;
+                }
+            }
+        }
+        if keep_rx {
+            self.connection_rx = Some(rx);
+        }
+    }
+}
+
+fn poll_connection_worker(tx: &mpsc::Sender<ConnectionEvent>) -> anyhow::Result<()> {
+    match usb::detect_mode()? {
+        NeoMode::Missing => {
+            info!("NEO USB device not visible to backend");
+            tx.send(ConnectionEvent::Status(missing_device_message()))?;
+        }
+        NeoMode::Hid => {
+            info!("NEO HID mode found; requesting permission and switching to direct mode");
+            tx.send(ConnectionEvent::Status(
+                "NEO HID mode found. Switching to direct USB mode...".to_owned(),
+            ))?;
+            usb::switch_hid_to_direct().context("switch HID device to direct USB")?;
+            if !usb::wait_for_mode(NeoMode::Direct, 40, Duration::from_millis(125))? {
+                anyhow::bail!("NEO did not re-enumerate in direct USB mode");
+            }
+            tx.send(ConnectionEvent::Status(
+                "NEO direct mode found. Initializing...".to_owned(),
+            ))?;
+            let client = NeoClient::open_and_init().context("initialize direct USB NEO")?;
+            tx.send(ConnectionEvent::Connected(client))?;
+        }
+        NeoMode::Direct => {
+            info!("NEO direct mode found; initializing");
+            tx.send(ConnectionEvent::Status(
+                "NEO already in direct USB mode. Initializing...".to_owned(),
+            ))?;
+            let client = NeoClient::open_and_init().context("initialize direct USB NEO")?;
+            tx.send(ConnectionEvent::Connected(client))?;
+        }
+    }
+    Ok(())
+}
+
+fn missing_device_message() -> String {
+    #[cfg(target_os = "android")]
+    {
+        "No NEO is visible to Android USB Host. Use an OTG/host connection; USB debugging over the same port keeps the phone in device mode.".to_owned()
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        "Connect the NEO with USB. It should appear as HID keyboard mode first.".to_owned()
     }
 }
 
