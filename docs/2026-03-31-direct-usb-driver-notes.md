@@ -433,7 +433,8 @@ The ways found so far to reach a USB device whose descriptor is `081e:bd01` are:
    - Dynamically proven on the physical NEO.
    - Production applet id is `0xa130`, version `1.20`, menu name `Alpha USB`.
    - Its menu-open screen instructs the user to connect the NEO to a computer or smartphone over USB, instead of showing only the applet name.
-   - Launching the applet and then connecting USB invokes the ROM HID-sequence completion path (`0x0044044e` / `0x0044047c`) from the applet's proven `0x30001` USB attach callback, then calls the normal direct-mode status callback `0x00410b26` so the LCD should repaint with the ROM `Connected to NEO Manager.` state instead of leaving the previous keyboard-emulation message visible.
+   - Launching the applet and then connecting USB invokes the ROM HID-sequence completion path (`0x0044044e` / `0x0044047c`) from the applet's proven `0x30001` USB attach callback, then calls the normal direct-mode status callback `0x00410b26` before returning status `0x11`.
+   - Failed follow-up: a v1.21 experiment drew a custom post-switch message and entered the applet idle loop from inside the `0x30001` USB attach callback. That is unsafe because the callback must return a status to the System USB/SmartApplet dispatcher. The physical device later failed boot with `File 127 MaxSize overflow...`, and the v1.21 install had already shown a finalize-response checksum mismatch. Do not idle or block inside the USB attach callback.
    - The device disconnects/re-enumerates as normal `081e:bd01` direct USB mode with bulk OUT `0x01` and bulk IN `0x82`.
    - This path does not require the host to open the initial `081e:bd04` HID keyboard interface, so it is the practical unrooted Android path.
 
@@ -876,3 +877,19 @@ What is already firm enough to rely on:
 - The DLL exports two MAC helper commands on top of the same 8-byte updater framing.
 - The 64-bit driver confirms that `0x220004` is an internal probe wrapper around lower-stack IOCTLs `0x220013` and `0x220007`.
 - The 64-bit driver confirms that `0x220003` is the lower-stack request used to fetch descriptors and to move data via URB-style request objects.
+
+## 2026-04-18 Recovery Note
+
+The direct USB and Small ROM updater paths were used to recover a physical NEO
+from file/applet catalog corruption after custom SmartApplet experiments. The
+working recovery sequence was:
+
+1. boot or switch to `081e:bd01` direct USB,
+2. flash the validator-disabled recovery OS image,
+3. switch normal HID back to direct mode,
+4. inspect the applet table,
+5. restore stock applets one at a time,
+6. verify `real-check applets` and `real-check list`.
+
+The detailed runbook is
+[2026-04-18-neo-recovery-runbook.md](/Users/jakubkolcar/customs/neo-re/docs/2026-04-18-neo-recovery-runbook.md).

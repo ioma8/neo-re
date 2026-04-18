@@ -554,7 +554,9 @@ When a five-byte sequence matches, the first sequence path performs the same com
 
 Live result from v1.17: after launching `USB HID Complete` and connecting USB, the host reported `081e:bd01` direct mode with bulk OUT `0x01` and bulk IN `0x82`. This proves device-side SmartApplet activation is possible without host access to the initial HID keyboard interface. The successful path is not a direct call to `0x00410b26`; it is the ROM HID-sequence completion path (`0x0044044e` / `0x0044047c`) invoked from the applet's `0x30001` USB attach callback.
 
-`Alpha USB` is the production form of this probe. It uses applet id `0xa130`, version `1.20`, and the menu name `Alpha USB`. Its `0x19` menu-open branch draws brief instructions telling the user to connect the NEO to a computer or smartphone via USB. Its `0x30001` branch keeps the proven v1.17 ROM HID-completion sequence unchanged, then calls the normal direct-mode status callback `0x00410b26` to repaint the LCD as `Connected to NEO Manager.` after the identity switch. Unlike the diagnostic probes, it has no intentional fault branches; other USB/event branches return quiet status values and avoid UI traps in USB callback context. Build command:
+`Alpha USB` is the production form of this probe. It uses applet id `0xa130`, version `1.20`, and the menu name `Alpha USB`. Its `0x19` menu-open branch draws brief instructions telling the user to connect the NEO to a computer or smartphone via USB. Its `0x30001` branch keeps the proven v1.17 ROM HID-completion sequence unchanged, then calls the normal direct-mode status callback `0x00410b26` before returning status `0x11`. Unlike the diagnostic probes, it has no intentional fault branches; other USB/event branches return quiet status values and avoid UI traps in USB callback context. Build command:
+
+Failed follow-up: v1.21 tried to draw a custom post-switch message and then idle in the applet screen from inside the `0x30001` USB attach callback. That was the wrong ownership boundary. The callback is part of the System USB/SmartApplet dispatcher path and must return a status; blocking there caused a finalize-response checksum mismatch during install, and the next boot reported `File 127 MaxSize overflow...`. Future display experiments must not call `A25C`/idle loops from USB attach callbacks.
 
 ```bash
 uv run --project poc/neotools neotools build-benign-smartapplet \
@@ -1921,6 +1923,22 @@ uv run --project poc/neotools python -m neotools smartapplet-add-plan-from-image
 ```
 
 Safety note: `real-check applets` is a read-only live metadata list probe. The offline `smartapplet-add-plan*` commands only print modeled packets, but any future live implementation of the `0x06` / `0x02` / `0xff` / `0x0b` / `0x07` add/program/finalize sequence would modify the device and must not be used as a probe on a data-bearing NEO.
+
+## 2026-04-18 Recovery Note
+
+Custom SmartApplet USB experiments produced duplicate `Alpha USB` entries and a
+damaged writable catalog on the physical NEO. The successful repair did not use
+the broad restore flow as the final mechanism. Instead, after a patched
+validator-disabled OS restored normal direct USB access, the applet area was
+left with System only and stock applets were installed one at a time, validating
+with `real-check applets` after each install.
+
+The Thesaurus applet was intentionally not restored. The final validated applet
+set was System, AlphaWord Plus, five NEO fonts, KeyWords, Control Panel, Beamer,
+AlphaQuiz, Calculator, Text2Speech Updater, and SpellCheck Large USA.
+
+Full details and exact commands are in
+[2026-04-18-neo-recovery-runbook.md](/Users/jakubkolcar/customs/neo-re/docs/2026-04-18-neo-recovery-runbook.md).
 
 ## Remaining Unknowns
 

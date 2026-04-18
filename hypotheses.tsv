@@ -85,3 +85,18 @@ A custom applet must answer AlphaWord low identity/event commands, not only meta
 NeoManager's own documentation says direct USB is reliable only from AlphaWord Plus or the SmartApplets menu, not arbitrary running SmartApplets	proven
 USB HID Complete v1.17 proves invoking the ROM HID-sequence completion path 0x44044e/0x44047c from the proven 0x30001 attach command enters 081e:bd01	proven
 Alpha USB v1.18 is the production SmartApplet form of the proven v1.17 device-side direct USB activation path	proven
+NEO Small ROM direct mode accepts NeoManager OS-install gate command 0x18 and returns status 0x56	proven
+Current bd01 recovery transport is compatible with NeoManager Small ROM OS recovery protocol	needs further investigation
+NEO OS flash without rest-of-ROM reformat can complete from Small ROM direct mode	proven
+NEO filesystem MaxSize overflow is caused by corrupted writable/file ROM area rather than System OS code segment	proven
+NeoManager-style rest-of-ROM erase uses 0x17 address 0x005ffc00 trailing 0 in the OS-update path	proven
+After rest-of-ROM erase, programming the final 0x005ffc00 OS tail chunk fails with status 0x8c	proven
+Finalizing after the final-tail chunk failure is accepted with status 0x48	proven
+Normal SmartApplet add/list/clear commands remain unavailable in Small ROM and return 0x92	proven
+Programming only the final 0x005ffc00 OS tail segment after rest-of-ROM reformat succeeds	proven
+Successful tail-only finalize makes the bd01 direct USB device disappear from the host	proven
+Disabling the OS filesystem validator entry at runtime 0x0043c832 lets a catalog-corrupted NEO boot far enough for normal HID/direct USB repair	proven
+The recovered device's remaining boot/workspace failure was a dirty SmartApplet/file catalog, not an unflashable OS segment	proven
+Broad restore-stock-applets after catalog corruption can clear the applet area but fail before reinstalling applets, leaving only System installed	proven
+Incremental one-at-a-time stock SmartApplet install with applets validation after each step safely restores the catalog	proven
+Keeping the validator-disabled patched OS is the preferred recovery baseline for this device because it preserves normal USB access while avoiding boot-time catalog validator failures	proven

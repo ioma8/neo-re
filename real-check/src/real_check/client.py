@@ -58,6 +58,39 @@ class SmartAppletEntry:
     applet_class: int
 
 
+@dataclass(frozen=True)
+class OsFlashSegment:
+    address: int
+    length: int
+
+
+@dataclass(frozen=True)
+class OsFlashSummary:
+    bytes_written: int
+    chunks_written: int
+    segments: tuple[OsFlashSegment, ...]
+
+
+def parse_neo_os_segments(image: bytes) -> tuple[OsFlashSegment, ...]:
+    if len(image) < 0x70:
+        raise ValueError("OS image is too short")
+    if image[6:24] != b"System 3 Neo      ":
+        raise ValueError("OS image is not a NEO System 3 image")
+
+    segments: list[OsFlashSegment] = []
+    for offset in range(0x50, len(image), 8):
+        address = int.from_bytes(image[offset : offset + 4], "big")
+        length = int.from_bytes(image[offset + 4 : offset + 8], "big")
+        if address == 0 and length == 0:
+            break
+        if length <= 0:
+            raise ValueError(f"invalid OS segment length at offset 0x{offset:x}")
+        segments.append(OsFlashSegment(address=address, length=length))
+    if not segments:
+        raise ValueError("OS image contains no flash segments")
+    return tuple(segments)
+
+
 class NeoAlphaWordClient:
     def __init__(self, transport: NeoTransport, *, alphaword_applet_id: int = 0xA000) -> None:
         self._transport = transport
@@ -318,6 +351,40 @@ class NeoAlphaWordClient:
         self.enter_updater_mode()
         self._transport.write(build_updater_command(command=0x08, argument=0, trailing=0))
         self._require_status(0x52, timeout_ms=1000, operation="restart device")
+
+    def install_neo_os_image(self, image: bytes, *, reformat_rest_of_rom: bool = False) -> OsFlashSummary:
+        segments = parse_neo_os_segments(image)
+        self.enter_updater_mode()
+
+        self._transport.write(build_updater_command(command=0x18, argument=0, trailing=0))
+        self._require_status(0x56, timeout_ms=5000, operation="enter Small ROM")
+
+        self._transport.write(build_updater_command(command=0x16, argument=0, trailing=0))
+        self._require_status(0x54, timeout_ms=5000, operation="clear OS segment map")
+
+        for segment in segments:
+            erase_kb = (segment.length + 0x3FF) >> 10
+            if reformat_rest_of_rom and segment.address == 0x005FFC00:
+                erase_kb = 0
+            self._transport.write(build_updater_command(command=0x17, argument=segment.address, trailing=erase_kb))
+            self._require_status(0x55, timeout_ms=90000, operation=f"erase OS segment 0x{segment.address:08x}")
+
+        chunks_written = 0
+        for offset in range(0, len(image), 0x400):
+            chunk = image[offset : offset + 0x400]
+            self._transport.write(
+                build_updater_command(command=0x02, argument=len(chunk), trailing=sum(chunk) & 0xFFFF)
+            )
+            self._require_status(0x42, timeout_ms=5000, operation="OS chunk handshake")
+            self._transport.write(chunk)
+            self._require_status(0x43, timeout_ms=10000, operation="OS chunk commit")
+            self._transport.write(build_program_applet_command())
+            self._require_status(0x47, timeout_ms=90000, operation=f"program OS chunk offset=0x{offset:06x}")
+            chunks_written += 1
+
+        self._transport.write(build_finalize_applet_update_command())
+        self._require_status(0x48, timeout_ms=120000, operation="finalize OS update")
+        return OsFlashSummary(bytes_written=len(image), chunks_written=chunks_written, segments=segments)
 
     def _require_status(self, expected_status: int, *, timeout_ms: int, operation: str) -> None:
         response = parse_updater_response(self._transport.read_exact(8, timeout_ms=timeout_ms))

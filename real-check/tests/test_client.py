@@ -8,7 +8,14 @@ from neotools.smartapplets import (
 )
 from neotools.updater_packets import build_updater_command
 
-from real_check.client import AlphaWordFileEntry, AlphaWordFileVerification, NeoAlphaWordClient, SmartAppletEntry
+from real_check.client import (
+    AlphaWordFileEntry,
+    AlphaWordFileVerification,
+    NeoAlphaWordClient,
+    OsFlashSegment,
+    SmartAppletEntry,
+    parse_neo_os_segments,
+)
 
 
 def _build_response(status: int, argument: int, trailing: int) -> bytes:
@@ -54,6 +61,18 @@ def _build_padded_test_applet(size: int) -> bytes:
         raise ValueError("padded applet size must not shrink the image")
     image[-4:-4] = b"\x00" * (size - len(image))
     image[0x04:0x08] = size.to_bytes(4, "big")
+    return bytes(image)
+
+
+def _build_minimal_neo_os_image() -> bytes:
+    image = bytearray(0x430)
+    image[0:4] = b"\xff\xff\xff\xff"
+    image[4:6] = (1).to_bytes(2, "big")
+    image[6:24] = b"System 3 Neo      "
+    image[0x50:0x54] = (0x00410000).to_bytes(4, "big")
+    image[0x54:0x58] = (0x00000600).to_bytes(4, "big")
+    image[0x58:0x5C] = (0x00406000).to_bytes(4, "big")
+    image[0x5C:0x60] = (0x00000014).to_bytes(4, "big")
     return bytes(image)
 
 
@@ -420,6 +439,89 @@ class ClientTests(unittest.TestCase):
                 b"?Swtch\x00\x00",
                 build_updater_command(command=0x08, argument=0, trailing=0),
             ],
+        )
+
+    def test_parse_neo_os_segments_reads_segment_map(self) -> None:
+        self.assertEqual(
+            parse_neo_os_segments(_build_minimal_neo_os_image()),
+            (
+                OsFlashSegment(address=0x00410000, length=0x600),
+                OsFlashSegment(address=0x00406000, length=0x14),
+            ),
+        )
+
+    def test_install_neo_os_image_uses_small_rom_flash_sequence(self) -> None:
+        image = _build_minimal_neo_os_image()
+        first_chunk = image[:0x400]
+        second_chunk = image[0x400:]
+        transport = FakeTransport(
+            [
+                b"Switched",
+                _build_response(0x56, 0, 0),
+                _build_response(0x54, 0, 0),
+                _build_response(0x55, 0, 0),
+                _build_response(0x55, 0, 0),
+                _build_response(0x42, 0, 0),
+                _build_response(0x43, 0, 0),
+                _build_response(0x47, 0, 0),
+                _build_response(0x42, 0, 0),
+                _build_response(0x43, 0, 0),
+                _build_response(0x47, 0, 0),
+                _build_response(0x48, 0, 0),
+            ]
+        )
+        client = NeoAlphaWordClient(transport)
+
+        summary = client.install_neo_os_image(image)
+
+        self.assertEqual(summary.bytes_written, len(image))
+        self.assertEqual(summary.chunks_written, 2)
+        self.assertEqual(
+            transport.writes,
+            [
+                b"?\xff\x00reset",
+                b"?Swtch\x00\x00",
+                build_updater_command(command=0x18, argument=0, trailing=0),
+                build_updater_command(command=0x16, argument=0, trailing=0),
+                build_updater_command(command=0x17, argument=0x00410000, trailing=2),
+                build_updater_command(command=0x17, argument=0x00406000, trailing=1),
+                build_updater_command(command=0x02, argument=len(first_chunk), trailing=sum(first_chunk) & 0xFFFF),
+                first_chunk,
+                build_updater_command(command=0x0B, argument=0, trailing=0),
+                build_updater_command(command=0x02, argument=len(second_chunk), trailing=sum(second_chunk) & 0xFFFF),
+                second_chunk,
+                build_updater_command(command=0x0B, argument=0, trailing=0),
+                build_updater_command(command=0x07, argument=0, trailing=0),
+            ],
+        )
+
+    def test_install_neo_os_image_can_reformat_rest_of_rom(self) -> None:
+        image = _build_minimal_neo_os_image()
+        image = image[:0x60] + (0x005FFC00).to_bytes(4, "big") + (0x400).to_bytes(4, "big") + image[0x68:]
+        transport = FakeTransport(
+            [
+                b"Switched",
+                _build_response(0x56, 0, 0),
+                _build_response(0x54, 0, 0),
+                _build_response(0x55, 0, 0),
+                _build_response(0x55, 0, 0),
+                _build_response(0x55, 0, 0),
+                _build_response(0x42, 0, 0),
+                _build_response(0x43, 0, 0),
+                _build_response(0x47, 0, 0),
+                _build_response(0x42, 0, 0),
+                _build_response(0x43, 0, 0),
+                _build_response(0x47, 0, 0),
+                _build_response(0x48, 0, 0),
+            ]
+        )
+        client = NeoAlphaWordClient(transport)
+
+        client.install_neo_os_image(image, reformat_rest_of_rom=True)
+
+        self.assertIn(
+            build_updater_command(command=0x17, argument=0x005FFC00, trailing=0),
+            transport.writes,
         )
 
     def test_close_closes_transport(self) -> None:

@@ -1,7 +1,10 @@
 import argparse
+from pathlib import Path
 import sys
 
-from real_check.client import NeoAlphaWordClient
+from neotools.smartapplets import parse_smartapplet_metadata
+
+from real_check.client import NeoAlphaWordClient, parse_neo_os_segments
 from real_check.hid_switch import send_hid_output_report_sequence, send_manager_switch_sequence
 from real_check.live_usb import open_direct_usb_transport, probe_direct_usb_device, watch_alphasmart_devices
 from real_check.usb_select import EndpointDescriptor, InterfaceDescriptor
@@ -62,6 +65,37 @@ def main(argv: list[str] | None = None) -> int:
     remove_applet_parser = subparsers.add_parser("remove-applet-index")
     remove_applet_parser.add_argument("index")
     subparsers.add_parser("clear-applet-area")
+    restore_stock_parser = subparsers.add_parser("restore-stock-applets")
+    restore_stock_parser.add_argument("--backup-dir", required=True)
+    restore_stock_parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="required because this clears the SmartApplet area before restoring backups",
+    )
+    restore_stock_parser.add_argument(
+        "--include-system",
+        action="store_true",
+        help="also install applet id 0x0000; normally unsafe and unnecessary",
+    )
+    restore_stock_parser.add_argument(
+        "--skip",
+        action="append",
+        default=[],
+        help="applet id to skip, for example 0xa017; may be repeated",
+    )
+    restore_stock_parser.add_argument("--restart", action="store_true")
+    install_os_parser = subparsers.add_parser("install-os-image")
+    install_os_parser.add_argument("path")
+    install_os_parser.add_argument(
+        "--yes-flash-os",
+        action="store_true",
+        help="required because this erases and rewrites the NEO System OS flash segments",
+    )
+    install_os_parser.add_argument(
+        "--reformat-rest-of-rom",
+        action="store_true",
+        help="use NeoManager's length-0 erase for the 0x005ffc00 segment before rewriting the OS tail",
+    )
     subparsers.add_parser("restart-device")
 
     verify_get_parser = subparsers.add_parser("verify-get")
@@ -217,6 +251,78 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             client.close()
         print("cleared SmartApplet area")
+        return 0
+
+    if args.command == "restore-stock-applets":
+        if not args.yes:
+            print("refusing to clear SmartApplet area without --yes", file=sys.stderr)
+            return 2
+        backup_dir = Path(args.backup_dir)
+        images = sorted(backup_dir.glob("*.os3kapp"))
+        if not images:
+            print(f"no .os3kapp files found in {backup_dir}", file=sys.stderr)
+            return 1
+        skipped_ids = {int(value, 0) for value in args.skip}
+        selected: list[tuple[Path, bytes]] = []
+        for image_path in images:
+            image = image_path.read_bytes()
+            metadata = parse_smartapplet_metadata(image[:0x84])
+            if metadata.applet_id == 0 and not args.include_system:
+                print(f"skip applet_id=0x0000 name={metadata.name} path={image_path}")
+                continue
+            if metadata.applet_id in skipped_ids:
+                print(f"skip applet_id=0x{metadata.applet_id:04x} name={metadata.name} path={image_path}")
+                continue
+            selected.append((image_path, image))
+        if not selected:
+            print("no applets selected for restore", file=sys.stderr)
+            return 1
+
+        transport = open_direct_usb_transport()
+        client = NeoAlphaWordClient(transport)
+        try:
+            client.clear_smart_applet_area()
+            print("cleared SmartApplet area")
+            for image_path, image in selected:
+                entry = client.install_smart_applet(image)
+                print(
+                    f"installed applet_id=0x{entry.applet_id:04x} "
+                    f"version={entry.version_major}.{entry.version_minor} "
+                    f"name={entry.name} file_size={entry.file_size} path={image_path}"
+                )
+            if args.restart:
+                client.restart_device()
+                print("sent restart command")
+        finally:
+            client.close()
+        return 0
+
+    if args.command == "install-os-image":
+        if not args.yes_flash_os:
+            print("refusing to flash OS image without --yes-flash-os", file=sys.stderr)
+            return 2
+        image_path = Path(args.path)
+        image = image_path.read_bytes()
+        segments = parse_neo_os_segments(image)
+        print(
+            f"validated NEO OS image path={image_path} bytes={len(image)} "
+            f"segments={len(segments)}"
+        )
+        for segment in segments:
+            erase_kb = (segment.length + 0x3FF) >> 10
+            if args.reformat_rest_of_rom and segment.address == 0x005FFC00:
+                erase_kb = 0
+            print(f"segment address=0x{segment.address:08x} length={segment.length} erase_kb={erase_kb}")
+        transport = open_direct_usb_transport()
+        client = NeoAlphaWordClient(transport)
+        try:
+            summary = client.install_neo_os_image(image, reformat_rest_of_rom=args.reformat_rest_of_rom)
+        finally:
+            client.close()
+        print(
+            f"flashed NEO OS bytes={summary.bytes_written} "
+            f"chunks={summary.chunks_written} segments={len(summary.segments)}"
+        )
         return 0
 
     if args.command == "restart-device":

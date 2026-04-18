@@ -11,6 +11,29 @@ from real_check.live_usb import AlphaSmartDeviceMode, ObservedAlphaSmartDevice
 from real_check.usb_select import EndpointDescriptor, InterfaceDescriptor
 
 
+def _fake_applet_image(*, applet_id: int, name: str) -> bytes:
+    image = bytearray(0x84)
+    image[0x00:0x04] = bytes.fromhex("c0 ff ee ad")
+    image[0x04:0x08] = len(image).to_bytes(4, "big")
+    image[0x10:0x14] = (0xFF0000CE).to_bytes(4, "big")
+    image[0x14:0x18] = ((applet_id << 16) | 0x0100).to_bytes(4, "big")
+    image[0x18 : 0x18 + len(name)] = name.encode("ascii")
+    image[0x3C] = 0x01
+    image[0x3D] = 0x00
+    image[0x3F] = 0x01
+    return bytes(image)
+
+
+def _fake_neo_os_image() -> bytes:
+    image = bytearray(0x80)
+    image[0:4] = b"\xff\xff\xff\xff"
+    image[4:6] = (1).to_bytes(2, "big")
+    image[6:24] = b"System 3 Neo      "
+    image[0x50:0x54] = (0x00410000).to_bytes(4, "big")
+    image[0x54:0x58] = (0x00000600).to_bytes(4, "big")
+    return bytes(image)
+
+
 class CLITests(unittest.TestCase):
     def test_probe_parser_accepts_descriptor_dump_mode(self) -> None:
         stdout = io.StringIO()
@@ -30,6 +53,8 @@ class CLITests(unittest.TestCase):
         self.assertIn("install-applet", stdout.getvalue())
         self.assertIn("remove-applet-index", stdout.getvalue())
         self.assertIn("clear-applet-area", stdout.getvalue())
+        self.assertIn("restore-stock-applets", stdout.getvalue())
+        self.assertIn("install-os-image", stdout.getvalue())
         self.assertIn("restart-device", stdout.getvalue())
         self.assertIn("verify-get", stdout.getvalue())
         self.assertIn("get", stdout.getvalue())
@@ -304,6 +329,89 @@ class CLITests(unittest.TestCase):
         self.assertEqual(stdout.getvalue(), "cleared SmartApplet area\n")
         open_transport.assert_called_once()
         client.clear_smart_applet_area.assert_called_once()
+        client.close.assert_called_once()
+
+    def test_restore_stock_applets_refuses_without_confirmation(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            exit_code = main(["restore-stock-applets", "--backup-dir", "/tmp/nowhere"])
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(stderr.getvalue(), "refusing to clear SmartApplet area without --yes\n")
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_restore_stock_applets_clears_and_installs_selected_backups(
+        self, client_cls: mock.Mock, open_transport: mock.Mock
+    ) -> None:
+        client = client_cls.return_value
+        client.install_smart_applet.side_effect = [
+            SmartAppletEntry(
+                applet_id=0xA000,
+                version_major=1,
+                version_minor=0,
+                name="AlphaWord Plus",
+                file_size=0x84,
+                applet_class=0x01,
+            )
+        ]
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            system_path = f"{tmpdir}/0000.os3kapp"
+            alphaword_path = f"{tmpdir}/a000.os3kapp"
+            with open(system_path, "wb") as handle:
+                handle.write(_fake_applet_image(applet_id=0x0000, name="System"))
+            with open(alphaword_path, "wb") as handle:
+                alphaword_image = _fake_applet_image(applet_id=0xA000, name="AlphaWord Plus")
+                handle.write(alphaword_image)
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["restore-stock-applets", "--backup-dir", tmpdir, "--yes"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("skip applet_id=0x0000 name=System", stdout.getvalue())
+        self.assertIn("cleared SmartApplet area\n", stdout.getvalue())
+        self.assertIn("installed applet_id=0xa000 version=1.0 name=AlphaWord Plus", stdout.getvalue())
+        open_transport.assert_called_once()
+        client.clear_smart_applet_area.assert_called_once()
+        client.install_smart_applet.assert_called_once_with(alphaword_image)
+        client.close.assert_called_once()
+
+    def test_install_os_image_refuses_without_confirmation(self) -> None:
+        stderr = io.StringIO()
+
+        with contextlib.redirect_stderr(stderr):
+            exit_code = main(["install-os-image", "/tmp/nowhere.os3kos"])
+
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(stderr.getvalue(), "refusing to flash OS image without --yes-flash-os\n")
+
+    @mock.patch("real_check.open_direct_usb_transport")
+    @mock.patch("real_check.NeoAlphaWordClient")
+    def test_install_os_image_validates_and_flashes_confirmed_image(
+        self, client_cls: mock.Mock, open_transport: mock.Mock
+    ) -> None:
+        client = client_cls.return_value
+        client.install_neo_os_image.return_value.bytes_written = 0x80
+        client.install_neo_os_image.return_value.chunks_written = 1
+        client.install_neo_os_image.return_value.segments = (object(),)
+        stdout = io.StringIO()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = f"{tmpdir}/os3kneorom.os3kos"
+            image = _fake_neo_os_image()
+            with open(path, "wb") as handle:
+                handle.write(image)
+            with contextlib.redirect_stdout(stdout):
+                exit_code = main(["install-os-image", path, "--yes-flash-os"])
+
+        self.assertEqual(exit_code, 0)
+        self.assertIn("validated NEO OS image", stdout.getvalue())
+        self.assertIn("segment address=0x00410000", stdout.getvalue())
+        self.assertIn("flashed NEO OS bytes=128 chunks=1 segments=1", stdout.getvalue())
+        open_transport.assert_called_once()
+        client.install_neo_os_image.assert_called_once_with(image, reformat_rest_of_rom=False)
         client.close.assert_called_once()
 
     @mock.patch("real_check.open_direct_usb_transport")
