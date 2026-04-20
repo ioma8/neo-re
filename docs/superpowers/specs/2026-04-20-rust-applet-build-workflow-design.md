@@ -1,0 +1,187 @@
+# Rust Applet Build Workflow Design
+
+## Goal
+
+Make writing, adding, and compiling AlphaSmart NEO SmartApplets from the Rust SDK simple enough that applet authors work mostly in one readable source file per applet.
+
+The target command shape is:
+
+```bash
+cargo run -- build alpha_usb
+cargo run -- build all
+```
+
+The generated applet packages are `.os3kapp` files written under `../exports/`.
+
+## Project Structure
+
+Move applet-specific source into `src/applets/`:
+
+```text
+alpha-usb-rust/
+  src/
+    applets/
+      mod.rs
+      alpha_usb.rs
+    compiler.rs
+    lib.rs
+    main.rs
+    os3kapp.rs
+    sdk.rs
+```
+
+`src/applets/alpha_usb.rs` owns only the Alpha USB applet definition. SDK, compiler, and `.os3kapp` packaging code stay in their existing focused modules.
+
+`src/applets/mod.rs` exposes an applet registry. New applets should require:
+
+1. Add `src/applets/<name>.rs`.
+2. Register it in `src/applets/mod.rs`.
+3. Run `cargo run -- build <name>`.
+
+No applet author should need to touch compiler internals, package layout code, or raw byte emission for ordinary applets.
+
+## CLI
+
+Keep a single binary and add a small subcommand parser:
+
+```bash
+cargo run -- build alpha_usb
+cargo run -- build all
+cargo run -- list
+```
+
+`build alpha_usb` writes the Alpha USB applet package.
+
+`build all` iterates over the registry and writes every applet package.
+
+`list` prints registered applet names and their output filenames. This is useful once multiple applets exist and is cheap to maintain.
+
+The default output directory is `../exports/applets/`. An optional `--output-dir <path>` may override it:
+
+```bash
+cargo run -- build alpha_usb --output-dir ../exports
+```
+
+Output filenames come from the registry, for example `alpha-usb.os3kapp`.
+
+## Registry
+
+Represent each applet as an `AppletPackage`:
+
+```rust
+pub struct AppletPackage {
+    pub name: &'static str,
+    pub output_filename: &'static str,
+    pub build: fn() -> AppletDefinition,
+    pub validate: fn(&[u8]) -> Result<(), Box<dyn Error>>,
+}
+```
+
+The registry returns a static slice:
+
+```rust
+pub fn all() -> &'static [AppletPackage];
+pub fn find(name: &str) -> Option<&'static AppletPackage>;
+```
+
+Alpha USB can keep using the existing strict validation because it is a known production-sensitive applet:
+
+```rust
+os3kapp::validate_alpha_usb_image(image)?;
+```
+
+Future applets can initially use generic package validation, then add stricter validators when needed.
+
+## Build Flow
+
+The shared build helper performs the complete pipeline:
+
+1. Resolve applet by registry name.
+2. Compile the `AppletDefinition` with `compiler::compile_applet`.
+3. Package it with `os3kapp::build_image`.
+4. Run the applet validator.
+5. Create the output directory.
+6. Write the `.os3kapp`.
+7. Print `wrote=<path>`.
+
+`build all` applies the same helper to every registered applet and fails the process if any applet fails. Partial outputs are acceptable because generated files are ignored and each successful file is explicitly printed.
+
+## SDK Authoring Surface
+
+The applet source should remain high level:
+
+```rust
+pub struct AlphaUsb;
+
+impl NeoApplet for AlphaUsb {
+    const MANIFEST: AppletManifest =
+        AppletManifest::alpha_usb_bridge(AppletId(0xA130), "Alpha USB", Version::decimal(1, 20));
+
+    fn on_focus(&self, ctx: &mut UiContext) {
+        ctx.screen().clear();
+        ctx.screen().write_lines(
+            2,
+            [
+                "Now connect the NEO",
+                "to your computer or",
+                "smartphone via USB.",
+            ],
+        );
+        ctx.events().idle_forever();
+    }
+
+    fn on_usb_plug(&self, ctx: &mut UsbContext) {
+        ctx.usb().complete_hid_to_direct();
+        ctx.usb().mark_direct_connected();
+        ctx.status(Status::USB_HANDLED);
+    }
+}
+```
+
+The build workflow should not make applet authors handle raw bytes, A-line traps, checksums, or `.os3kapp` offsets.
+
+## Errors
+
+CLI errors should be explicit:
+
+- unknown applet: list available names
+- invalid command: show usage
+- output write failure: include the path
+- compile/package/validation failure: include the applet name
+
+No panic-based error handling should be introduced.
+
+## Validation
+
+After implementation:
+
+```bash
+cargo check
+cargo fmt --all -- --check
+cargo test
+cargo clippy --all-targets --all-features -- -D warnings -D clippy::all -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
+cargo run -- build alpha_usb
+cargo run -- build all
+```
+
+Alpha USB must remain byte-exact with the Python reference:
+
+```bash
+uv run --project poc/neotools neotools build-benign-smartapplet \
+  --output exports/alpha-usb-python-reference.os3kapp \
+  --applet-id 0xa130 \
+  --name "Alpha USB" \
+  --draw-on-menu-command \
+  --host-usb-message-handler \
+  --alphaword-write-metadata \
+  --alpha-usb-production
+
+md5 exports/alpha-usb-python-reference.os3kapp exports/applets/alpha-usb.os3kapp
+cmp exports/alpha-usb-python-reference.os3kapp exports/applets/alpha-usb.os3kapp
+```
+
+Expected MD5:
+
+```text
+6a167dd71f52800f3608bbc4e235cb5e
+```
