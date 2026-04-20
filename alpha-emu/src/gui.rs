@@ -4,7 +4,7 @@ use anyhow::Result;
 use eframe::egui;
 
 use crate::applet_host::AppletHost;
-use crate::domain::{EmulatorSnapshot, Lcd, UsbMode};
+use crate::domain::{EmulatorSnapshot, Lcd, Screen, UsbMode};
 
 /// Runs the desktop emulator UI.
 ///
@@ -34,32 +34,53 @@ struct AlphaEmuApp {
 
 impl AlphaEmuApp {
     fn load(path: &Path) -> Self {
+        let mut app = Self {
+            host: None,
+            load_error: None,
+        };
+        app.load_applet(path);
+        app
+    }
+
+    fn load_applet(&mut self, path: &Path) {
         match AppletHost::load(path) {
-            Ok(host) => Self {
-                host: Some(host),
-                load_error: None,
-            },
-            Err(error) => Self {
-                host: None,
-                load_error: Some(format!("{}: {error}", path.display())),
-            },
+            Ok(host) => {
+                self.host = Some(host);
+                self.load_error = None;
+            }
+            Err(error) => {
+                self.host = None;
+                self.load_error = Some(format!("{}: {error}", path.display()));
+            }
+        }
+    }
+
+    fn open_file_dialog(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("AlphaSmart applet", &["os3kapp"])
+            .pick_file()
+        {
+            self.load_applet(&path);
         }
     }
 }
 
 impl eframe::App for AlphaEmuApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.handle_keyboard(ui);
+
         ui.add_space(16.0);
         ui.heading("AlphaSmart NEO emulator");
-        ui.label("First slice: run the real Alpha USB SmartApplet package.");
+        ui.label("Emulated SmartApplets menu and Alpha USB runtime.");
         ui.add_space(12.0);
 
-        if let Some(error) = &self.load_error {
-            ui.colored_label(ui.visuals().error_fg_color, error);
-            return;
-        }
+        render_top_controls(ui, self);
+        ui.add_space(12.0);
 
         let Some(host) = &mut self.host else {
+            if let Some(error) = &self.load_error {
+                ui.colored_label(ui.visuals().error_fg_color, error);
+            }
             ui.label("No applet loaded.");
             return;
         };
@@ -69,17 +90,49 @@ impl eframe::App for AlphaEmuApp {
         ui.add_space(12.0);
         render_lcd(ui, &snapshot.lcd);
         ui.add_space(12.0);
-        render_controls(ui, host);
+        render_runtime_controls(ui, host);
         ui.add_space(12.0);
         render_status(ui, &host.snapshot());
     }
 }
 
+impl AlphaEmuApp {
+    fn handle_keyboard(&mut self, ui: &egui::Ui) {
+        let Some(host) = &mut self.host else {
+            return;
+        };
+        ui.input(|input| {
+            if input.key_pressed(egui::Key::ArrowUp) {
+                host.menu_up();
+            }
+            if input.key_pressed(egui::Key::ArrowDown) {
+                host.menu_down();
+            }
+            if input.key_pressed(egui::Key::Enter) {
+                host.open_selected();
+            }
+        });
+    }
+}
+
+fn render_top_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
+    ui.horizontal(|ui| {
+        if ui.button("Open applet").clicked() {
+            app.open_file_dialog();
+        }
+        ui.label("Menu: Up/Down arrows select, Enter opens.");
+    });
+}
+
 fn render_metadata(ui: &mut egui::Ui, snapshot: &EmulatorSnapshot) {
     ui.horizontal(|ui| {
-        ui.label(format!("Applet: {}", snapshot.metadata.name));
+        let Some(metadata) = &snapshot.metadata else {
+            ui.label("Applet: none");
+            return;
+        };
+        ui.label(format!("Applet: {}", metadata.name));
         ui.separator();
-        ui.label(format!("ID: 0x{:04x}", snapshot.metadata.applet_id));
+        ui.label(format!("ID: 0x{:04x}", metadata.applet_id));
         ui.separator();
         ui.label(format!(
             "USB: {}",
@@ -106,11 +159,8 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &Lcd) {
         });
 }
 
-fn render_controls(ui: &mut egui::Ui, host: &mut AppletHost) {
+fn render_runtime_controls(ui: &mut egui::Ui, host: &mut AppletHost) {
     ui.horizontal(|ui| {
-        if ui.button("Open applet").clicked() {
-            host.open_applet();
-        }
         if ui.button("Simulate USB attach").clicked() {
             host.simulate_usb_attach();
         }
@@ -126,6 +176,14 @@ fn render_status(ui: &mut egui::Ui, snapshot: &EmulatorSnapshot) {
     } else {
         ui.label("Last status: none");
     }
+    ui.label(format!(
+        "Screen: {}",
+        match snapshot.screen {
+            Screen::AppletsMenu => "SmartApplets menu",
+            Screen::AppletRunning => "Applet running",
+            Screen::UsbAttach => "USB attach",
+        }
+    ));
 
     if let Some(error) = &snapshot.error {
         ui.colored_label(ui.visuals().error_fg_color, error);

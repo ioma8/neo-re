@@ -61,10 +61,18 @@ pub struct AppletMetadata {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EmulatorSnapshot {
-    pub metadata: AppletMetadata,
+    pub metadata: Option<AppletMetadata>,
+    pub screen: Screen,
     pub lcd: Lcd,
     pub usb_mode: UsbMode,
     pub last_status: Option<u32>,
     pub last_trace: Vec<String>,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Screen {
+    AppletsMenu,
+    AppletRunning,
+    UsbAttach,
 }

@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 use crate::cpu68k::{self, CpuError};
-use crate::domain::EmulatorSnapshot;
+use crate::domain::{EmulatorSnapshot, Screen, UsbMode};
 use crate::neo_os::NeoOs;
 use crate::os3kapp::{Os3kApp, Os3kAppError};
 
@@ -9,6 +9,7 @@ use crate::os3kapp::{Os3kApp, Os3kAppError};
 pub struct AppletHost {
     app: Os3kApp,
     os: NeoOs,
+    screen: Screen,
     last_status: Option<u32>,
     last_trace: Vec<String>,
     error: Option<String>,
@@ -29,9 +30,13 @@ impl AppletHost {
     ///
     /// Returns an error when the package cannot be read or parsed.
     pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, HostError> {
+        let app = Os3kApp::read(path)?;
+        let mut os = NeoOs::default();
+        os.draw_applets_menu(&app.metadata.name, true);
         Ok(Self {
-            app: Os3kApp::read(path)?,
-            os: NeoOs::default(),
+            app,
+            os,
+            screen: Screen::AppletsMenu,
             last_status: None,
             last_trace: Vec::new(),
             error: None,
@@ -39,24 +44,47 @@ impl AppletHost {
     }
 
     pub fn open_applet(&mut self) {
+        self.screen = Screen::AppletRunning;
         self.run_message(0x19);
     }
 
     pub fn simulate_usb_attach(&mut self) {
+        self.screen = Screen::UsbAttach;
+        self.os.draw_usb_attach_start();
         self.run_message(0x3_0001);
+        if self.error.is_none() {
+            if self.os.usb_mode == UsbMode::Direct {
+                self.os.draw_direct_attached();
+            } else {
+                self.os.draw_usb_keyboard_attached();
+            }
+        }
     }
 
     pub fn reset(&mut self) {
         self.os = NeoOs::default();
+        self.os.draw_applets_menu(&self.app.metadata.name, true);
+        self.screen = Screen::AppletsMenu;
         self.last_status = None;
         self.last_trace.clear();
         self.error = None;
     }
 
+    pub fn menu_up(&mut self) {}
+
+    pub fn menu_down(&mut self) {}
+
+    pub fn open_selected(&mut self) {
+        if self.screen == Screen::AppletsMenu {
+            self.open_applet();
+        }
+    }
+
     #[must_use]
     pub fn snapshot(&self) -> EmulatorSnapshot {
         EmulatorSnapshot {
-            metadata: self.app.metadata.clone(),
+            metadata: Some(self.app.metadata.clone()),
+            screen: self.screen,
             lcd: self.os.lcd.clone(),
             usb_mode: self.os.usb_mode,
             last_status: self.last_status,
@@ -98,6 +126,17 @@ mod tests {
     }
 
     #[test]
+    fn starts_in_applets_menu() -> Result<(), Box<dyn std::error::Error>> {
+        let host = AppletHost::load("../exports/applets/alpha-usb-native.os3kapp")?;
+        let snapshot = host.snapshot();
+
+        assert_eq!(snapshot.screen, crate::domain::Screen::AppletsMenu);
+        assert_eq!(snapshot.lcd.rows()[0], "SmartApplets");
+        assert_eq!(snapshot.lcd.rows()[2], "> Alpha USB");
+        Ok(())
+    }
+
+    #[test]
     fn alpha_usb_attach_switches_to_direct() -> Result<(), Box<dyn std::error::Error>> {
         let mut host = AppletHost::load("../exports/applets/alpha-usb-native.os3kapp")?;
         host.simulate_usb_attach();
@@ -105,6 +144,8 @@ mod tests {
 
         assert_eq!(snapshot.error, None);
         assert_eq!(snapshot.usb_mode, UsbMode::Direct);
+        assert_eq!(snapshot.lcd.rows()[1], "Connected to");
+        assert_eq!(snapshot.lcd.rows()[2], "NEO Manager.");
         assert_eq!(snapshot.last_status, Some(0x11));
         Ok(())
     }
