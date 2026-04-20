@@ -4,9 +4,9 @@
 
 **Goal:** Build `alpha-emu`, a desktop Rust emulator that loads the real `Alpha USB` `.os3kapp` package and executes enough m68k/NEO behavior for focus and USB attach flows.
 
-**Architecture:** Keep the emulator narrow and testable: package parsing, domain state, CPU/instruction stepping, NEO OS shims, host message dispatch, and GUI are separate modules. Start with the real `Alpha USB` package and implement only the reached instruction/OS surface.
+**Architecture:** Keep the emulator narrow and testable: package parsing, domain state, `m68000` interpreter integration, NEO OS shims, host message dispatch, and GUI are separate modules. Start with the real `Alpha USB` package and implement only the reached instruction/OS surface.
 
-**Tech Stack:** Rust 2024, `m68000` for m68k execution/disassembly support where practical, `eframe/egui` for desktop UI, `thiserror`/`anyhow` for errors, `tracing` for diagnostics.
+**Tech Stack:** Rust 2024, `m68000` for m68k execution/disassembly, `eframe/egui` for desktop UI, `thiserror`/`anyhow` for errors, `tracing` for diagnostics.
 
 ---
 
@@ -40,8 +40,8 @@
 - Create: `alpha-emu/src/applet_host.rs`
 - Modify: `alpha-emu/src/lib.rs`
 
-- [ ] Build a bounded interpreter host for the `Alpha USB` applet.
-- [ ] Use m68k disassembly/execution support where useful, but keep explicit shims for known Alpha USB OS calls.
+- [ ] Build a bounded interpreter host for the `Alpha USB` applet using the `m68000` crate directly.
+- [ ] Implement `m68000` memory access around applet code, stack, and known NEO OS call interception points.
 - [ ] Implement `open_applet()` for message `0x19`.
 - [ ] Implement `simulate_usb_attach()` for message `0x30001`.
 - [ ] Add tests for expected LCD text and HID-to-direct mode transition.
@@ -68,4 +68,3 @@
 - [ ] Run `cargo test`.
 - [ ] Run a strict but practical `cargo clippy` pass and fix warnings.
 - [ ] Smoke-run `cargo run -- ../exports/applets/alpha-usb-native.os3kapp`.
-
