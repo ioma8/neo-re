@@ -33,6 +33,34 @@ impl Lcd {
             *row = text;
         }
     }
+
+    pub fn clear_span(&mut self, index: usize, col: usize, width: usize) {
+        let Some(row) = self.rows.get_mut(index) else {
+            return;
+        };
+        let end = col.saturating_add(width).min(LCD_COLS);
+        while row.len() < end {
+            row.push(' ');
+        }
+        for pos in col..end {
+            row.replace_range(pos..=pos, " ");
+        }
+        *row = row.trim_end().to_string();
+    }
+
+    pub fn put_char(&mut self, index: usize, col: usize, ch: char) {
+        let Some(row) = self.rows.get_mut(index) else {
+            return;
+        };
+        if col >= LCD_COLS {
+            return;
+        }
+        while row.len() <= col {
+            row.push(' ');
+        }
+        row.replace_range(col..=col, &ch.to_string());
+        row.truncate(LCD_COLS);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

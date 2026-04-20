@@ -109,7 +109,24 @@ impl AlphaEmuApp {
                 system.menu_down();
             }
             if input.key_pressed(egui::Key::Enter) {
-                system.open_selected();
+                if system.snapshot().screen == crate::domain::Screen::AppletRunning {
+                    system.applet_key(0x0d);
+                } else {
+                    system.open_selected();
+                }
+            }
+            if input.key_pressed(egui::Key::Escape) {
+                system.applet_key(0x1b);
+            }
+            if input.key_pressed(egui::Key::Backspace) {
+                system.applet_key(0x08);
+            }
+            for event in &input.events {
+                if let egui::Event::Text(text) = event {
+                    for byte in text.bytes() {
+                        system.applet_key(byte);
+                    }
+                }
             }
         });
     }

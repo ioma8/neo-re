@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::applet_runner::{self, RunnerError};
+use crate::applet_runner::{self, AppletSession, RunnerError};
 use crate::domain::{EmulatorSnapshot, Screen, UsbMode};
 use crate::os_shims::NeoOsShims;
 use crate::os3kapp::{Os3kApp, Os3kAppError};
@@ -10,6 +10,7 @@ pub struct NeoSystem {
     app: Os3kApp,
     os: NeoOsShims,
     screen: Screen,
+    session: Option<AppletSession>,
     last_status: Option<u32>,
     last_trace: Vec<String>,
     error: Option<String>,
@@ -37,6 +38,7 @@ impl NeoSystem {
             app,
             os,
             screen: Screen::AppletsMenu,
+            session: None,
             last_status: None,
             last_trace: Vec::new(),
             error: None,
@@ -45,7 +47,15 @@ impl NeoSystem {
 
     pub fn open_applet(&mut self) {
         self.screen = Screen::AppletRunning;
-        self.run_message(0x19);
+        match AppletSession::start(&self.app, 0x19) {
+            Ok(mut session) => {
+                self.run_session(&mut session);
+                self.session = Some(session);
+            }
+            Err(error) => {
+                self.error = Some(error.to_string());
+            }
+        }
     }
 
     pub fn simulate_usb_attach(&mut self) {
@@ -65,6 +75,7 @@ impl NeoSystem {
         self.os = NeoOsShims::default();
         self.os.draw_applets_menu(&self.app.metadata.name, true);
         self.screen = Screen::AppletsMenu;
+        self.session = None;
         self.last_status = None;
         self.last_trace.clear();
         self.error = None;
@@ -77,6 +88,17 @@ impl NeoSystem {
     pub fn open_selected(&mut self) {
         if self.screen == Screen::AppletsMenu {
             self.open_applet();
+        }
+    }
+
+    pub fn applet_key(&mut self, key: u8) {
+        if self.screen != Screen::AppletRunning {
+            return;
+        }
+        self.os.push_key(key);
+        if let Some(mut session) = self.session.take() {
+            self.run_session(&mut session);
+            self.session = Some(session);
         }
     }
 
@@ -99,6 +121,22 @@ impl NeoSystem {
                 self.last_status = Some(result.status);
                 self.last_trace = result.trace;
                 self.error = None;
+            }
+            Err(error) => {
+                self.error = Some(error.to_string());
+            }
+        }
+    }
+
+    fn run_session(&mut self, session: &mut AppletSession) {
+        match session.run_until_yield_or_return(&mut self.os) {
+            Ok(result) => {
+                self.last_status = Some(result.status);
+                self.last_trace = result.trace;
+                self.error = None;
+                if !result.yielded {
+                    self.session = None;
+                }
             }
             Err(error) => {
                 self.error = Some(error.to_string());
@@ -147,6 +185,45 @@ mod tests {
         assert_eq!(snapshot.lcd.rows()[1], "Connected to");
         assert_eq!(snapshot.lcd.rows()[2], "NEO Manager.");
         assert_eq!(snapshot.last_status, Some(0x11));
+        Ok(())
+    }
+
+    #[test]
+    fn calculator_opens_without_emulator_error() -> Result<(), Box<dyn std::error::Error>> {
+        let mut system =
+            NeoSystem::load("../analysis/device-dumps/applets/A002-Calculator.os3kapp")?;
+        system.open_applet();
+        let snapshot = system.snapshot();
+
+        assert_eq!(
+            snapshot.error,
+            None,
+            "trace:\n{}",
+            snapshot.last_trace.join("\n")
+        );
+        assert!(snapshot.lcd.rows()[0].contains("valid keys"));
+        assert!(snapshot.lcd.rows()[1].contains("+-*x/"));
+        Ok(())
+    }
+
+    #[test]
+    fn calculator_accepts_key_input_without_emulator_error()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut system =
+            NeoSystem::load("../analysis/device-dumps/applets/A002-Calculator.os3kapp")?;
+        system.open_applet();
+        system.applet_key(b'1');
+        system.applet_key(b'+');
+        system.applet_key(b'2');
+        system.applet_key(0x0d);
+        let snapshot = system.snapshot();
+
+        assert_eq!(
+            snapshot.error,
+            None,
+            "trace:\n{}",
+            snapshot.last_trace.join("\n")
+        );
         Ok(())
     }
 }

@@ -10,6 +10,8 @@ const HEADER_SIZE: usize = 0x84;
 pub struct Os3kApp {
     pub metadata: AppletMetadata,
     pub entry_offset: u32,
+    pub base_memory_size: u32,
+    pub extra_memory_size: u32,
     pub image: Vec<u8>,
 }
 
@@ -75,6 +77,8 @@ impl Os3kApp {
         Ok(Self {
             metadata,
             entry_offset,
+            base_memory_size: read_be32(&image, 0x08),
+            extra_memory_size: read_be32(&image, 0x80),
             image,
         })
     }
