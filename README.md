@@ -1,6 +1,6 @@
 # neo-re
 
-AlphaSmart NEO reverse-engineering notes and tools.
+AlphaSmart NEO reverse-engineering notes and working tools.
 
 The core validated result is direct USB access: the NEO can be switched from HID
 keyboard mode `081e:bd04` to direct USB mode `081e:bd01`, where AlphaWord files
@@ -8,7 +8,18 @@ and SmartApplet metadata can be read through bulk endpoints. The repo also
 contains a validated `Alpha USB` SmartApplet path for Android backups without
 root, proxy hardware, or typewriter fallback.
 
-## What Is Here
+## Implemented And Working
+
+- Desktop USB detection, HID-to-direct switching, and direct endpoint probing.
+- Read-only AlphaWord slot listing and file download.
+- SmartApplet listing, dumping, installing, clearing, and stock restore tooling.
+- NEO OS image flashing/recovery tooling used successfully on physical hardware.
+- Desktop TUI backup app and desktop GUI backup app.
+- Android GUI backup path using the `Alpha USB` SmartApplet to enter direct USB.
+- Native Rust SmartApplet SDK/packer that builds the `Alpha USB` applet for
+  `m68k-unknown-none-elf`.
+
+## Main Components
 
 - `real-check/`: live USB command tool for probing, switching to direct mode,
   listing/downloading AlphaWord files, SmartApplet operations, and recovery
@@ -21,25 +32,3 @@ root, proxy hardware, or typewriter fallback.
   reverse-engineering helpers.
 - `docs/`: protocol notes and device findings. The most important recovery note
   is [docs/2026-04-18-neo-recovery-runbook.md](docs/2026-04-18-neo-recovery-runbook.md).
-
-## Current Status
-
-- Desktop HID-to-direct switching is physically validated.
-- Read-only AlphaWord listing and file download are physically validated.
-- Android backup works when the NEO runs the `Alpha USB` SmartApplet before USB
-  connection.
-- Native Rust SmartApplet builds are structurally validated; treat new applets as
-  hardware-facing experiments and validate carefully.
-- OS/app flashing and clearing commands exist, but they are recovery tools and
-  can rewrite persistent device state.
-
-## Public Repo Hygiene
-
-Local reverse-engineering artifacts are intentionally ignored:
-
-- `analysis/`
-- `exports/`
-- `NEOManager3_9_3USPC/`
-
-The Git history has been purged of proprietary NEO Manager installer payloads.
-Keep those paths ignored.
