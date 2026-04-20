@@ -71,7 +71,9 @@ impl FirmwareSession {
             if !disassembly.is_empty() {
                 self.push_trace(format!("0x{pc:08x}: {disassembly}"));
             }
-            self.mmio_accesses.extend(self.memory.drain_mmio_accesses());
+            for access in self.memory.drain_mmio_accesses() {
+                self.push_mmio_access(access);
+            }
 
             if let Some(vector) = exception {
                 self.last_exception = Some(format_exception(vector, pc));
@@ -97,6 +99,13 @@ impl FirmwareSession {
         self.trace.push(line);
         if self.trace.len() > 80 {
             self.trace.remove(0);
+        }
+    }
+
+    fn push_mmio_access(&mut self, access: String) {
+        self.mmio_accesses.push(access);
+        if self.mmio_accesses.len() > 256 {
+            self.mmio_accesses.remove(0);
         }
     }
 }

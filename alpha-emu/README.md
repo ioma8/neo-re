@@ -34,6 +34,28 @@ The desktop UI shows:
 - recent m68k instruction trace
 - MMIO reads/writes observed while the firmware runs
 
+For faster hardware probing without the UI:
+
+```sh
+cargo +nightly run -- --headless --steps=2000000
+```
+
+## Current Hardware Map
+
+Validated from the Small ROM boot path:
+
+- `0x00000000`: reset-vector mirror of the Small ROM image
+- `0x00400000`: executable Small ROM mapping; reset PC is `0x0040042a`
+- `0x0000f000..0x00010000`: DragonBall-style internal register window
+- `0xfffff000..0xffffffff`: sign-extended alias of the `0x0000f000` register window
+- `0x01000000..0x01000002`: left LCD controller command/data byte ports
+- `0x01008000..0x01008002`: right LCD controller command/data byte ports
+
+The current emulation preserves MMIO register byte state, logs reads/writes, and
+lets the Small ROM pass CPU setup, LCD initialization/clear, and keyboard-matrix
+polling without a bus error. The keyboard scanner currently idles by repeatedly
+reading `0xfffff419`, which appears to be a keyboard matrix input register.
+
 ## Validation
 
 ```sh

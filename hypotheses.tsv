@@ -121,3 +121,8 @@ Calculator firmware-only trap execution can be completed with general m68k instr
 Firmware routine 0x00416768 is the complete SmartApplet Line-A trap dispatcher	disproven
 Calculator firmware-only Line-A execution needs a runtime-initialized OS trap table or a different vector than 0x00416768	needs further investigation
 Rust A-line service shims can be removed without exposing missing firmware runtime state	disproven
+Small ROM executable image must be mirrored at 0x00400000 while reset vectors remain visible at 0x00000000	proven
+Small ROM early hardware initialization uses 68k absolute-short addresses sign-extended to 0xfffffxxx	proven
+Preserving byte state for MMIO registers lets Small ROM pass early CPU register setup without custom OS shims	proven
+Small ROM LCD initialization writes two byte-wide controller ports at 0x01000000/0x01000001 and 0x01008000/0x01008001	proven
+Small ROM keyboard idle polls 0xfffff419 as a keyboard matrix input register after LCD clear	proven

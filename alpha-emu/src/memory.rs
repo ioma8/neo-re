@@ -1,4 +1,5 @@
 use m68000::MemoryAccess;
+use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::firmware::FirmwareRuntime;
@@ -8,6 +9,10 @@ const ROM_BASE: usize = 0x0040_0000;
 const LOW_MMIO_START: u32 = 0x0000_f000;
 const LOW_MMIO_END: u32 = 0x0001_0000;
 const MMIO_BASE: u32 = 0xffff_0000;
+const LCD_LEFT_START: u32 = 0x0100_0000;
+const LCD_LEFT_END: u32 = 0x0100_0002;
+const LCD_RIGHT_START: u32 = 0x0100_8000;
+const LCD_RIGHT_END: u32 = 0x0100_8002;
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
@@ -18,6 +23,7 @@ pub enum MemoryError {
 #[derive(Clone, Debug)]
 pub(crate) struct EmuMemory {
     bytes: Vec<u8>,
+    mmio_bytes: BTreeMap<u32, u8>,
     mmio_accesses: Vec<String>,
 }
 
@@ -33,6 +39,7 @@ impl EmuMemory {
         bytes[ROM_BASE..ROM_BASE + firmware.image().len()].copy_from_slice(firmware.image());
         Ok(Self {
             bytes,
+            mmio_bytes: BTreeMap::new(),
             mmio_accesses: Vec::new(),
         })
     }
@@ -47,21 +54,47 @@ impl EmuMemory {
             self.mmio_accesses.remove(0);
         }
     }
+
+    fn read_mmio_byte(&self, addr: u32) -> u8 {
+        *self.mmio_bytes.get(&normalize_mmio(addr)).unwrap_or(&0)
+    }
+
+    fn read_mmio_word(&self, addr: u32) -> u16 {
+        u16::from_be_bytes([self.read_mmio_byte(addr), self.read_mmio_byte(addr + 1)])
+    }
+
+    fn write_mmio_byte(&mut self, addr: u32, value: u8) {
+        self.mmio_bytes.insert(normalize_mmio(addr), value);
+    }
+
+    fn write_mmio_word(&mut self, addr: u32, value: u16) {
+        let bytes = value.to_be_bytes();
+        self.write_mmio_byte(addr, bytes[0]);
+        self.write_mmio_byte(addr + 1, bytes[1]);
+    }
 }
 
 impl MemoryAccess for EmuMemory {
     fn get_byte(&mut self, addr: u32) -> Option<u8> {
         if is_mmio(addr) {
-            self.record_mmio(format!("read8 0x{addr:08x}"));
-            return Some(0);
+            let value = self.read_mmio_byte(addr);
+            self.record_mmio(format!(
+                "read8 0x{addr:08x}/0x{:04x}->0x{value:02x}",
+                normalize_mmio(addr)
+            ));
+            return Some(value);
         }
         self.bytes.get(addr as usize).copied()
     }
 
     fn get_word(&mut self, addr: u32) -> Option<u16> {
         if is_mmio(addr) {
-            self.record_mmio(format!("read16 0x{addr:08x}"));
-            return Some(0);
+            let value = self.read_mmio_word(addr);
+            self.record_mmio(format!(
+                "read16 0x{addr:08x}/0x{:04x}->0x{value:04x}",
+                normalize_mmio(addr)
+            ));
+            return Some(value);
         }
         let addr = addr as usize;
         Some(u16::from_be_bytes([
@@ -72,7 +105,11 @@ impl MemoryAccess for EmuMemory {
 
     fn set_byte(&mut self, addr: u32, value: u8) -> Option<()> {
         if is_mmio(addr) {
-            self.record_mmio(format!("write8 0x{addr:08x}=0x{value:02x}"));
+            self.write_mmio_byte(addr, value);
+            self.record_mmio(format!(
+                "write8 0x{addr:08x}/0x{:04x}=0x{value:02x}",
+                normalize_mmio(addr)
+            ));
             return Some(());
         }
         *self.bytes.get_mut(addr as usize)? = value;
@@ -81,7 +118,11 @@ impl MemoryAccess for EmuMemory {
 
     fn set_word(&mut self, addr: u32, value: u16) -> Option<()> {
         if is_mmio(addr) {
-            self.record_mmio(format!("write16 0x{addr:08x}=0x{value:04x}"));
+            self.write_mmio_word(addr, value);
+            self.record_mmio(format!(
+                "write16 0x{addr:08x}/0x{:04x}=0x{value:04x}",
+                normalize_mmio(addr)
+            ));
             return Some(());
         }
         let addr = addr as usize;
@@ -95,5 +136,53 @@ impl MemoryAccess for EmuMemory {
 }
 
 fn is_mmio(addr: u32) -> bool {
-    addr >= MMIO_BASE || (LOW_MMIO_START..LOW_MMIO_END).contains(&addr)
+    addr >= MMIO_BASE
+        || (LOW_MMIO_START..LOW_MMIO_END).contains(&addr)
+        || (LCD_LEFT_START..LCD_LEFT_END).contains(&addr)
+        || (LCD_RIGHT_START..LCD_RIGHT_END).contains(&addr)
+}
+
+fn normalize_mmio(addr: u32) -> u32 {
+    if addr >= MMIO_BASE {
+        addr & 0xffff
+    } else {
+        addr
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use m68000::MemoryAccess;
+
+    use super::EmuMemory;
+    use crate::firmware::FirmwareRuntime;
+
+    #[test]
+    fn sign_extended_mmio_aliases_share_register_state() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+
+        assert_eq!(memory.set_byte(0xffff_f429, 0x5a), Some(()));
+
+        assert_eq!(memory.get_byte(0x0000_f429), Some(0x5a));
+        Ok(())
+    }
+
+    #[test]
+    fn lcd_controller_command_and_data_ports_are_mapped() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+
+        assert_eq!(memory.set_byte(0x0100_8000, 0xb0), Some(()));
+        assert_eq!(memory.set_byte(0x0100_8001, 0xff), Some(()));
+        assert_eq!(memory.set_byte(0x0100_0000, 0xa3), Some(()));
+        assert_eq!(memory.set_byte(0x0100_0001, 0x55), Some(()));
+
+        assert_eq!(memory.get_byte(0x0100_8000), Some(0xb0));
+        assert_eq!(memory.get_byte(0x0100_8001), Some(0xff));
+        assert_eq!(memory.get_byte(0x0100_0000), Some(0xa3));
+        assert_eq!(memory.get_byte(0x0100_0001), Some(0x55));
+        Ok(())
+    }
 }
