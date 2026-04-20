@@ -1,0 +1,144 @@
+pub const LCD_WIDTH: usize = 320;
+pub const LCD_HEIGHT: usize = 128;
+
+const CONTROLLER_WIDTH: usize = LCD_WIDTH / 2;
+const RIGHT_CONTROLLER_X_BASE: usize = 132;
+const PAGE_HEIGHT: usize = 8;
+const PAGES: usize = LCD_HEIGHT / PAGE_HEIGHT;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LcdSnapshot {
+    pub width: usize,
+    pub height: usize,
+    pub pixels: Vec<bool>,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct Lcd {
+    controllers: [Controller; 2],
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Controller {
+    page: usize,
+    column: usize,
+    display_on: bool,
+    pixels: [[u8; CONTROLLER_WIDTH]; PAGES],
+}
+
+impl Lcd {
+    pub(crate) fn new() -> Self {
+        Self {
+            controllers: [Controller::new(), Controller::new()],
+        }
+    }
+
+    pub(crate) fn write_command(&mut self, controller: usize, command: u8) {
+        if let Some(controller) = self.controllers.get_mut(controller) {
+            controller.write_command(command);
+        }
+    }
+
+    pub(crate) fn write_data(&mut self, controller: usize, value: u8) {
+        if let Some(controller) = self.controllers.get_mut(controller) {
+            controller.write_data(value);
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> LcdSnapshot {
+        let mut pixels = vec![false; LCD_WIDTH * LCD_HEIGHT];
+        for controller_index in 0..self.controllers.len() {
+            let controller = self.controllers[controller_index];
+            let x_base = controller_x_base(controller_index);
+            for page in 0..PAGES {
+                for column in 0..CONTROLLER_WIDTH {
+                    let value = controller.pixels[page][column];
+                    for bit in 0..PAGE_HEIGHT {
+                        let x = x_base + column;
+                        let y = page * PAGE_HEIGHT + bit;
+                        if x < LCD_WIDTH {
+                            pixels[y * LCD_WIDTH + x] =
+                                controller.display_on && value & (1 << bit) != 0;
+                        }
+                    }
+                }
+            }
+        }
+        LcdSnapshot {
+            width: LCD_WIDTH,
+            height: LCD_HEIGHT,
+            pixels,
+        }
+    }
+}
+
+fn controller_x_base(controller_index: usize) -> usize {
+    if controller_index == 0 {
+        0
+    } else {
+        RIGHT_CONTROLLER_X_BASE
+    }
+}
+
+impl Controller {
+    const fn new() -> Self {
+        Self {
+            page: 0,
+            column: 0,
+            display_on: true,
+            pixels: [[0; CONTROLLER_WIDTH]; PAGES],
+        }
+    }
+
+    fn write_command(&mut self, command: u8) {
+        match command {
+            0xae => self.display_on = false,
+            0xaf => self.display_on = true,
+            0xb0..=0xbf => self.page = usize::from(command & 0x0f).min(PAGES - 1),
+            0x00..=0x0f => self.column = (self.column & 0xf0) | usize::from(command),
+            0x10..=0x1f => self.column = (self.column & 0x0f) | (usize::from(command & 0x0f) << 4),
+            0x40..=0x7f => self.column = 0,
+            0xa0 | 0xa1 | 0xa3 | 0xa6 | 0xc0..=0xc8 | 0xe0..=0xee | 0xf8 => {}
+            _ => {}
+        }
+        self.column = self.column.min(CONTROLLER_WIDTH - 1);
+    }
+
+    fn write_data(&mut self, value: u8) {
+        self.pixels[self.page][self.column] = value;
+        self.column = (self.column + 1).min(CONTROLLER_WIDTH - 1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LCD_WIDTH, Lcd};
+
+    #[test]
+    fn data_write_sets_vertical_pixels_and_advances_column() {
+        let mut lcd = Lcd::new();
+
+        lcd.write_command(0, 0xb1);
+        lcd.write_command(0, 0x11);
+        lcd.write_command(0, 0x02);
+        lcd.write_data(0, 0b0000_0101);
+
+        let snapshot = lcd.snapshot();
+        let x = 0x12;
+        assert!(snapshot.pixels[8 * LCD_WIDTH + x]);
+        assert!(!snapshot.pixels[9 * LCD_WIDTH + x]);
+        assert!(snapshot.pixels[10 * LCD_WIDTH + x]);
+    }
+
+    #[test]
+    fn right_controller_maps_to_right_half() {
+        let mut lcd = Lcd::new();
+
+        lcd.write_command(1, 0xb0);
+        lcd.write_data(1, 0x01);
+
+        let snapshot = lcd.snapshot();
+        assert!(snapshot.pixels[132]);
+        assert!(!snapshot.pixels[0]);
+    }
+}

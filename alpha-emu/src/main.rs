@@ -10,11 +10,14 @@ fn main() -> Result<()> {
         .init();
 
     let mut headless = false;
+    let mut lcd_ranges = false;
     let mut path = None;
     let mut steps = 10_000;
     for arg in std::env::args_os().skip(1) {
         if arg == "--headless" {
             headless = true;
+        } else if arg == "--lcd-ranges" {
+            lcd_ranges = true;
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--steps=")) {
             steps = value.parse()?;
         } else {
@@ -43,6 +46,31 @@ fn main() -> Result<()> {
         println!("trace:");
         for line in &snapshot.trace {
             println!("  {line}");
+        }
+        if lcd_ranges {
+            println!("lcd occupied x ranges:");
+            for y in 0..snapshot.lcd.height {
+                let mut ranges = Vec::new();
+                let mut start = None;
+                for x in 0..snapshot.lcd.width {
+                    if snapshot.lcd.pixels[y * snapshot.lcd.width + x] {
+                        start.get_or_insert(x);
+                    } else if let Some(range_start) = start.take() {
+                        ranges.push((range_start, x - 1));
+                    }
+                }
+                if let Some(range_start) = start {
+                    ranges.push((range_start, snapshot.lcd.width - 1));
+                }
+                if !ranges.is_empty() {
+                    let ranges = ranges
+                        .into_iter()
+                        .map(|(min, max)| format!("{min:03}..{max:03}"))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    println!("  y={y:03}: {ranges}");
+                }
+            }
         }
         Ok(())
     } else {

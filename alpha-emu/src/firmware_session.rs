@@ -6,6 +6,7 @@ use m68000::exception::Vector;
 use thiserror::Error;
 
 use crate::firmware::{FirmwareError, FirmwareRuntime};
+use crate::lcd::LcdSnapshot;
 use crate::memory::{EmuMemory, MemoryError};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,6 +18,7 @@ pub struct FirmwareSnapshot {
     pub last_exception: Option<String>,
     pub trace: Vec<String>,
     pub mmio_accesses: Vec<String>,
+    pub lcd: LcdSnapshot,
 }
 
 #[derive(Debug, Error)]
@@ -92,6 +94,7 @@ impl FirmwareSession {
             last_exception: self.last_exception.clone(),
             trace: self.trace.clone(),
             mmio_accesses: self.mmio_accesses.clone(),
+            lcd: self.memory.lcd_snapshot(),
         }
     }
 

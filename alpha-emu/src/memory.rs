@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::firmware::FirmwareRuntime;
+use crate::lcd::{Lcd, LcdSnapshot};
 
 const MEMORY_SIZE: usize = 0x0080_0000;
 const ROM_BASE: usize = 0x0040_0000;
@@ -23,6 +24,7 @@ pub enum MemoryError {
 #[derive(Clone, Debug)]
 pub(crate) struct EmuMemory {
     bytes: Vec<u8>,
+    lcd: Lcd,
     mmio_bytes: BTreeMap<u32, u8>,
     mmio_accesses: Vec<String>,
 }
@@ -39,6 +41,7 @@ impl EmuMemory {
         bytes[ROM_BASE..ROM_BASE + firmware.image().len()].copy_from_slice(firmware.image());
         Ok(Self {
             bytes,
+            lcd: Lcd::new(),
             mmio_bytes: BTreeMap::new(),
             mmio_accesses: Vec::new(),
         })
@@ -46,6 +49,10 @@ impl EmuMemory {
 
     pub(crate) fn drain_mmio_accesses(&mut self) -> Vec<String> {
         std::mem::take(&mut self.mmio_accesses)
+    }
+
+    pub(crate) fn lcd_snapshot(&self) -> LcdSnapshot {
+        self.lcd.snapshot()
     }
 
     fn record_mmio(&mut self, access: impl Into<String>) {
@@ -64,6 +71,13 @@ impl EmuMemory {
     }
 
     fn write_mmio_byte(&mut self, addr: u32, value: u8) {
+        match addr {
+            0x0100_8000 => self.lcd.write_command(0, value),
+            0x0100_8001 => self.lcd.write_data(0, value),
+            0x0100_0000 => self.lcd.write_command(1, value),
+            0x0100_0001 => self.lcd.write_data(1, value),
+            _ => {}
+        }
         self.mmio_bytes.insert(normalize_mmio(addr), value);
     }
 
@@ -183,6 +197,20 @@ mod tests {
         assert_eq!(memory.get_byte(0x0100_8001), Some(0xff));
         assert_eq!(memory.get_byte(0x0100_0000), Some(0xa3));
         assert_eq!(memory.get_byte(0x0100_0001), Some(0x55));
+        Ok(())
+    }
+
+    #[test]
+    fn lcd_port_0x01008000_maps_to_left_half() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+
+        assert_eq!(memory.set_byte(0x0100_8000, 0xb0), Some(()));
+        assert_eq!(memory.set_byte(0x0100_8001, 0x01), Some(()));
+
+        let snapshot = memory.lcd_snapshot();
+        assert!(snapshot.pixels[0]);
+        assert!(!snapshot.pixels[132]);
         Ok(())
     }
 }

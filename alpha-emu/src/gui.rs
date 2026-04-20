@@ -5,6 +5,7 @@ use eframe::egui;
 
 use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::{FirmwareSession, FirmwareSnapshot};
+use crate::lcd::LcdSnapshot;
 
 /// Runs the desktop Small ROM emulator UI.
 ///
@@ -57,7 +58,7 @@ impl AlphaEmuApp {
             });
         match loaded {
             Ok(mut session) => {
-                session.run_steps(200);
+                session.run_steps(300_000);
                 self.session = Some(session);
                 self.load_error = None;
             }
@@ -90,6 +91,8 @@ impl AlphaEmuApp {
                     match self.session.as_mut() {
                         Some(session) => {
                             let snapshot = session.snapshot();
+                            render_lcd(ui, &snapshot.lcd);
+                            ui.add_space(14.0);
                             render_summary(ui, &self.firmware_path, &snapshot);
                             ui.add_space(14.0);
                             render_controls(ui, session);
@@ -222,7 +225,49 @@ fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
             if secondary_button(ui, "Run 5,000 steps").clicked() {
                 session.run_steps(5_000);
             }
+            if secondary_button(ui, "Run 250,000 steps").clicked() {
+                session.run_steps(250_000);
+            }
         });
+    });
+}
+
+fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
+    card(ui, |ui| {
+        ui.label(
+            egui::RichText::new("Emulated LCD")
+                .size(15.0)
+                .strong()
+                .color(text_primary()),
+        );
+        ui.add_space(10.0);
+        let width = ui.available_width().min(800.0);
+        let height = width * lcd.height as f32 / lcd.width as f32;
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+        let lcd_bg = egui::Color32::from_rgb(196, 208, 174);
+        let pixel = egui::Color32::from_rgb(47, 58, 48);
+        painter.rect_filled(rect, 8.0, lcd_bg);
+        painter.rect_stroke(
+            rect,
+            8.0,
+            egui::Stroke::new(1.5, egui::Color32::from_rgb(93, 105, 81)),
+            egui::StrokeKind::Inside,
+        );
+        let scale_x = rect.width() / lcd.width as f32;
+        let scale_y = rect.height() / lcd.height as f32;
+        for y in 0..lcd.height {
+            for x in 0..lcd.width {
+                if lcd.pixels[y * lcd.width + x] {
+                    let min = egui::pos2(
+                        rect.left() + x as f32 * scale_x,
+                        rect.top() + y as f32 * scale_y,
+                    );
+                    let max = egui::pos2(min.x + scale_x.max(1.0), min.y + scale_y.max(1.0));
+                    painter.rect_filled(egui::Rect::from_min_max(min, max), 0.0, pixel);
+                }
+            }
+        }
     });
 }
 
