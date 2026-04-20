@@ -35,8 +35,11 @@ pub fn build_image(manifest: &AppletManifest, entry_code: &[u8]) -> Result<Vec<u
     payload.extend_from_slice(&2_u32.to_be_bytes());
     payload.extend_from_slice(entry_code);
 
-    let info_table = build_alphaword_write_info_table();
-    let file_size = HEADER_SIZE + payload.len() + info_table.len();
+    let info_table = manifest
+        .alphaword_write_metadata
+        .then(build_alphaword_write_info_table);
+    let info_table_len = info_table.as_ref().map_or(0, Vec::len);
+    let file_size = HEADER_SIZE + payload.len() + info_table_len;
     let file_size_u32 =
         u32::try_from(file_size).map_err(|_| Os3kAppError::FileTooLarge(file_size))?;
     let info_offset = HEADER_SIZE + payload.len();
@@ -61,13 +64,17 @@ pub fn build_image(manifest: &AppletManifest, entry_code: &[u8]) -> Result<Vec<u
     write_be32(&mut image, 0x80, manifest.extra_memory_size);
 
     image.extend_from_slice(&payload);
-    if manifest.alphaword_write_metadata {
+    if let Some(info_table) = info_table {
         image.extend_from_slice(&info_table);
     }
     Ok(image)
 }
 
 pub fn validate_alpha_usb_image(image: &[u8]) -> Result<(), Os3kAppError> {
+    validate_image(image)
+}
+
+pub fn validate_image(image: &[u8]) -> Result<(), Os3kAppError> {
     if image.len() < HEADER_SIZE + 16 {
         return Err(Os3kAppError::EntryTooShort);
     }
@@ -131,6 +138,22 @@ mod tests {
         assert_eq!(&image[0x94..0x96], &[0x4E, 0x75]);
         assert_eq!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);
         validate_alpha_usb_image(&image)?;
+        Ok(())
+    }
+
+    #[test]
+    fn packages_basic_manifest_without_metadata_size_mismatch() -> Result<(), Box<dyn Error>> {
+        let manifest = AppletManifest::basic(
+            crate::sdk::AppletId(0xA140),
+            "Basic",
+            crate::sdk::Version::decimal(1, 0),
+        );
+        let image = build_image(&manifest, &[0x4E, 0x75])?;
+
+        let declared_size = u32::from_be_bytes([image[4], image[5], image[6], image[7]]);
+        assert_eq!(declared_size as usize, image.len());
+        assert!(!image.ends_with(&[0xCA, 0xFE, 0xFE, 0xED]));
+        validate_image(&image)?;
         Ok(())
     }
 }

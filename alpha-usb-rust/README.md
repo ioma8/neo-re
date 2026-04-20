@@ -13,7 +13,20 @@ production applet byte-for-byte.
 The applet definition lives in `src/applets/alpha_usb.rs`:
 
 ```rust
+use crate::applets::{AppletPackage, validate_alpha_usb};
 use crate::sdk::{AppletId, AppletManifest, NeoApplet, Status, UiContext, UsbContext, Version};
+use crate::sdk::{AppletDefinition, define};
+
+pub const PACKAGE: AppletPackage = AppletPackage {
+    name: "alpha_usb",
+    output_filename: "alpha-usb.os3kapp",
+    build,
+    validate: validate_alpha_usb,
+};
+
+fn build() -> AppletDefinition {
+    define(AlphaUsb)
+}
 
 pub struct AlphaUsb;
 
@@ -93,8 +106,9 @@ directory when needed:
 cargo run -- build alpha_usb --output-dir ../exports
 ```
 
-To add another applet, create `src/applets/<name>.rs`, register it in
-`src/applets/mod.rs`, then run `cargo run -- build <name>`.
+To add another applet, create `src/applets/<name>.rs`. The build script discovers
+it automatically as long as the file exposes `pub const PACKAGE: AppletPackage`.
+No registry or module file needs to be edited.
 
 Generated files are ignored by git under `exports/`.
 

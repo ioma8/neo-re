@@ -1,4 +1,17 @@
+use crate::applets::{AppletPackage, validate_alpha_usb};
 use crate::sdk::{AppletId, AppletManifest, NeoApplet, Status, UiContext, UsbContext, Version};
+use crate::sdk::{AppletDefinition, define};
+
+pub const PACKAGE: AppletPackage = AppletPackage {
+    name: "alpha_usb",
+    output_filename: "alpha-usb.os3kapp",
+    build,
+    validate: validate_alpha_usb,
+};
+
+fn build() -> AppletDefinition {
+    define(AlphaUsb)
+}
 
 pub struct AlphaUsb;
 
