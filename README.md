@@ -83,6 +83,60 @@ Run the desktop backup TUI:
 cargo run --manifest-path alpha-cli/Cargo.toml
 ```
 
+## Building The GUI
+
+Desktop GUI development run:
+
+```bash
+cargo run --manifest-path alpha-cli/Cargo.toml --bin alpha-gui
+```
+
+Desktop GUI release build:
+
+```bash
+cargo build --manifest-path alpha-cli/Cargo.toml --bin alpha-gui --release
+```
+
+The desktop binary is written under:
+
+```text
+alpha-cli/target/release/alpha-gui
+```
+
+Validate desktop GUI targets:
+
+```bash
+cargo check --manifest-path alpha-cli/Cargo.toml --target aarch64-apple-darwin --bin alpha-gui
+```
+
+Android GUI target check:
+
+```bash
+cargo check --manifest-path alpha-cli/Cargo.toml --target aarch64-linux-android --bin alpha-gui
+```
+
+Build the Android debug APK:
+
+```bash
+ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" cargo apk build --manifest-path alpha-cli/Cargo.toml --lib
+```
+
+APK output:
+
+```text
+alpha-cli/target/debug/apk/alpha-gui.apk
+```
+
+Install the debug APK over ADB:
+
+```bash
+adb install -r alpha-cli/target/debug/apk/alpha-gui.apk
+```
+
+Android direct USB access requires launching the `Alpha USB` SmartApplet on the
+NEO before connecting it to the phone. A plain HID-keyboard NEO is blocked from
+normal apps by Android's USB host stack.
+
 Read the detailed command safety guide before writing to the device:
 
 ```text
