@@ -7,6 +7,15 @@ pub struct Version {
     pub minor_bcd: u8,
 }
 
+impl Version {
+    pub const fn new(major: u8, minor: u8) -> Self {
+        Self {
+            major_bcd: major,
+            minor_bcd: minor,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct AppletManifest {
     pub id: AppletId,
@@ -17,6 +26,34 @@ pub struct AppletManifest {
     pub extra_memory_size: u32,
     pub copyright: &'static str,
     pub alphaword_write_metadata: bool,
+}
+
+impl AppletManifest {
+    pub const fn basic(id: AppletId, name: &'static str, version: Version) -> Self {
+        Self {
+            id,
+            name,
+            version,
+            flags: 0xFF00_0000,
+            base_memory_size: 0x100,
+            extra_memory_size: 0,
+            copyright: "neo-re SmartApplet",
+            alphaword_write_metadata: false,
+        }
+    }
+
+    pub const fn alpha_usb_bridge(id: AppletId, name: &'static str, version: Version) -> Self {
+        Self {
+            id,
+            name,
+            version,
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x100,
+            extra_memory_size: 0x2000,
+            copyright: "neo-re benign SmartApplet probe",
+            alphaword_write_metadata: true,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

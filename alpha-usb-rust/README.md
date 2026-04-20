@@ -21,19 +21,11 @@ use crate::sdk::{
 pub struct AlphaUsb;
 
 impl NeoApplet for AlphaUsb {
-    const MANIFEST: AppletManifest = AppletManifest {
-        id: AppletId(0xA130),
-        name: "Alpha USB",
-        version: Version {
-            major_bcd: 0x01,
-            minor_bcd: 0x20,
-        },
-        flags: 0xFF00_00CE,
-        base_memory_size: 0x100,
-        extra_memory_size: 0x2000,
-        copyright: "neo-re benign SmartApplet probe",
-        alphaword_write_metadata: true,
-    };
+    const MANIFEST: AppletManifest = AppletManifest::alpha_usb_bridge(
+        AppletId(0xA130),
+        "Alpha USB",
+        Version::new(0x01, 0x20),
+    );
 
     fn on_focus(&self, ctx: &mut UiContext) {
         ctx.screen().clear();
@@ -64,6 +56,16 @@ No applet source code needs to write raw bytes, A-line traps, or direct ROM
 addresses. The `UiContext` exposes screen/event actions; the `UsbContext`
 intentionally does not expose screen drawing, which prevents unsafe USB callback
 UI work.
+
+Applet authors also do not need to guess SmartApplet header flags or memory
+fields. Use named manifest presets:
+
+```rust
+AppletManifest::basic(AppletId(0xA140), "Hello", Version::new(1, 0));
+AppletManifest::alpha_usb_bridge(AppletId(0xA130), "Alpha USB", Version::new(1, 20));
+```
+
+The preset owns the low-level flags, allocation fields, and metadata records.
 
 Additional message hooks can be added by implementing more trait methods:
 
