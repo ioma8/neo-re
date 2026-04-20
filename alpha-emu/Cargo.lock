@@ -47,7 +47,6 @@ dependencies = [
  "eframe",
  "m68000",
  "rfd",
- "tempfile",
  "thiserror 2.0.18",
  "tracing",
  "tracing-subscriber",

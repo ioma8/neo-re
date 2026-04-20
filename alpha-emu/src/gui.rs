@@ -3,10 +3,10 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use eframe::egui;
 
-use crate::domain::{EmulatorSnapshot, Lcd, Screen, UsbMode};
-use crate::neo_system::NeoSystem;
+use crate::firmware::FirmwareRuntime;
+use crate::firmware_session::{FirmwareSession, FirmwareSnapshot};
 
-/// Runs the desktop emulator UI.
+/// Runs the desktop Small ROM emulator UI.
 ///
 /// # Errors
 ///
@@ -15,41 +15,54 @@ pub fn run(path: PathBuf) -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Alpha Emulator")
-            .with_inner_size([780.0, 520.0]),
+            .with_inner_size([900.0, 640.0])
+            .with_min_inner_size([760.0, 520.0]),
         ..Default::default()
     };
 
     eframe::run_native(
         "Alpha Emulator",
         options,
-        Box::new(move |_cc| Ok(Box::new(AlphaEmuApp::load(&path)))),
+        Box::new(move |cc| {
+            install_style(&cc.egui_ctx);
+            Ok(Box::new(AlphaEmuApp::load(&path)))
+        }),
     )
     .map_err(|error| anyhow::anyhow!("failed to run GUI: {error}"))
 }
 
 struct AlphaEmuApp {
-    system: Option<NeoSystem>,
+    firmware_path: PathBuf,
+    session: Option<FirmwareSession>,
     load_error: Option<String>,
 }
 
 impl AlphaEmuApp {
     fn load(path: &Path) -> Self {
         let mut app = Self {
-            system: None,
+            firmware_path: path.to_path_buf(),
+            session: None,
             load_error: None,
         };
-        app.load_applet(path);
+        app.boot_path(path);
         app
     }
 
-    fn load_applet(&mut self, path: &Path) {
-        match NeoSystem::load(path) {
-            Ok(system) => {
-                self.system = Some(system);
+    fn boot_path(&mut self, path: &Path) {
+        self.firmware_path = path.to_path_buf();
+        let loaded = FirmwareRuntime::load_small_rom(path)
+            .map_err(|error| error.to_string())
+            .and_then(|rom| {
+                FirmwareSession::boot_small_rom(rom).map_err(|error| error.to_string())
+            });
+        match loaded {
+            Ok(mut session) => {
+                session.run_steps(200);
+                self.session = Some(session);
                 self.load_error = None;
             }
             Err(error) => {
-                self.system = None;
+                self.session = None;
                 self.load_error = Some(format!("{}: {error}", path.display()));
             }
         }
@@ -57,160 +70,242 @@ impl AlphaEmuApp {
 
     fn open_file_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
-            .add_filter("AlphaSmart applet", &["os3kapp"])
+            .add_filter("AlphaSmart firmware", &["os3kos"])
             .pick_file()
         {
-            self.load_applet(&path);
+            self.boot_path(&path);
         }
+    }
+
+    fn render(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add_space(22.0);
+                ui.vertical_centered(|ui| {
+                    ui.set_max_width(840.0);
+                    render_header(ui, self);
+                    ui.add_space(18.0);
+
+                    match self.session.as_mut() {
+                        Some(session) => {
+                            let snapshot = session.snapshot();
+                            render_summary(ui, &self.firmware_path, &snapshot);
+                            ui.add_space(14.0);
+                            render_controls(ui, session);
+                            ui.add_space(14.0);
+                            render_trace(ui, &session.snapshot());
+                        }
+                        None => render_empty_state(ui, self.load_error.as_deref()),
+                    }
+                });
+            });
     }
 }
 
 impl eframe::App for AlphaEmuApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        self.handle_keyboard(ui);
-
-        ui.add_space(16.0);
-        ui.heading("AlphaSmart NEO emulator");
-        ui.label("Emulated SmartApplets menu and Alpha USB runtime.");
-        ui.add_space(12.0);
-
-        render_top_controls(ui, self);
-        ui.add_space(12.0);
-
-        let Some(system) = &mut self.system else {
-            if let Some(error) = &self.load_error {
-                ui.colored_label(ui.visuals().error_fg_color, error);
-            }
-            ui.label("No applet loaded.");
-            return;
-        };
-
-        let snapshot = system.snapshot();
-        render_metadata(ui, &snapshot);
-        ui.add_space(12.0);
-        render_lcd(ui, &snapshot.lcd);
-        ui.add_space(12.0);
-        render_runtime_controls(ui, system);
-        ui.add_space(12.0);
-        render_status(ui, &system.snapshot());
+        egui::Frame::new()
+            .fill(app_bg())
+            .show(ui, |ui| self.render(ui));
     }
 }
 
-impl AlphaEmuApp {
-    fn handle_keyboard(&mut self, ui: &egui::Ui) {
-        let Some(system) = &mut self.system else {
-            return;
-        };
-        ui.input(|input| {
-            if input.key_pressed(egui::Key::ArrowUp) {
-                system.menu_up();
-            }
-            if input.key_pressed(egui::Key::ArrowDown) {
-                system.menu_down();
-            }
-            if input.key_pressed(egui::Key::Enter) {
-                if system.snapshot().screen == crate::domain::Screen::AppletRunning {
-                    system.applet_key(0x0d);
-                } else {
-                    system.open_selected();
-                }
-            }
-            if input.key_pressed(egui::Key::Escape) {
-                system.applet_key(0x1b);
-            }
-            if input.key_pressed(egui::Key::Backspace) {
-                system.applet_key(0x08);
-            }
-            for event in &input.events {
-                if let egui::Event::Text(text) = event {
-                    for byte in text.bytes() {
-                        system.applet_key(byte);
-                    }
-                }
+fn install_style(ctx: &egui::Context) {
+    ctx.set_visuals(egui::Visuals::light());
+    let mut style = (*ctx.global_style()).clone();
+    style.spacing.item_spacing = egui::vec2(10.0, 8.0);
+    style.spacing.button_padding = egui::vec2(14.0, 7.0);
+    style.visuals.selection.bg_fill = accent_blue();
+    style.visuals.window_fill = app_bg();
+    ctx.set_global_style(style);
+}
+
+fn app_bg() -> egui::Color32 {
+    egui::Color32::from_rgb(246, 247, 249)
+}
+
+fn card_bg() -> egui::Color32 {
+    egui::Color32::from_rgb(255, 255, 255)
+}
+
+fn text_primary() -> egui::Color32 {
+    egui::Color32::from_rgb(32, 38, 46)
+}
+
+fn text_secondary() -> egui::Color32 {
+    egui::Color32::from_rgb(102, 112, 127)
+}
+
+fn border() -> egui::Stroke {
+    egui::Stroke::new(1.0, egui::Color32::from_rgb(219, 224, 231))
+}
+
+fn accent_blue() -> egui::Color32 {
+    egui::Color32::from_rgb(0, 122, 255)
+}
+
+fn render_header(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
+    ui.horizontal(|ui| {
+        ui.vertical(|ui| {
+            ui.label(
+                egui::RichText::new("AlphaSmart NEO firmware emulator")
+                    .size(24.0)
+                    .strong()
+                    .color(text_primary()),
+            );
+            ui.label(
+                egui::RichText::new("Small ROM boot, CPU trace, and MMIO logging.")
+                    .size(14.0)
+                    .color(text_secondary()),
+            );
+        });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if primary_button(ui, "Open firmware").clicked() {
+                app.open_file_dialog();
             }
         });
-    }
+    });
 }
 
-fn render_top_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
-    ui.horizontal(|ui| {
-        if ui.button("Open applet").clicked() {
-            app.open_file_dialog();
+fn render_empty_state(ui: &mut egui::Ui, error: Option<&str>) {
+    card(ui, |ui| {
+        ui.label(
+            egui::RichText::new("No firmware loaded")
+                .size(18.0)
+                .strong()
+                .color(text_primary()),
+        );
+        if let Some(error) = error {
+            ui.add_space(6.0);
+            ui.colored_label(ui.visuals().error_fg_color, error);
         }
-        ui.label("Menu: Up/Down arrows select, Enter opens.");
     });
 }
 
-fn render_metadata(ui: &mut egui::Ui, snapshot: &EmulatorSnapshot) {
-    ui.horizontal(|ui| {
-        let Some(metadata) = &snapshot.metadata else {
-            ui.label("Applet: none");
-            return;
-        };
-        ui.label(format!("Applet: {}", metadata.name));
-        ui.separator();
-        ui.label(format!("ID: 0x{:04x}", metadata.applet_id));
-        ui.separator();
-        ui.label(format!(
-            "USB: {}",
-            match snapshot.usb_mode {
-                UsbMode::HidKeyboard => "HID keyboard",
-                UsbMode::Direct => "Direct USB",
+fn render_summary(ui: &mut egui::Ui, path: &Path, snapshot: &FirmwareSnapshot) {
+    card(ui, |ui| {
+        ui.label(
+            egui::RichText::new("Small ROM session")
+                .size(18.0)
+                .strong()
+                .color(text_primary()),
+        );
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            metadata_pill(ui, "File", path.display());
+            metadata_pill(ui, "PC", format!("0x{:08x}", snapshot.pc));
+            metadata_pill(ui, "SSP", format!("0x{:08x}", snapshot.ssp));
+            metadata_pill(ui, "Steps", snapshot.steps);
+            metadata_pill(
+                ui,
+                "State",
+                snapshot
+                    .last_exception
+                    .as_deref()
+                    .unwrap_or(if snapshot.stopped {
+                        "stopped"
+                    } else {
+                        "running"
+                    }),
+            );
+        });
+    });
+}
+
+fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
+    card(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            if primary_button(ui, "Run 200 steps").clicked() {
+                session.run_steps(200);
             }
-        ));
+            if secondary_button(ui, "Run 5,000 steps").clicked() {
+                session.run_steps(5_000);
+            }
+        });
     });
 }
 
-fn render_lcd(ui: &mut egui::Ui, lcd: &Lcd) {
+fn render_trace(ui: &mut egui::Ui, snapshot: &FirmwareSnapshot) {
+    ui.columns(2, |columns| {
+        trace_panel(&mut columns[0], "Recent CPU trace", &snapshot.trace);
+        trace_panel(&mut columns[1], "MMIO accesses", &snapshot.mmio_accesses);
+    });
+}
+
+fn trace_panel(ui: &mut egui::Ui, title: &str, lines: &[String]) {
+    card(ui, |ui| {
+        ui.label(
+            egui::RichText::new(title)
+                .size(15.0)
+                .strong()
+                .color(text_primary()),
+        );
+        ui.add_space(8.0);
+        egui::ScrollArea::vertical()
+            .max_height(320.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if lines.is_empty() {
+                    ui.label(egui::RichText::new("none").color(text_secondary()));
+                }
+                for line in lines {
+                    ui.label(
+                        egui::RichText::new(line)
+                            .monospace()
+                            .size(12.0)
+                            .color(text_secondary()),
+                    );
+                }
+            });
+    });
+}
+
+fn card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
-        .fill(egui::Color32::from_rgb(188, 199, 164))
-        .stroke(egui::Stroke::new(2.0, egui::Color32::from_rgb(78, 86, 68)))
-        .corner_radius(egui::CornerRadius::same(8))
-        .inner_margin(egui::Margin::same(18))
-        .show(ui, |ui| {
-            ui.set_min_size(egui::vec2(ui.available_width(), 180.0));
-            for row in lcd.rows() {
-                let text = if row.is_empty() { " " } else { row };
-                ui.monospace(text);
-            }
-        });
+        .fill(card_bg())
+        .stroke(border())
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::same(16))
+        .show(ui, add_contents);
 }
 
-fn render_runtime_controls(ui: &mut egui::Ui, system: &mut NeoSystem) {
-    ui.horizontal(|ui| {
-        if ui.button("Simulate USB attach").clicked() {
-            system.simulate_usb_attach();
-        }
-        if ui.button("Reset emulator").clicked() {
-            system.reset();
-        }
-    });
+fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE))
+            .fill(accent_blue())
+            .stroke(egui::Stroke::NONE)
+            .corner_radius(8.0),
+    )
 }
 
-fn render_status(ui: &mut egui::Ui, snapshot: &EmulatorSnapshot) {
-    if let Some(status) = snapshot.last_status {
-        ui.label(format!("Last status: 0x{status:08x}"));
-    } else {
-        ui.label("Last status: none");
-    }
-    ui.label(format!(
-        "Screen: {}",
-        match snapshot.screen {
-            Screen::AppletsMenu => "SmartApplets menu",
-            Screen::AppletRunning => "Applet running",
-            Screen::UsbAttach => "USB attach",
-        }
-    ));
+fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(text_primary()))
+            .fill(egui::Color32::from_rgb(238, 241, 245))
+            .stroke(border())
+            .corner_radius(8.0),
+    )
+}
 
-    if let Some(error) = &snapshot.error {
-        ui.colored_label(ui.visuals().error_fg_color, error);
-    }
-
-    egui::CollapsingHeader::new("Recent m68k trace")
-        .default_open(false)
+fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(239, 243, 248))
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::symmetric(10, 5))
         .show(ui, |ui| {
-            for line in &snapshot.last_trace {
-                ui.monospace(line);
-            }
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .size(12.0)
+                        .color(text_secondary()),
+                );
+                ui.label(
+                    egui::RichText::new(value.to_string())
+                        .size(12.0)
+                        .strong()
+                        .color(text_primary()),
+                );
+            });
         });
 }

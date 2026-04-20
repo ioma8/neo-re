@@ -8,7 +8,7 @@ fn main() -> Result<()> {
         .init();
 
     let path = std::env::args_os().nth(1).map_or_else(
-        || PathBuf::from("../exports/applets/alpha-usb-native.os3kapp"),
+        || PathBuf::from("../analysis/cab/smallos3kneorom.os3kos"),
         PathBuf::from,
     );
 

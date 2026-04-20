@@ -1,64 +1,42 @@
 # alpha-emu
 
-Desktop AlphaSmart NEO SmartApplet emulator.
+Small, firmware-first AlphaSmart NEO emulator experiment.
 
-The emulator loads a real `.os3kapp` package and runs selected SmartApplet
-machine code through the `m68000` interpreter plus a small emulated NEO OS
-surface. `NeoSystem` owns firmware-like behavior such as the SmartApplets menu
-and USB attach screens; `applet_runner` executes the applet machine code; and
-`os_shims` implements the NEO services that interpreted applet code calls.
+Current scope is deliberately narrow: load the Small ROM image, initialize the
+m68k CPU from its reset vectors, run bounded instruction slices, and log MMIO
+accesses for hardware-mapping research. SmartApplet trap shims and direct
+applet execution were removed from this crate; the next emulator work should
+add hardware devices under the firmware, not reimplement NEO OS calls in Rust.
 
 ## Run
 
-Build the applet package first if needed:
-
 ```sh
-cd ../aplha-rust-native
-./build.sh alpha_usb
+cd alpha-emu
+cargo +nightly run
 ```
 
-Run the emulator:
-
-```sh
-cd ../alpha-emu
-cargo +nightly run -- ../exports/applets/alpha-usb-native.os3kapp
-```
-
-If no path is passed, the emulator defaults to:
+The default firmware is:
 
 ```text
-../exports/applets/alpha-usb-native.os3kapp
+../analysis/cab/smallos3kneorom.os3kos
 ```
 
-## Current Scope
+To boot another Small ROM-compatible image:
 
-Implemented:
+```sh
+cargo +nightly run -- ../analysis/cab/smallos3kneorom.os3kos
+```
 
-- `.os3kapp` metadata and image loading
-- `m68000`-based applet execution
-- persistent applet sessions across `A25C` yields
-- emulated SmartApplets menu with Up/Down/Enter navigation
-- `Open applet` file dialog for choosing another `.os3kapp`
-- minimal NEO display, keyboard, and event traps used by `Alpha USB` and stock
-  `Calculator`
-- simulated USB attach screen and direct-mode transition
-- simple `eframe/egui` desktop UI
-- stock Calculator opens, renders its initial screen, and accepts emulated key
-  input without interpreter traps
+The desktop UI shows:
 
-Not implemented yet:
+- reset-vector boot state
+- current PC/SSP/step count
+- recent m68k instruction trace
+- MMIO reads/writes observed while the firmware runs
 
-- complete NEO OS trap surface
-- exact Calculator key/display fidelity
-- full filesystem or AlphaWord storage
-- real USB hardware access
+## Validation
 
-## Runtime Notes
-
-NEO applets call OS services through local A-line trap stubs such as `A004`,
-`A010`, `A094`, and `A25C`. Those stubs are contiguous trap words, not normal
-inline calls. The real OS handler behaves like a subroutine return: after
-handling the trap, it resumes at the JSR/BSR return address from the applet
-stack. The emulator must therefore pop that return address for every handled
-A-line trap. Otherwise execution falls through the import table, which was the
-root cause of the original Calculator blank-screen behavior.
+```sh
+cargo +nightly check
+cargo +nightly test
+```
