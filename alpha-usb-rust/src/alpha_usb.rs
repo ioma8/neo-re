@@ -22,6 +22,6 @@ impl NeoApplet for AlphaUsb {
     fn on_usb_plug(&self, ctx: &mut UsbContext) {
         ctx.usb().complete_hid_to_direct();
         ctx.usb().mark_direct_connected();
-        ctx.status(Status::raw(0x11));
+        ctx.status(Status::USB_HANDLED);
     }
 }

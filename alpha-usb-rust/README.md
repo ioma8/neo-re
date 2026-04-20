@@ -43,7 +43,7 @@ impl NeoApplet for AlphaUsb {
     fn on_usb_plug(&self, ctx: &mut UsbContext) {
         ctx.usb().complete_hid_to_direct();
         ctx.usb().mark_direct_connected();
-        ctx.status(Status::raw(0x11));
+        ctx.status(Status::USB_HANDLED);
     }
 }
 
@@ -69,14 +69,17 @@ Additional message hooks can be added by implementing more trait methods:
 ```rust
 fn on_key(&self, ctx: &mut KeyContext) {
     ctx.when_key(Key::Esc, |ctx| {
-        ctx.status(Status::raw(7));
+        ctx.status(Status::EXIT);
     });
-    ctx.status(Status::raw(0x04));
+    ctx.status(Status::UNHANDLED);
 }
 ```
 
 The hook records runtime actions into a compiler IR. That keeps applet source
 readable while the backend still emits the exact NEO-compatible 68k bytecode.
+Known return statuses are exposed as named constants such as `Status::OK`,
+`Status::UNHANDLED`, `Status::EXIT`, and `Status::USB_HANDLED`; `Status::raw`
+remains available for reverse-engineered statuses that are not named yet.
 
 ## Build
 

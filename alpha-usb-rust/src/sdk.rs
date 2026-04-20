@@ -115,6 +115,9 @@ pub struct Status(u8);
 
 impl Status {
     pub const OK: Self = Self(0);
+    pub const UNHANDLED: Self = Self(0x04);
+    pub const EXIT: Self = Self(7);
+    pub const USB_HANDLED: Self = Self(0x11);
 
     pub const fn raw(value: u8) -> Self {
         Self(value)
@@ -137,11 +140,11 @@ pub trait NeoApplet {
     }
 
     fn on_char(&self, ctx: &mut SystemContext) {
-        ctx.status(Status::raw(0x04));
+        ctx.status(Status::UNHANDLED);
     }
 
     fn on_key(&self, ctx: &mut KeyContext) {
-        ctx.status(Status::raw(0x04));
+        ctx.status(Status::UNHANDLED);
     }
 
     fn on_identity(&self, ctx: &mut IdentityContext) {
@@ -149,19 +152,19 @@ pub trait NeoApplet {
     }
 
     fn on_usb_mac_init(&self, ctx: &mut UsbContext) {
-        ctx.status(Status::raw(0x11));
+        ctx.status(Status::USB_HANDLED);
     }
 
     fn on_usb_plug(&self, ctx: &mut UsbContext) {
-        ctx.status(Status::raw(0x11));
+        ctx.status(Status::USB_HANDLED);
     }
 
     fn on_usb_pc_init(&self, ctx: &mut UsbContext) {
-        ctx.status(Status::raw(0x11));
+        ctx.status(Status::USB_HANDLED);
     }
 
     fn on_other_usb(&self, ctx: &mut SystemContext, _message: u32) {
-        ctx.status(Status::raw(0x04));
+        ctx.status(Status::UNHANDLED);
     }
 }
 
