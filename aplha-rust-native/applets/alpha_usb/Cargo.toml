@@ -1,0 +1,13 @@
+[package]
+name = "alpha-usb-applet"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+alpha-neo-sdk = { path = "../../crates/alpha-neo-sdk" }
+

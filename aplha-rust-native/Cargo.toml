@@ -1,0 +1,23 @@
+[workspace]
+members = [
+    "crates/alpha-neo-pack",
+    "crates/alpha-neo-sdk",
+    "applets/alpha_usb",
+]
+default-members = [
+    "crates/alpha-neo-pack",
+    "crates/alpha-neo-sdk",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.lints.clippy]
+all = "deny"
+pedantic = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
