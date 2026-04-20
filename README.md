@@ -19,6 +19,7 @@ root, proxy hardware, or typewriter fallback.
 - Native Rust SmartApplet SDK/packer targeting `m68k-unknown-none-elf`.
 - Native Rust SmartApplets: validated `Alpha USB` and experimental `Forth Mini`
   REPL source/package.
+- Early desktop SmartApplet emulator running the real `Alpha USB` package.
 
 ## Main Components
 
@@ -29,6 +30,8 @@ root, proxy hardware, or typewriter fallback.
   are in [alpha-cli/README.md](alpha-cli/README.md).
 - `aplha-rust-native/`: native Rust SmartApplet SDK and packer targeting
   `m68k-unknown-none-elf`. See [aplha-rust-native/README.md](aplha-rust-native/README.md).
+- `alpha-emu/`: desktop SmartApplet emulator using `m68000` plus emulated NEO
+  OS services for `Alpha USB`. See [alpha-emu/README.md](alpha-emu/README.md).
 - `poc/neotools/`: protocol parsers, packet builders, validators, and offline
   reverse-engineering helpers.
 - `docs/`: protocol notes and device findings. The most important recovery note
