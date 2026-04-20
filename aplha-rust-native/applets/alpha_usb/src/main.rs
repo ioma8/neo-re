@@ -1,7 +1,8 @@
 #![no_std]
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 #![cfg_attr(target_arch = "m68k", feature(asm_experimental_arch))]
 
+#[cfg(not(test))]
 use core::panic::PanicInfo;
 
 use alpha_neo_sdk::prelude::*;
@@ -39,6 +40,7 @@ impl Applet for AlphaUsb {
 
 export_applet!(AlphaUsb);
 
+#[cfg(not(test))]
 #[panic_handler]
 fn panic(_info: &PanicInfo<'_>) -> ! {
     loop {}

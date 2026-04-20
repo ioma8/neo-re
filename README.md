@@ -16,8 +16,9 @@ root, proxy hardware, or typewriter fallback.
 - NEO OS image flashing/recovery tooling used successfully on physical hardware.
 - Desktop TUI backup app and desktop GUI backup app.
 - Android GUI backup path using the `Alpha USB` SmartApplet to enter direct USB.
-- Native Rust SmartApplet SDK/packer that builds the `Alpha USB` applet for
-  `m68k-unknown-none-elf`.
+- Native Rust SmartApplet SDK/packer targeting `m68k-unknown-none-elf`.
+- Native Rust SmartApplets: validated `Alpha USB` and experimental `Forth Mini`
+  REPL source/package.
 
 ## Main Components
 

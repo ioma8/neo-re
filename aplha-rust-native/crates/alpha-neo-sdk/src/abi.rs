@@ -36,6 +36,7 @@ pub struct Status(u32);
 impl Status {
     pub const OK: Self = Self(0);
     pub const UNHANDLED: Self = Self(0x04);
+    pub const APPLET_EXIT: Self = Self(0x07);
     pub const USB_HANDLED: Self = Self(0x11);
 
     #[must_use]

@@ -7,5 +7,6 @@ rustflags = [
     "-C", "link-arg=-Tapplets/alpha_usb/memory.x",
     "-C", "link-arg=--gc-sections",
     "-C", "relocation-model=pic",
+    "-C", "jump-tables=no",
     "-C", "panic=abort",
 ]

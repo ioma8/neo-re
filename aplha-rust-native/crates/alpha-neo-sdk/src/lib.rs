@@ -4,6 +4,7 @@
 pub mod abi;
 pub mod context;
 pub mod display;
+pub mod keyboard;
 pub mod usb;
 
 pub mod prelude {

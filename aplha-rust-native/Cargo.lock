@@ -21,6 +21,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "forth-mini-applet"
+version = "0.1.0"
+dependencies = [
+ "alpha-neo-sdk",
+]
+
+[[package]]
 name = "goblin"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

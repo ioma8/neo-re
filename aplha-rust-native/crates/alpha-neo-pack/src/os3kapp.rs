@@ -167,4 +167,27 @@ mod tests {
         validate_image(&image)?;
         Ok(())
     }
+
+    #[test]
+    fn packages_forth_mini_shape() -> Result<(), Box<dyn Error>> {
+        let manifest = AppletManifest {
+            id: 0xA131,
+            name: "Forth Mini",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x400,
+            extra_memory_size: 0x2000,
+            copyright: "neo-re native Rust SmartApplet",
+            alphaword_write_metadata: false,
+        };
+        let image = build_image(&manifest, &[0x4E, 0x75])?;
+
+        assert_eq!(&image[0x00..0x04], &[0xC0, 0xFF, 0xEE, 0xAD]);
+        assert_eq!(&image[0x14..0x18], &[0xA1, 0x31, 0x01, 0x00]);
+        assert_eq!(&image[0x3C..0x40], &[0x00, 0x01, 0x00, 0x01]);
+        assert_eq!(&image[0x94..0x96], &[0x4E, 0x75]);
+        assert_ne!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);
+        validate_image(&image)?;
+        Ok(())
+    }
 }

@@ -1,4 +1,4 @@
-use crate::{Status, display, usb};
+use crate::{Status, display, keyboard, usb};
 
 pub struct Context {
     param: u32,
@@ -21,6 +21,10 @@ impl Context {
 
     pub const fn system(&mut self) -> System {
         System
+    }
+
+    pub const fn keyboard(&mut self) -> Keyboard {
+        Keyboard
     }
 
     pub const fn usb(&mut self) -> Usb {
@@ -48,6 +52,33 @@ impl Screen {
     pub fn write_bytes<const N: usize>(self, row: u8, bytes: [u8; N]) {
         display::write_bytes(row, bytes);
     }
+
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep applet UI rendering as direct trap calls"
+    )]
+    #[inline(always)]
+    pub fn write_slice(self, row: u8, bytes: &[u8]) {
+        display::write_slice(row, bytes);
+    }
+
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep applet UI rendering as direct trap calls"
+    )]
+    #[inline(always)]
+    pub fn clear_row(self, row: u8) {
+        display::clear_row(row);
+    }
+
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep applet rendering as direct trap calls"
+    )]
+    #[inline(always)]
+    pub fn flush(self) {
+        display::flush();
+    }
 }
 
 pub struct System;
@@ -60,6 +91,33 @@ impl System {
     #[inline(always)]
     pub fn idle_forever(self) -> ! {
         display::idle_forever();
+    }
+
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep interactive applet loops as direct OS yield calls"
+    )]
+    #[inline(always)]
+    pub fn yield_once(self) {
+        display::yield_once();
+    }
+}
+
+pub struct Keyboard;
+
+impl Keyboard {
+    #[must_use]
+    pub fn is_ready(self) -> bool {
+        keyboard::is_ready()
+    }
+
+    #[must_use]
+    pub fn read_key(self) -> u32 {
+        keyboard::read_key()
+    }
+
+    pub fn pump_events(self) {
+        keyboard::pump_events();
     }
 }
 

@@ -20,23 +20,25 @@ On macOS with Homebrew:
 brew install m68k-elf-binutils
 ```
 
-## Build Alpha USB
+## Build Applets
 
 ```sh
 cd aplha-rust-native
 ./build.sh alpha_usb
+./build.sh forth_mini
 ```
 
-Output:
+Outputs:
 
 ```text
 ../exports/applets/alpha-usb-native.os3kapp
+../exports/applets/forth-mini.os3kapp
 ```
 
 The wrapper runs:
 
-1. `cargo +nightly build -p alpha-usb-applet --target m68k-unknown-none-elf -Z build-std=core,panic_abort --release`
-2. `cargo +nightly run -p alpha-neo-pack -- alpha-usb <linked-elf> <output.os3kapp>`
+1. `cargo +nightly build -p <applet-package> --target m68k-unknown-none-elf -Z build-std=core,panic_abort --release`
+2. `cargo +nightly run -p alpha-neo-pack -- <applet-name> <linked-elf> <output.os3kapp>`
 
 Release mode is intentional. The tested 2026-03-25 nightly segfaulted while compiling `compiler_builtins` for this target in debug mode, but the release build succeeds.
 
@@ -45,6 +47,7 @@ Release mode is intentional. The tested 2026-03-25 nightly segfaulted while comp
 - `crates/alpha-neo-sdk`: `no_std` applet-side SDK with message dispatch, display traps, USB helpers, and the shared m68k entry shell.
 - `crates/alpha-neo-pack`: host-side ELF-to-OS3KApp packer.
 - `applets/alpha_usb`: native Cargo-built Alpha USB applet authored as Rust callbacks.
+- `applets/forth_mini`: experimental minimal Forth REPL applet.
 
 ## Applet Authoring
 
@@ -103,7 +106,9 @@ Implement only the callbacks your applet needs:
 - `const ID: u16`: the SmartApplet id returned to the NEO.
 - `on_focus`: called for message `0x19` when the applet is opened from the
   applets menu. This is the safe place to draw instructions and enter the applet
-  UI loop.
+  UI loop. Calculator uses this pattern: it polls keys through `A0A4`,
+  `A09C`, and `A094`, yields through `A25C`, and returns status `7` when the
+  applet exits.
 - `on_usb_plug`: called for message `0x30001` on USB attach. Keep this
   non-blocking. Do not draw, flush, wait for keys, or idle here.
 - `on_usb_mac_init`: called for message `0x10001`.
@@ -123,6 +128,8 @@ screen_line!(ctx, 2, b"Text");       // write one immediate byte-literal line
 ctx.system().idle_forever();         // stay in the applet screen
 ctx.usb().is_keyboard_connection();  // current Alpha USB applet gate
 ctx.usb().switch_to_direct();        // run the validated direct-USB OS path
+ctx.keyboard().is_ready();           // non-blocking keyboard poll
+ctx.keyboard().read_key();           // read one pending key code
 ```
 
 Known statuses are named:
@@ -130,6 +137,7 @@ Known statuses are named:
 ```rust
 Status::OK
 Status::UNHANDLED
+Status::APPLET_EXIT
 Status::USB_HANDLED
 Status::raw(0x1234) // escape hatch for newly discovered statuses
 ```
@@ -147,6 +155,22 @@ Until the SDK adds a validated static-data story, avoid normal `&str`, global
 tables, heap allocation, and `std`. They may compile but can produce output that
 is unsafe on the NEO because applet binaries are relocated by the OS3K applet
 loader, not by a normal ELF loader.
+
+The m68k target config also disables jump-table lowering. Keep that setting:
+PIC jump tables create `.got`/`.got.plt` sections, and the packer rejects those
+sections because the NEO applet loader does not behave like a normal ELF dynamic
+loader.
+
+Betawise builds C applets with `-ffixed-a5 -ffixed-d7`. That reserves those
+registers from ordinary C compiler allocation; it is not a rule that a final
+SmartApplet binary can never mention them. The stock Calculator applet uses
+both registers extensively, with `a5` acting like a runtime/local-state base in
+many paths and `d7` used by applet/runtime code.
+
+Rust does not currently expose a proven equivalent to GCC's fixed-register
+flags for this m68k target. Use `scripts/audit-m68k-registers.sh` when changing
+entry or callback code to see where `a5`/`d7` appear, but do not treat every
+appearance as a packaging failure.
 
 ### USB Callback Safety
 
@@ -180,9 +204,48 @@ fn on_usb_plug(ctx: &mut Context) -> Status {
 }
 ```
 
+## Included Applets
+
+### Alpha USB
+
+`Alpha USB` is the validated Android/desktop bridge applet. Open it on the NEO,
+connect USB, and it switches the device from HID keyboard mode into direct USB
+mode without using typewriter fallback.
+
+Build:
+
+```sh
+./build.sh alpha_usb
+```
+
+### Forth Mini
+
+`Forth Mini` is a small interactive Forth-style REPL. It currently supports:
+
+```text
++ - * / mod dup drop swap over . .s clear
+```
+
+It accepts signed decimal integers and keeps a 16-cell stack. This is an
+experimental applet intended to exercise keyboard polling, display updates, and
+small stateful Rust applet code.
+
+Its lifecycle intentionally follows Calculator: all live REPL state is owned by
+the `0x19` focus/menu-open handler while that handler runs its key polling loop.
+It does not use applet-private keypress messages for ordinary typing.
+
+Current status: the Rust source compiles, packages, and its host tests pass.
+It has not yet been validated on the physical device. Treat it as experimental
+until the REPL has been installed and exercised with a recovery path available.
+
+Build:
+
+```sh
+./build.sh forth_mini
+```
+
 ## Adding Another Applet
 
-The current native workspace has one packaged applet, `applets/alpha_usb`.
 Adding a second native applet currently requires:
 
 1. Create `applets/<name>/Cargo.toml`.
@@ -204,7 +267,9 @@ cargo +nightly fmt --all -- --check
 cargo +nightly test
 cargo +nightly clippy --all-targets -- -D warnings -W clippy::pedantic -W clippy::unwrap_used -W clippy::expect_used -W clippy::panic
 cargo +nightly clippy -p alpha-usb-applet --target m68k-unknown-none-elf -Z build-std=core,panic_abort --release -- -D warnings -W clippy::pedantic -W clippy::unwrap_used -W clippy::expect_used -W clippy::panic
+cargo +nightly clippy -p forth-mini-applet --target m68k-unknown-none-elf -Z build-std=core,panic_abort --release -- -D warnings -W clippy::pedantic -W clippy::unwrap_used -W clippy::expect_used -W clippy::panic
 ./build.sh alpha_usb
+./build.sh forth_mini
 ```
 
 Then inspect the linked ELF:
@@ -218,6 +283,8 @@ Expected properties:
 
 - no relocation entries
 - no `.got` or `.got.plt`
+- `scripts/audit-m68k-registers.sh <linked-elf>` reviewed when changing ABI or
+  callback dispatch code
 - applet-local control flow is PC-relative
 
 Validate the packaged `.os3kapp` structure:

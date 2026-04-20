@@ -64,20 +64,55 @@ pub fn write_bytes<const N: usize>(row: u8, bytes: [u8; N]) {
 
 #[allow(
     clippy::inline_always,
+    reason = "required to render stack-local applet buffers through direct trap calls"
+)]
+#[inline(always)]
+pub fn write_slice(row: u8, bytes: &[u8]) {
+    set_row(row);
+    for byte in bytes {
+        draw_char(*byte);
+    }
+}
+
+#[allow(
+    clippy::inline_always,
+    reason = "required to render applet UI through direct trap calls"
+)]
+#[inline(always)]
+pub fn clear_row(row: u8) {
+    set_row(row);
+    let mut count = 0;
+    while count < 28 {
+        draw_char(b' ');
+        count += 1;
+    }
+}
+
+#[allow(
+    clippy::inline_always,
     reason = "required to keep the focus idle loop inside relocatable applet code"
 )]
 #[inline(always)]
 pub fn idle_forever() -> ! {
     flush();
     loop {
-        #[cfg(not(target_arch = "m68k"))]
-        {}
-        #[cfg(target_arch = "m68k")]
-        // SAFETY: Yields cooperatively to the NEO OS; it does not return ownership of any data.
-        unsafe {
-            alpha_neo_yield();
-        };
+        yield_once();
     }
+}
+
+#[allow(
+    clippy::inline_always,
+    reason = "required to keep interactive applet loops inside relocatable applet code"
+)]
+#[inline(always)]
+pub fn yield_once() {
+    #[cfg(not(target_arch = "m68k"))]
+    {}
+    #[cfg(target_arch = "m68k")]
+    // SAFETY: Yields cooperatively to the NEO OS; it does not return ownership of any data.
+    unsafe {
+        alpha_neo_yield();
+    };
 }
 
 #[allow(
@@ -115,7 +150,7 @@ fn draw_char(byte: u8) {
     reason = "required to keep the focus idle loop free of extra applet calls"
 )]
 #[inline(always)]
-fn flush() {
+pub fn flush() {
     #[cfg(not(target_arch = "m68k"))]
     {}
     #[cfg(target_arch = "m68k")]
