@@ -41,7 +41,9 @@ aplha-rust-native/
 
 `alpha-neo-pack` is a host CLI. It parses the m68k ELF, extracts the applet entry bytes, wraps them in the known OS3KApp container, writes AlphaWord metadata where requested, and validates the result.
 
-`applets/alpha_usb` is a `#![no_std]` applet crate. Its final safe version links a small `m68k-elf-as` entry stub through `build.rs`, because rustc-generated m68k code initially produced low absolute intra-applet references and data pointers that are unsafe for SmartApplet loading.
+`applets/alpha_usb` is a `#![no_std]` applet crate. Applet authors must write normal Rust callbacks, not per-applet assembly. A shared SDK runtime may contain the m68k ABI shell and OS trap glue, but the applet-specific behavior is compiled by Cargo/rustc for `m68k-unknown-none-elf`.
+
+The authoring surface follows the Betawise split: the SDK owns the header/entry/ABI/syscall details, while each applet implements message callbacks. Unlike Betawise's C `ProcessMessage`, our callback body is Rust and can use ordinary Rust control flow, local variables, helper functions, and match/if/loop logic.
 
 ## Native ABI Shape
 
@@ -52,6 +54,37 @@ The applet exports one m68k entrypoint. The entrypoint receives the OS message a
 - status output pointer at `0x0c(a7)`
 
 The SDK provides a small dispatch layer that calls applet hooks for focus, USB plug, identity, and default messages. Known OS entrypoints used by the existing Alpha USB applet are exposed as narrowly named SDK functions. Runtime-critical applets must also be checked for position-safe code: local control flow should use PC-relative branches/calls, and string/data access must not depend on unrelocated low absolute addresses.
+
+The first Rust callback API is:
+
+```rust
+use alpha_neo_sdk::prelude::*;
+
+struct AlphaUsb;
+
+impl Applet for AlphaUsb {
+    fn on_focus(ctx: &mut Context) -> Status {
+        ctx.screen().clear();
+        screen_line!(ctx, 2, b"Now connect the NEO");
+        screen_line!(ctx, 3, b"to your computer or");
+        screen_line!(ctx, 4, b"smartphone via USB.");
+        ctx.system().idle_forever()
+    }
+
+    fn on_usb_plug(ctx: &mut Context) -> Status {
+        if ctx.usb().is_keyboard_connection() {
+            ctx.usb().switch_to_direct();
+            Status::UsbHandled
+        } else {
+            Status::Unhandled
+        }
+    }
+}
+
+alpha_neo_sdk::export_applet!(AlphaUsb);
+```
+
+`export_applet!` emits the shared SDK entry binding and connects the applet type to the Rust dispatch function. It must not require an applet-local `entry.s` file.
 
 ## Alpha USB Behavior
 

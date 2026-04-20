@@ -34,7 +34,7 @@ alpha_neo_yield:
 #[cfg(target_arch = "m68k")]
 unsafe extern "C" {
     fn alpha_neo_clear_screen();
-    fn alpha_neo_set_text_row(row: u32);
+    fn alpha_neo_set_text_row(row: u32, col: u32, width: u32);
     fn alpha_neo_draw_char(byte: u32);
     fn alpha_neo_flush_text();
     fn alpha_neo_yield();
@@ -50,21 +50,23 @@ pub fn clear() {
     };
 }
 
-pub fn write_lines(start_row: u8, lines: &[&str]) {
-    for (index, line) in lines.iter().enumerate() {
-        let Ok(row_offset) = u8::try_from(index) else {
-            return;
-        };
-        let Some(row) = start_row.checked_add(row_offset) else {
-            return;
-        };
-        set_row(row);
-        for byte in line.bytes() {
-            draw_char(byte);
-        }
+#[allow(
+    clippy::inline_always,
+    reason = "required to avoid GOT-backed byte literal arrays in applet code"
+)]
+#[inline(always)]
+pub fn write_bytes<const N: usize>(row: u8, bytes: [u8; N]) {
+    set_row(row);
+    for byte in bytes {
+        draw_char(byte);
     }
 }
 
+#[allow(
+    clippy::inline_always,
+    reason = "required to keep the focus idle loop inside relocatable applet code"
+)]
+#[inline(always)]
 pub fn idle_forever() -> ! {
     flush();
     loop {
@@ -78,16 +80,26 @@ pub fn idle_forever() -> ! {
     }
 }
 
+#[allow(
+    clippy::inline_always,
+    reason = "required so row setup uses the caller's stack frame directly"
+)]
+#[inline(always)]
 fn set_row(row: u8) {
     #[cfg(not(target_arch = "m68k"))]
     let _ = row;
     #[cfg(target_arch = "m68k")]
     // SAFETY: Calls the NEO OS row-selection trap with a scalar row argument.
     unsafe {
-        alpha_neo_set_text_row(u32::from(row));
+        alpha_neo_set_text_row(u32::from(row), 1, 28);
     };
 }
 
+#[allow(
+    clippy::inline_always,
+    reason = "required so byte drawing uses immediate values instead of a data table"
+)]
+#[inline(always)]
 fn draw_char(byte: u8) {
     #[cfg(not(target_arch = "m68k"))]
     let _ = byte;
@@ -98,6 +110,11 @@ fn draw_char(byte: u8) {
     };
 }
 
+#[allow(
+    clippy::inline_always,
+    reason = "required to keep the focus idle loop free of extra applet calls"
+)]
+#[inline(always)]
 fn flush() {
     #[cfg(not(target_arch = "m68k"))]
     {}

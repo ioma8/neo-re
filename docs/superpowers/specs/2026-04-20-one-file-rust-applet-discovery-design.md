@@ -1,5 +1,9 @@
 # One-File Rust Applet Discovery Design
 
+Historical note: this design applied to the old `alpha-usb-rust` builder, which
+has been removed after the native `aplha-rust-native` SDK replaced it. Keep this
+file only as design history for the removed builder.
+
 ## Goal
 
 Let a developer add a new Rust SmartApplet by creating only one file:

@@ -6,7 +6,10 @@ use goblin::{Object, archive::Archive, elf::Elf};
 #[derive(Debug)]
 pub enum ExtractError {
     ArchiveMemberMissing,
+    ForbiddenSection(String),
+    LowAbsoluteJump(u32),
     MissingLoadSection,
+    RelocationsPresent(String),
     UnsupportedObject,
     Goblin(goblin::error::Error),
 }
@@ -17,7 +20,12 @@ impl Display for ExtractError {
             Self::ArchiveMemberMissing => {
                 f.write_str("archive has no member defining alpha_usb_entry")
             }
+            Self::ForbiddenSection(name) => write!(f, "ELF contains forbidden section {name}"),
+            Self::LowAbsoluteJump(address) => {
+                write!(f, "ELF contains low absolute jump to 0x{address:08x}")
+            }
             Self::MissingLoadSection => f.write_str("ELF has no non-empty loadable image"),
+            Self::RelocationsPresent(name) => write!(f, "ELF contains relocations in {name}"),
             Self::UnsupportedObject => f.write_str("input is not an ELF object or archive"),
             Self::Goblin(error) => write!(f, "{error}"),
         }
@@ -54,9 +62,18 @@ fn load_image_from_archive(bytes: &[u8], archive: &Archive<'_>) -> Result<Vec<u8
 fn load_image_from_elf(bytes: &[u8], elf: &Elf<'_>) -> Result<Vec<u8>, ExtractError> {
     const SHF_ALLOC: u64 = 0x2;
     const SHT_NOBITS: u32 = 8;
+    const SHT_REL: u32 = 9;
+    const SHT_RELA: u32 = 4;
 
     let mut image = Vec::new();
     for section in &elf.section_headers {
+        let name = elf.shdr_strtab.get_at(section.sh_name).unwrap_or("");
+        if section.sh_size > 0 && matches!(name, ".got" | ".got.plt") {
+            return Err(ExtractError::ForbiddenSection(name.to_owned()));
+        }
+        if section.sh_size > 0 && matches!(section.sh_type, SHT_REL | SHT_RELA) {
+            return Err(ExtractError::RelocationsPresent(name.to_owned()));
+        }
         if section.sh_flags & SHF_ALLOC == 0 || section.sh_type == SHT_NOBITS {
             continue;
         }
@@ -86,5 +103,38 @@ fn load_image_from_elf(bytes: &[u8], elf: &Elf<'_>) -> Result<Vec<u8>, ExtractEr
     if image.is_empty() {
         return Err(ExtractError::MissingLoadSection);
     }
+    validate_load_image_safety(&image)?;
     Ok(image)
+}
+
+fn validate_load_image_safety(image: &[u8]) -> Result<(), ExtractError> {
+    for window in image.windows(6) {
+        if window[0] == 0x4E && window[1] == 0xB9 {
+            let address = u32::from_be_bytes([window[2], window[3], window[4], window[5]]);
+            if address < 0x0010_0000 {
+                return Err(ExtractError::LowAbsoluteJump(address));
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_low_absolute_jsr() {
+        let image = [0x4E, 0xB9, 0x00, 0x00, 0x01, 0x34];
+        assert!(matches!(
+            validate_load_image_safety(&image),
+            Err(ExtractError::LowAbsoluteJump(0x134))
+        ));
+    }
+
+    #[test]
+    fn allows_known_os_absolute_jsr() -> Result<(), ExtractError> {
+        let image = [0x4E, 0xB9, 0x00, 0x41, 0x0B, 0x26];
+        validate_load_image_safety(&image)
+    }
 }

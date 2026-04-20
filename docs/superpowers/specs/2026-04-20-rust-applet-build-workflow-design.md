@@ -1,5 +1,9 @@
 # Rust Applet Build Workflow Design
 
+Historical note: this design applied to the old `alpha-usb-rust` builder, which
+has been removed after the native `aplha-rust-native` SDK replaced it. Keep this
+file only as design history for the removed builder.
+
 ## Goal
 
 Make writing, adding, and compiling AlphaSmart NEO SmartApplets from the Rust SDK simple enough that applet authors work mostly in one readable source file per applet.

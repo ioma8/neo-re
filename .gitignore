@@ -1,6 +1,28 @@
+# Local reverse-engineering inputs and generated dumps.
 analysis/
 exports/
-alpha-cli/target/
-.DS_Store
+NEOManager3_9_3USPC/
+*.os3kapp
+*.os3kos
+*.raw
+
+# Build output.
+target/
+**/target/
+build/
+dist/
+
+# Local Python/uv state.
+.venv/
+.uv/
 __pycache__/
 *.py[cod]
+
+# Logs and local runtime state.
+logs/
+*.log
+
+# OS/editor noise.
+.DS_Store
+.idea/
+.vscode/

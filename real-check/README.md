@@ -103,6 +103,219 @@ PY
 
 The tested slot 1 export produced `22712` raw bytes and a `22712` byte UTF-8 text file after CR-to-LF normalization. Keep `exports/` ignored; these files can contain private device data.
 
+## Operational Command Guide
+
+This section groups every `real-check` command by device risk. Commands that
+write to the NEO are marked clearly. When in doubt, run the read-only inspection
+commands first and save the output.
+
+### USB Mode And Endpoint Checks
+
+These commands do not read or modify AlphaWord contents or SmartApplet flash.
+They either observe USB descriptors or change only the current USB mode.
+
+Check what the host sees:
+
+```bash
+uv run --project real-check real-check watch --timeout 5
+```
+
+Expected keyboard mode:
+
+```text
+vendor_id=0x081e product_id=0xbd04 mode=keyboard detail=AlphaSmart HID keyboard mode; no direct USB OUT endpoint
+```
+
+Expected direct USB mode:
+
+```text
+vendor_id=0x081e product_id=0xbd01 mode=direct detail=NEO direct USB mode
+```
+
+Switch a NEO in HID keyboard mode to direct USB mode from the host:
+
+```bash
+uv run --project real-check real-check switch-to-direct
+uv run --project real-check real-check watch --timeout 5
+```
+
+Probe the direct USB interface and endpoint selection:
+
+```bash
+uv run --project real-check real-check probe
+```
+
+Run a candidate HID switch sequence for diagnostics:
+
+```bash
+uv run --project real-check real-check switch-hid-sequence e0 e1 e2 e3 e4
+uv run --project real-check real-check switch-hid-sequence 01 02 04 03 07 --delay 2 --wait 5
+```
+
+`switch-hid-sequence` sends each provided byte as a one-byte HID output report.
+Use it only for switch-sequence experiments.
+
+### Read-Only Direct USB Commands
+
+These require direct USB mode. They send read commands to the device and write
+only to the host filesystem.
+
+List AlphaWord slot metadata:
+
+```bash
+uv run --project real-check real-check list
+```
+
+Debug AlphaWord attribute responses when `list` is suspicious:
+
+```bash
+uv run --project real-check real-check debug-attributes
+```
+
+List installed SmartApplet metadata:
+
+```bash
+uv run --project real-check real-check applets
+```
+
+Dump raw SmartApplet metadata records:
+
+```bash
+uv run --project real-check real-check debug-applets
+```
+
+Dump one installed SmartApplet package to the host:
+
+```bash
+uv run --project real-check real-check dump-applet 0xa130 --output analysis/device-dumps/applets/A130-Alpha_USB.os3kapp
+```
+
+Verify one AlphaWord slot download without saving or printing the document:
+
+```bash
+uv run --project real-check real-check verify-get 1
+```
+
+Download one AlphaWord slot to a host file:
+
+```bash
+uv run --project real-check real-check get 1 --output exports/alphaword-slot1.raw
+```
+
+`get` without `--output` prints the file bytes as hex. Avoid that on devices
+with private data unless you intentionally want terminal output.
+
+### SmartApplet Write Commands
+
+These commands rewrite the NEO SmartApplet area. Back up first with `applets`
+and `dump-applet`. They should not directly modify AlphaWord document slots, but
+they do modify persistent device flash and can make the applet catalog invalid
+if interrupted or if a bad applet is installed.
+
+Install the validated native Alpha USB applet:
+
+```bash
+uv run --project real-check real-check switch-to-direct
+uv run --project real-check real-check install-applet exports/applets/alpha-usb-native.os3kapp
+uv run --project real-check real-check applets
+```
+
+Use `--assume-updater` only when the NEO is already showing the SmartApplet
+loading/updater screen and the `?Swtch` bootstrap must be skipped:
+
+```bash
+uv run --project real-check real-check install-applet exports/applets/alpha-usb-native.os3kapp --assume-updater
+```
+
+Remove one applet by table index:
+
+```bash
+uv run --project real-check real-check applets
+uv run --project real-check real-check remove-applet-index 3
+uv run --project real-check real-check applets
+```
+
+The index is the applet table index used by the device protocol, not the
+`applet_id`. Use only after inspecting the current table.
+
+Clear the writable SmartApplet area:
+
+```bash
+uv run --project real-check real-check clear-applet-area
+uv run --project real-check real-check applets
+```
+
+This is destructive for installed custom/stock applets in the writable applet
+area. It is useful for catalog repair only when backups exist.
+
+Restore applets from a backup directory:
+
+```bash
+uv run --project real-check real-check restore-stock-applets \
+  --backup-dir analysis/device-dumps/applets \
+  --yes
+```
+
+By default this skips applet id `0x0000` System. Add repeated `--skip` options
+to omit applets that should not be restored:
+
+```bash
+uv run --project real-check real-check restore-stock-applets \
+  --backup-dir analysis/device-dumps/applets \
+  --skip 0xa017 \
+  --yes
+```
+
+Add `--restart` only after the restore is known-good:
+
+```bash
+uv run --project real-check real-check restore-stock-applets \
+  --backup-dir analysis/device-dumps/applets \
+  --skip 0xa017 \
+  --yes \
+  --restart
+```
+
+The physically safer recovery pattern was one applet install at a time with
+`applets` verification after each install. The broad restore command exists, but
+do not use it on a fragile device unless that tradeoff is intentional.
+
+### OS Flash And Recovery Commands
+
+These are destructive OS-flash/recovery commands. They are for Small ROM Updater
+or serious recovery work, not normal applet iteration.
+
+Flash a NEO OS image:
+
+```bash
+uv run --project real-check real-check install-os-image \
+  /tmp/os3kneorom-disable-fscheck.os3kos \
+  --yes-flash-os
+```
+
+`--yes-flash-os` is required. Keep using the patched validator-disabled OS as
+the recovery baseline while applet/catalog work is in progress; it proved more
+useful than immediately returning to the original stock OS.
+
+Only use `--reformat-rest-of-rom` when intentionally reproducing NeoManager's
+tail-segment erase behavior during OS repair:
+
+```bash
+uv run --project real-check real-check install-os-image \
+  /tmp/os3kneorom-disable-fscheck.os3kos \
+  --yes-flash-os \
+  --reformat-rest-of-rom
+```
+
+Restart the device from direct USB:
+
+```bash
+uv run --project real-check real-check restart-device
+```
+
+The detailed physical-device recovery record is in
+`docs/2026-04-18-neo-recovery-runbook.md`.
+
 ## Current assumptions
 
 - HID keyboard-mode device match is `VID=0x081e`, `PID=0xbd04`

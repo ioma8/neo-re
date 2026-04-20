@@ -1,0 +1,92 @@
+use crate::{Status, display, usb};
+
+pub struct Context {
+    param: u32,
+}
+
+impl Context {
+    #[must_use]
+    pub const fn new(param: u32) -> Self {
+        Self { param }
+    }
+
+    #[must_use]
+    pub const fn param(&self) -> u32 {
+        self.param
+    }
+
+    pub const fn screen(&mut self) -> Screen {
+        Screen
+    }
+
+    pub const fn system(&mut self) -> System {
+        System
+    }
+
+    pub const fn usb(&mut self) -> Usb {
+        Usb
+    }
+}
+
+pub struct Screen;
+
+impl Screen {
+    #[allow(
+        clippy::inline_always,
+        reason = "required to avoid GOT-backed literal pointers in SmartApplet output"
+    )]
+    #[inline(always)]
+    pub fn clear(self) {
+        display::clear();
+    }
+
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep byte literals immediate and relocatable"
+    )]
+    #[inline(always)]
+    pub fn write_bytes<const N: usize>(self, row: u8, bytes: [u8; N]) {
+        display::write_bytes(row, bytes);
+    }
+}
+
+pub struct System;
+
+impl System {
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep the focus handler as direct PC-relative code"
+    )]
+    #[inline(always)]
+    pub fn idle_forever(self) -> ! {
+        display::idle_forever();
+    }
+}
+
+pub struct Usb;
+
+impl Usb {
+    #[must_use]
+    pub const fn is_keyboard_connection(self) -> bool {
+        true
+    }
+
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep USB callback control flow PC-relative"
+    )]
+    #[inline(always)]
+    pub fn switch_to_direct(self) {
+        usb::complete_hid_to_direct();
+        usb::mark_direct_connected();
+    }
+}
+
+pub struct Identity;
+
+impl Identity {
+    #[must_use]
+    pub const fn applet_id(id: u16) -> Status {
+        Status::raw(id as u32)
+    }
+}
