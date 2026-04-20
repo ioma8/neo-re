@@ -24,7 +24,7 @@ impl NeoApplet for AlphaUsb {
     const MANIFEST: AppletManifest = AppletManifest::alpha_usb_bridge(
         AppletId(0xA130),
         "Alpha USB",
-        Version::new(0x01, 0x20),
+        Version::decimal(1, 20),
     );
 
     fn on_focus(&self, ctx: &mut UiContext) {
@@ -47,9 +47,6 @@ impl NeoApplet for AlphaUsb {
     }
 }
 
-pub fn define_alpha_usb() -> AppletDefinition {
-    define(AlphaUsb)
-}
 ```
 
 No applet source code needs to write raw bytes, A-line traps, or direct ROM
@@ -61,8 +58,8 @@ Applet authors also do not need to guess SmartApplet header flags or memory
 fields. Use named manifest presets:
 
 ```rust
-AppletManifest::basic(AppletId(0xA140), "Hello", Version::new(1, 0));
-AppletManifest::alpha_usb_bridge(AppletId(0xA130), "Alpha USB", Version::new(1, 20));
+AppletManifest::basic(AppletId(0xA140), "Hello", Version::decimal(1, 0));
+AppletManifest::alpha_usb_bridge(AppletId(0xA130), "Alpha USB", Version::decimal(1, 20));
 ```
 
 The preset owns the low-level flags, allocation fields, and metadata records.

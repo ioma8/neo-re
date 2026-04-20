@@ -352,7 +352,7 @@ mod tests {
 
     #[test]
     fn compiles_alpha_usb_from_sdk_definition() -> Result<(), Box<dyn std::error::Error>> {
-        let code = compile_applet(&alpha_usb::define_alpha_usb())?;
+        let code = compile_applet(&crate::sdk::define(alpha_usb::AlphaUsb))?;
 
         assert!(code.starts_with(&[0x20, 0x6F, 0x00, 0x0C]));
         assert!(

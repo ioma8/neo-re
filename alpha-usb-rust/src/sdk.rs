@@ -8,12 +8,23 @@ pub struct Version {
 }
 
 impl Version {
-    pub const fn new(major: u8, minor: u8) -> Self {
+    pub const fn decimal(major: u8, minor: u8) -> Self {
         Self {
             major_bcd: major,
-            minor_bcd: minor,
+            minor_bcd: decimal_to_bcd(minor),
         }
     }
+
+    pub const fn bcd(major_bcd: u8, minor_bcd: u8) -> Self {
+        Self {
+            major_bcd,
+            minor_bcd,
+        }
+    }
+}
+
+const fn decimal_to_bcd(value: u8) -> u8 {
+    ((value / 10) << 4) | (value % 10)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -371,5 +382,18 @@ impl IdentityContext {
             message,
             actions: self.actions,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Version;
+
+    #[test]
+    fn decimal_version_is_encoded_as_bcd() {
+        let version = Version::decimal(1, 20);
+
+        assert_eq!(version.major_bcd, 0x01);
+        assert_eq!(version.minor_bcd, 0x20);
     }
 }

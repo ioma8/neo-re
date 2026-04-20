@@ -20,7 +20,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<PathBuf, Box<dyn Error>> {
     let output_path = parse_output_path(env::args_os())?;
-    let definition = alpha_usb_rust::alpha_usb::define_alpha_usb();
+    let definition = alpha_usb_rust::sdk::define(alpha_usb_rust::alpha_usb::AlphaUsb);
     let entry_code = alpha_usb_rust::compiler::compile_applet(&definition)?;
     let image = alpha_usb_rust::os3kapp::build_image(&definition.manifest, &entry_code)?;
     alpha_usb_rust::os3kapp::validate_alpha_usb_image(&image)?;
