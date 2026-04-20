@@ -78,6 +78,8 @@ The produced `.os3kapp` must pass structural validation and preserve the Alpha U
 
 ## Constraints
 
-The Rust `m68k-unknown-none-elf` target is Tier 3. It requires nightly `build-std` support and an m68k GNU linker because `rust-lld` does not support m68k. The wrapper script should fail early with clear instructions if those tools are unavailable.
+The Rust `m68k-unknown-none-elf` target is Tier 3. It requires nightly `build-std` support and an m68k GNU linker because `rust-lld` does not support m68k. The implementation uses Homebrew `m68k-elf-binutils` on macOS and links with `m68k-elf-ld`.
+
+Release builds are required for the current validated toolchain. `rustc 1.96.0-nightly (2026-03-25)` segfaulted while compiling `compiler_builtins` for this target in debug mode, while the release build completed successfully.
 
 The implementation must not flash or install anything to the device. It only builds and validates the applet file.

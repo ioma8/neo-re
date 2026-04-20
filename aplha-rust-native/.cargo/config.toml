@@ -2,10 +2,9 @@
 target-dir = "target"
 
 [target.m68k-unknown-none-elf]
-linker = "m68k-linux-gnu-ld"
+linker = "m68k-elf-ld"
 rustflags = [
     "-C", "link-arg=-Tapplets/alpha_usb/memory.x",
     "-C", "relocation-model=static",
     "-C", "panic=abort",
 ]
-

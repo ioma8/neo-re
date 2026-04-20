@@ -14,15 +14,9 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-if ! command -v m68k-linux-gnu-ld >/dev/null 2>&1; then
-  echo "m68k-linux-gnu-ld not found; install an m68k GNU binutils toolchain" >&2
-  exit 1
-fi
-
 cd "${ROOT}"
-cargo +nightly build -p alpha-usb-applet --target m68k-unknown-none-elf -Z build-std=core,panic_abort
+cargo +nightly build -p alpha-usb-applet --target m68k-unknown-none-elf -Z build-std=core,panic_abort --release
 cargo +nightly run -p alpha-neo-pack -- \
   alpha-usb \
-  target/m68k-unknown-none-elf/debug/libalpha_usb_applet.a \
+  target/m68k-unknown-none-elf/release/alpha-usb-applet \
   ../exports/applets/alpha-usb-native.os3kapp
-
