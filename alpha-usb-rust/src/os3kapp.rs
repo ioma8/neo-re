@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn packages_alpha_usb_header_and_prefix() -> Result<(), Box<dyn Error>> {
-        let manifest = crate::sdk::define(crate::alpha_usb::AlphaUsb).manifest;
+        let manifest = crate::sdk::define(crate::applets::alpha_usb::AlphaUsb).manifest;
         let image = build_image(&manifest, &[0x4E, 0x75])?;
 
         assert_eq!(&image[0x00..0x04], &[0xC0, 0xFF, 0xEE, 0xAD]);

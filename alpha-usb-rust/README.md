@@ -10,13 +10,10 @@ production applet byte-for-byte.
 
 ## Applet Source
 
-The applet definition lives in `src/alpha_usb.rs`:
+The applet definition lives in `src/applets/alpha_usb.rs`:
 
 ```rust
-use crate::sdk::{
-    define, AppletDefinition, AppletId, AppletManifest, NeoApplet, Status, UiContext, UsbContext,
-    Version,
-};
+use crate::sdk::{AppletId, AppletManifest, NeoApplet, Status, UiContext, UsbContext, Version};
 
 pub struct AlphaUsb;
 
@@ -84,10 +81,22 @@ remains available for reverse-engineered statuses that are not named yet.
 ## Build
 
 ```bash
-cargo run -- --output ../exports/alpha-usb-rust.os3kapp
+cargo run -- list
+cargo run -- build alpha_usb
+cargo run -- build all
 ```
 
-The generated file is ignored by git under `exports/`.
+By default, generated applets are written to `../exports/applets/`. Override the
+directory when needed:
+
+```bash
+cargo run -- build alpha_usb --output-dir ../exports
+```
+
+To add another applet, create `src/applets/<name>.rs`, register it in
+`src/applets/mod.rs`, then run `cargo run -- build <name>`.
+
+Generated files are ignored by git under `exports/`.
 
 ## Validate Against Existing Python Tooling
 
@@ -101,8 +110,8 @@ uv run --project poc/neotools neotools build-benign-smartapplet \
   --alphaword-write-metadata \
   --alpha-usb-production
 
-md5 exports/alpha-usb-python-reference.os3kapp exports/alpha-usb-rust.os3kapp
-cmp exports/alpha-usb-python-reference.os3kapp exports/alpha-usb-rust.os3kapp
+md5 exports/alpha-usb-python-reference.os3kapp exports/applets/alpha-usb.os3kapp
+cmp exports/alpha-usb-python-reference.os3kapp exports/applets/alpha-usb.os3kapp
 ```
 
 Expected current MD5:

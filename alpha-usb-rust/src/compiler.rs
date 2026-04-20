@@ -348,7 +348,7 @@ impl Assembler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::alpha_usb;
+    use crate::applets::alpha_usb;
 
     #[test]
     fn compiles_alpha_usb_from_sdk_definition() -> Result<(), Box<dyn std::error::Error>> {
