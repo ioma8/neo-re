@@ -126,3 +126,6 @@ Small ROM early hardware initialization uses 68k absolute-short addresses sign-e
 Preserving byte state for MMIO registers lets Small ROM pass early CPU register setup without custom OS shims	proven
 Small ROM LCD initialization writes two byte-wide controller ports at 0x01000000/0x01000001 and 0x01008000/0x01008001	proven
 Small ROM keyboard idle polls 0xfffff419 as a keyboard matrix input register after LCD clear	proven
+Small ROM password table at 0x004053ee maps ernie to matrix bytes 3a 3d 7f 30 3a	proven
+Small ROM matrix key bytes encode column bit in the high nibble and row select in the low nibble	proven
+The 0x004053ee password table alone is sufficient to label the entire physical keyboard matrix	disproven

@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 use crate::firmware::FirmwareRuntime;
+use crate::keyboard::{Keyboard, MatrixKey};
 use crate::lcd::{Lcd, LcdSnapshot};
 
 const MEMORY_SIZE: usize = 0x0080_0000;
@@ -10,10 +11,10 @@ const ROM_BASE: usize = 0x0040_0000;
 const LOW_MMIO_START: u32 = 0x0000_f000;
 const LOW_MMIO_END: u32 = 0x0001_0000;
 const MMIO_BASE: u32 = 0xffff_0000;
-const LCD_LEFT_START: u32 = 0x0100_0000;
-const LCD_LEFT_END: u32 = 0x0100_0002;
-const LCD_RIGHT_START: u32 = 0x0100_8000;
-const LCD_RIGHT_END: u32 = 0x0100_8002;
+const LCD_RIGHT_START: u32 = 0x0100_0000;
+const LCD_RIGHT_END: u32 = 0x0100_0002;
+const LCD_LEFT_START: u32 = 0x0100_8000;
+const LCD_LEFT_END: u32 = 0x0100_8002;
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
@@ -25,6 +26,7 @@ pub enum MemoryError {
 pub(crate) struct EmuMemory {
     bytes: Vec<u8>,
     lcd: Lcd,
+    keyboard: Keyboard,
     mmio_bytes: BTreeMap<u32, u8>,
     mmio_accesses: Vec<String>,
 }
@@ -42,9 +44,22 @@ impl EmuMemory {
         Ok(Self {
             bytes,
             lcd: Lcd::new(),
+            keyboard: Keyboard::default(),
             mmio_bytes: BTreeMap::new(),
             mmio_accesses: Vec::new(),
         })
+    }
+
+    pub(crate) fn type_small_rom_password(&mut self) {
+        self.keyboard.type_small_rom_password();
+    }
+
+    pub(crate) fn press_key(&mut self, key: MatrixKey) {
+        self.keyboard.press(key);
+    }
+
+    pub(crate) fn release_key(&mut self, key: MatrixKey) {
+        self.keyboard.release(key);
     }
 
     pub(crate) fn drain_mmio_accesses(&mut self) -> Vec<String> {
@@ -62,15 +77,22 @@ impl EmuMemory {
         }
     }
 
-    fn read_mmio_byte(&self, addr: u32) -> u8 {
-        *self.mmio_bytes.get(&normalize_mmio(addr)).unwrap_or(&0)
+    fn read_mmio_byte(&mut self, addr: u32) -> u8 {
+        let addr = normalize_mmio(addr);
+        if addr == 0xf419 {
+            return self.keyboard.read_matrix_input();
+        }
+        *self.mmio_bytes.get(&addr).unwrap_or(&0)
     }
 
-    fn read_mmio_word(&self, addr: u32) -> u16 {
+    fn read_mmio_word(&mut self, addr: u32) -> u16 {
         u16::from_be_bytes([self.read_mmio_byte(addr), self.read_mmio_byte(addr + 1)])
     }
 
     fn write_mmio_byte(&mut self, addr: u32, value: u8) {
+        if normalize_mmio(addr) == 0xf411 {
+            self.keyboard.select_row(value);
+        }
         match addr {
             0x0100_8000 => self.lcd.write_command(0, value),
             0x0100_8001 => self.lcd.write_data(0, value),
@@ -211,6 +233,29 @@ mod tests {
         let snapshot = memory.lcd_snapshot();
         assert!(snapshot.pixels[0]);
         assert!(!snapshot.pixels[132]);
+        Ok(())
+    }
+
+    #[test]
+    fn keyboard_input_defaults_to_no_pressed_key() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+
+        assert_eq!(memory.get_byte(0xffff_f419), Some(0xff));
+        Ok(())
+    }
+
+    #[test]
+    fn scripted_password_emits_first_expected_key_bit() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+
+        memory.type_small_rom_password();
+        for _ in 0..80 {
+            assert_eq!(memory.get_byte(0xffff_f419), Some(0xff));
+        }
+
+        assert_eq!(memory.get_byte(0xffff_f419), Some(0xf7));
         Ok(())
     }
 }

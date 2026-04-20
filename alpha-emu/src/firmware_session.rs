@@ -6,6 +6,7 @@ use m68000::exception::Vector;
 use thiserror::Error;
 
 use crate::firmware::{FirmwareError, FirmwareRuntime};
+use crate::keyboard::matrix_key_for_char;
 use crate::lcd::LcdSnapshot;
 use crate::memory::{EmuMemory, MemoryError};
 
@@ -81,6 +82,22 @@ impl FirmwareSession {
                 self.last_exception = Some(format_exception(vector, pc));
                 break;
             }
+        }
+    }
+
+    pub fn type_small_rom_password(&mut self) {
+        self.memory.type_small_rom_password();
+    }
+
+    pub fn press_char(&mut self, value: char) {
+        if let Some(key) = matrix_key_for_char(value) {
+            self.memory.press_key(key);
+        }
+    }
+
+    pub fn release_char(&mut self, value: char) {
+        if let Some(key) = matrix_key_for_char(value) {
+            self.memory.release_key(key);
         }
     }
 

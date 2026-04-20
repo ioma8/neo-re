@@ -108,9 +108,51 @@ impl AlphaEmuApp {
 
 impl eframe::App for AlphaEmuApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.handle_keyboard(ui.ctx());
         egui::Frame::new()
             .fill(app_bg())
             .show(ui, |ui| self.render(ui));
+    }
+}
+
+impl AlphaEmuApp {
+    fn handle_keyboard(&mut self, ctx: &egui::Context) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let mut handled = false;
+        ctx.input(|input| {
+            for event in &input.events {
+                if let egui::Event::Key {
+                    key,
+                    pressed,
+                    repeat: false,
+                    ..
+                } = event
+                    && let Some(value) = char_for_key(*key)
+                {
+                    if *pressed {
+                        session.press_char(value);
+                    } else {
+                        session.release_char(value);
+                    }
+                    handled = true;
+                }
+            }
+        });
+        if handled {
+            session.run_steps(10_000);
+        }
+    }
+}
+
+fn char_for_key(key: egui::Key) -> Option<char> {
+    match key {
+        egui::Key::E => Some('e'),
+        egui::Key::R => Some('r'),
+        egui::Key::N => Some('n'),
+        egui::Key::I => Some('i'),
+        _ => None,
     }
 }
 
