@@ -6,7 +6,7 @@ use m68000::{M68000, MemoryAccess};
 use thiserror::Error;
 
 use crate::memory::EmuMemory;
-use crate::neo_os::NeoOs;
+use crate::os_shims::NeoOsShims;
 use crate::os3kapp::Os3kApp;
 
 const STACK_START: u32 = 0x0070_0000;
@@ -27,7 +27,7 @@ pub struct RunResult {
 }
 
 #[derive(Debug, Error)]
-pub enum CpuError {
+pub enum RunnerError {
     #[error("applet image does not fit emulator memory")]
     ImageTooLarge,
     #[error("unsupported exception vector {vector} at pc=0x{pc:08x}")]
@@ -40,11 +40,19 @@ pub enum CpuError {
 
 /// Runs one NEO process message against the loaded applet.
 ///
+/// This is the machine-code boundary: applet bytes are interpreted by
+/// `m68000`; this module only seeds the NEO process-message stack frame and
+/// handles calls that leave the applet for firmware services.
+///
 /// # Errors
 ///
 /// Returns an error if the applet image cannot be mapped, the interpreted code
 /// hits an unsupported CPU exception, or the bounded step limit is reached.
-pub fn run_message(app: &Os3kApp, os: &mut NeoOs, message: u32) -> Result<RunResult, CpuError> {
+pub fn run_process_message(
+    app: &Os3kApp,
+    os: &mut NeoOsShims,
+    message: u32,
+) -> Result<RunResult, RunnerError> {
     let mut memory = EmuMemory::load(app)?;
     let mut cpu: M68000<Mc68000> = M68000::new_no_reset();
     cpu.regs.pc = Wrapping(app.entry_offset);
@@ -84,7 +92,7 @@ pub fn run_message(app: &Os3kApp, os: &mut NeoOs, message: u32) -> Result<RunRes
                     });
                 }
             } else {
-                return Err(CpuError::UnsupportedException {
+                return Err(RunnerError::UnsupportedException {
                     vector,
                     pc: cpu.regs.pc.0,
                 });
@@ -92,7 +100,7 @@ pub fn run_message(app: &Os3kApp, os: &mut NeoOs, message: u32) -> Result<RunRes
         }
     }
 
-    Err(CpuError::StepLimit)
+    Err(RunnerError::StepLimit)
 }
 
 fn handle_long_branch(cpu: &mut M68000<Mc68000>, memory: &mut EmuMemory) -> bool {
@@ -107,27 +115,27 @@ fn handle_long_branch(cpu: &mut M68000<Mc68000>, memory: &mut EmuMemory) -> bool
     true
 }
 
-fn seed_entry_stack(memory: &mut EmuMemory, message: u32) -> Result<(), CpuError> {
+fn seed_entry_stack(memory: &mut EmuMemory, message: u32) -> Result<(), RunnerError> {
     memory
         .set_long(STACK_START, RETURN_SENTINEL)
-        .ok_or(CpuError::StackAccess(STACK_START))?;
+        .ok_or(RunnerError::StackAccess(STACK_START))?;
     memory
         .set_long(STACK_START + 4, message)
-        .ok_or(CpuError::StackAccess(STACK_START + 4))?;
+        .ok_or(RunnerError::StackAccess(STACK_START + 4))?;
     memory
         .set_long(STACK_START + 8, 0)
-        .ok_or(CpuError::StackAccess(STACK_START + 8))?;
+        .ok_or(RunnerError::StackAccess(STACK_START + 8))?;
     memory
         .set_long(STACK_START + 12, STATUS_ADDR)
-        .ok_or(CpuError::StackAccess(STACK_START + 12))?;
+        .ok_or(RunnerError::StackAccess(STACK_START + 12))?;
     Ok(())
 }
 
 fn handle_os_call(
     cpu: &mut M68000<Mc68000>,
     memory: &mut EmuMemory,
-    os: &mut NeoOs,
-) -> Result<bool, CpuError> {
+    os: &mut NeoOsShims,
+) -> Result<bool, RunnerError> {
     match cpu.regs.pc.0 {
         OS_SET_USB_STAGE_A | OS_DELAY | OS_SET_USB_STAGE_B | OS_SET_USB_STAGE_C => {
             return_from_subroutine(cpu, memory)?;
@@ -146,8 +154,8 @@ fn handle_line_a(
     pc: u32,
     cpu: &mut M68000<Mc68000>,
     memory: &mut EmuMemory,
-    os: &mut NeoOs,
-) -> Result<bool, CpuError> {
+    os: &mut NeoOsShims,
+) -> Result<bool, RunnerError> {
     let opcode = memory.get_word(pc).unwrap_or(0);
     match opcode {
         0xA000 => os.clear_screen(),
@@ -165,7 +173,7 @@ fn handle_line_a(
         0xA098 => {}
         0xA25C => return Ok(true),
         _ => {
-            return Err(CpuError::UnsupportedException {
+            return Err(RunnerError::UnsupportedException {
                 vector: Vector::LineAEmulator as u8,
                 pc,
             });
@@ -177,9 +185,9 @@ fn handle_line_a(
 fn return_from_subroutine(
     cpu: &mut M68000<Mc68000>,
     memory: &mut EmuMemory,
-) -> Result<(), CpuError> {
+) -> Result<(), RunnerError> {
     let sp = cpu.regs.sp();
-    let ret = memory.get_long(sp).ok_or(CpuError::StackAccess(sp))?;
+    let ret = memory.get_long(sp).ok_or(RunnerError::StackAccess(sp))?;
     cpu.regs.pc = Wrapping(ret);
     cpu.regs.ssp += 4;
     Ok(())

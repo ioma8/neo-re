@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use eframe::egui;
 
-use crate::applet_host::AppletHost;
 use crate::domain::{EmulatorSnapshot, Lcd, Screen, UsbMode};
+use crate::neo_system::NeoSystem;
 
 /// Runs the desktop emulator UI.
 ///
@@ -28,14 +28,14 @@ pub fn run(path: PathBuf) -> Result<()> {
 }
 
 struct AlphaEmuApp {
-    host: Option<AppletHost>,
+    system: Option<NeoSystem>,
     load_error: Option<String>,
 }
 
 impl AlphaEmuApp {
     fn load(path: &Path) -> Self {
         let mut app = Self {
-            host: None,
+            system: None,
             load_error: None,
         };
         app.load_applet(path);
@@ -43,13 +43,13 @@ impl AlphaEmuApp {
     }
 
     fn load_applet(&mut self, path: &Path) {
-        match AppletHost::load(path) {
-            Ok(host) => {
-                self.host = Some(host);
+        match NeoSystem::load(path) {
+            Ok(system) => {
+                self.system = Some(system);
                 self.load_error = None;
             }
             Err(error) => {
-                self.host = None;
+                self.system = None;
                 self.load_error = Some(format!("{}: {error}", path.display()));
             }
         }
@@ -77,7 +77,7 @@ impl eframe::App for AlphaEmuApp {
         render_top_controls(ui, self);
         ui.add_space(12.0);
 
-        let Some(host) = &mut self.host else {
+        let Some(system) = &mut self.system else {
             if let Some(error) = &self.load_error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
             }
@@ -85,31 +85,31 @@ impl eframe::App for AlphaEmuApp {
             return;
         };
 
-        let snapshot = host.snapshot();
+        let snapshot = system.snapshot();
         render_metadata(ui, &snapshot);
         ui.add_space(12.0);
         render_lcd(ui, &snapshot.lcd);
         ui.add_space(12.0);
-        render_runtime_controls(ui, host);
+        render_runtime_controls(ui, system);
         ui.add_space(12.0);
-        render_status(ui, &host.snapshot());
+        render_status(ui, &system.snapshot());
     }
 }
 
 impl AlphaEmuApp {
     fn handle_keyboard(&mut self, ui: &egui::Ui) {
-        let Some(host) = &mut self.host else {
+        let Some(system) = &mut self.system else {
             return;
         };
         ui.input(|input| {
             if input.key_pressed(egui::Key::ArrowUp) {
-                host.menu_up();
+                system.menu_up();
             }
             if input.key_pressed(egui::Key::ArrowDown) {
-                host.menu_down();
+                system.menu_down();
             }
             if input.key_pressed(egui::Key::Enter) {
-                host.open_selected();
+                system.open_selected();
             }
         });
     }
@@ -159,13 +159,13 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &Lcd) {
         });
 }
 
-fn render_runtime_controls(ui: &mut egui::Ui, host: &mut AppletHost) {
+fn render_runtime_controls(ui: &mut egui::Ui, system: &mut NeoSystem) {
     ui.horizontal(|ui| {
         if ui.button("Simulate USB attach").clicked() {
-            host.simulate_usb_attach();
+            system.simulate_usb_attach();
         }
         if ui.button("Reset emulator").clicked() {
-            host.reset();
+            system.reset();
         }
     });
 }

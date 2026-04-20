@@ -4,8 +4,9 @@ Desktop AlphaSmart NEO SmartApplet emulator.
 
 The first slice loads a real `.os3kapp` package and runs the validated
 `Alpha USB` applet through the `m68000` interpreter plus a small emulated NEO OS
-surface. It starts at an emulated SmartApplets menu, supports opening the
-selected applet with Enter, and supports the simulated USB attach event.
+surface. `NeoSystem` owns firmware-like behavior such as the SmartApplets menu
+and USB attach screens; `applet_runner` executes the applet machine code; and
+`os_shims` implements the NEO services that interpreted applet code calls.
 
 ## Run
 

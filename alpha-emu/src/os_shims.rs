@@ -1,13 +1,13 @@
 use crate::domain::{Lcd, UsbMode};
 
 #[derive(Clone, Debug)]
-pub struct NeoOs {
+pub struct NeoOsShims {
     pub lcd: Lcd,
     pub usb_mode: UsbMode,
     current_row: usize,
 }
 
-impl Default for NeoOs {
+impl Default for NeoOsShims {
     fn default() -> Self {
         let mut os = Self {
             lcd: Lcd::default(),
@@ -19,7 +19,8 @@ impl Default for NeoOs {
     }
 }
 
-impl NeoOs {
+impl NeoOsShims {
+    // Firmware-owned screens. These are not drawn by applet machine code.
     pub fn draw_empty_menu(&mut self) {
         self.lcd.clear();
         self.lcd.set_row(0, "SmartApplets");
@@ -59,6 +60,7 @@ impl NeoOs {
         self.current_row = 0;
     }
 
+    // A-line display traps. These are invoked by interpreted applet machine code.
     pub fn clear_screen(&mut self) {
         self.lcd.clear();
     }

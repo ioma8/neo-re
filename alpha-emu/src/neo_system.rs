@@ -1,14 +1,14 @@
 use thiserror::Error;
 
-use crate::cpu68k::{self, CpuError};
+use crate::applet_runner::{self, RunnerError};
 use crate::domain::{EmulatorSnapshot, Screen, UsbMode};
-use crate::neo_os::NeoOs;
+use crate::os_shims::NeoOsShims;
 use crate::os3kapp::{Os3kApp, Os3kAppError};
 
 #[derive(Debug)]
-pub struct AppletHost {
+pub struct NeoSystem {
     app: Os3kApp,
-    os: NeoOs,
+    os: NeoOsShims,
     screen: Screen,
     last_status: Option<u32>,
     last_trace: Vec<String>,
@@ -16,22 +16,22 @@ pub struct AppletHost {
 }
 
 #[derive(Debug, Error)]
-pub enum HostError {
+pub enum NeoSystemError {
     #[error("OS3KApp error")]
     Os3k(#[from] Os3kAppError),
     #[error("CPU error")]
-    Cpu(#[from] CpuError),
+    Runner(#[from] RunnerError),
 }
 
-impl AppletHost {
-    /// Loads an `OS3KApp` package into a fresh emulator host.
+impl NeoSystem {
+    /// Loads an `OS3KApp` package into a fresh emulated NEO system.
     ///
     /// # Errors
     ///
     /// Returns an error when the package cannot be read or parsed.
-    pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, HostError> {
+    pub fn load(path: impl AsRef<std::path::Path>) -> Result<Self, NeoSystemError> {
         let app = Os3kApp::read(path)?;
-        let mut os = NeoOs::default();
+        let mut os = NeoOsShims::default();
         os.draw_applets_menu(&app.metadata.name, true);
         Ok(Self {
             app,
@@ -62,7 +62,7 @@ impl AppletHost {
     }
 
     pub fn reset(&mut self) {
-        self.os = NeoOs::default();
+        self.os = NeoOsShims::default();
         self.os.draw_applets_menu(&self.app.metadata.name, true);
         self.screen = Screen::AppletsMenu;
         self.last_status = None;
@@ -94,7 +94,7 @@ impl AppletHost {
     }
 
     fn run_message(&mut self, message: u32) {
-        match cpu68k::run_message(&self.app, &mut self.os, message) {
+        match applet_runner::run_process_message(&self.app, &mut self.os, message) {
             Ok(result) => {
                 self.last_status = Some(result.status);
                 self.last_trace = result.trace;
@@ -109,14 +109,14 @@ impl AppletHost {
 
 #[cfg(test)]
 mod tests {
-    use super::AppletHost;
+    use super::NeoSystem;
     use crate::domain::UsbMode;
 
     #[test]
     fn alpha_usb_focus_draws_instructions() -> Result<(), Box<dyn std::error::Error>> {
-        let mut host = AppletHost::load("../exports/applets/alpha-usb-native.os3kapp")?;
-        host.open_applet();
-        let snapshot = host.snapshot();
+        let mut system = NeoSystem::load("../exports/applets/alpha-usb-native.os3kapp")?;
+        system.open_applet();
+        let snapshot = system.snapshot();
 
         assert_eq!(snapshot.error, None);
         assert_eq!(snapshot.lcd.rows()[1], "Now connect the NEO");
@@ -127,8 +127,8 @@ mod tests {
 
     #[test]
     fn starts_in_applets_menu() -> Result<(), Box<dyn std::error::Error>> {
-        let host = AppletHost::load("../exports/applets/alpha-usb-native.os3kapp")?;
-        let snapshot = host.snapshot();
+        let system = NeoSystem::load("../exports/applets/alpha-usb-native.os3kapp")?;
+        let snapshot = system.snapshot();
 
         assert_eq!(snapshot.screen, crate::domain::Screen::AppletsMenu);
         assert_eq!(snapshot.lcd.rows()[0], "SmartApplets");
@@ -138,9 +138,9 @@ mod tests {
 
     #[test]
     fn alpha_usb_attach_switches_to_direct() -> Result<(), Box<dyn std::error::Error>> {
-        let mut host = AppletHost::load("../exports/applets/alpha-usb-native.os3kapp")?;
-        host.simulate_usb_attach();
-        let snapshot = host.snapshot();
+        let mut system = NeoSystem::load("../exports/applets/alpha-usb-native.os3kapp")?;
+        system.simulate_usb_attach();
+        let snapshot = system.snapshot();
 
         assert_eq!(snapshot.error, None);
         assert_eq!(snapshot.usb_mode, UsbMode::Direct);

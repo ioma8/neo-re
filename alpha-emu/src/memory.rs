@@ -1,6 +1,6 @@
 use m68000::MemoryAccess;
 
-use crate::cpu68k::CpuError;
+use crate::applet_runner::RunnerError;
 use crate::os3kapp::Os3kApp;
 
 const MEMORY_SIZE: usize = 0x0080_0000;
@@ -10,9 +10,9 @@ pub(crate) struct EmuMemory {
 }
 
 impl EmuMemory {
-    pub(crate) fn load(app: &Os3kApp) -> Result<Self, CpuError> {
+    pub(crate) fn load(app: &Os3kApp) -> Result<Self, RunnerError> {
         if app.image.len() > MEMORY_SIZE {
-            return Err(CpuError::ImageTooLarge);
+            return Err(RunnerError::ImageTooLarge);
         }
         let mut bytes = vec![0; MEMORY_SIZE];
         bytes[..app.image.len()].copy_from_slice(&app.image);
