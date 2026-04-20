@@ -11,7 +11,7 @@ use os3kapp::{AppletManifest, Version};
 fn main() -> Result<(), Box<dyn Error>> {
     let command = parse_args(env::args().skip(1))?;
     let bytes = fs::read(&command.input)?;
-    let code = elf::extract_text(&bytes)?;
+    let code = elf::extract_load_image(&bytes)?;
     let image = os3kapp::build_image(&alpha_usb_manifest(), &code)?;
     os3kapp::validate_image(&image)?;
 

@@ -41,7 +41,7 @@ aplha-rust-native/
 
 `alpha-neo-pack` is a host CLI. It parses the m68k ELF, extracts the applet entry bytes, wraps them in the known OS3KApp container, writes AlphaWord metadata where requested, and validates the result.
 
-`applets/alpha_usb` is a `#![no_std]` applet crate. It defines the manifest and message handlers using the SDK.
+`applets/alpha_usb` is a `#![no_std]` applet crate. Its final safe version links a small `m68k-elf-as` entry stub through `build.rs`, because rustc-generated m68k code initially produced low absolute intra-applet references and data pointers that are unsafe for SmartApplet loading.
 
 ## Native ABI Shape
 
@@ -51,7 +51,7 @@ The applet exports one m68k entrypoint. The entrypoint receives the OS message a
 - parameter at `0x08(a7)`
 - status output pointer at `0x0c(a7)`
 
-The SDK provides a small dispatch layer that calls applet hooks for focus, USB plug, identity, and default messages. Known OS entrypoints used by the existing Alpha USB applet are exposed as narrowly named SDK functions.
+The SDK provides a small dispatch layer that calls applet hooks for focus, USB plug, identity, and default messages. Known OS entrypoints used by the existing Alpha USB applet are exposed as narrowly named SDK functions. Runtime-critical applets must also be checked for position-safe code: local control flow should use PC-relative branches/calls, and string/data access must not depend on unrelocated low absolute addresses.
 
 ## Alpha USB Behavior
 
@@ -64,6 +64,8 @@ The native Alpha USB applet should:
 - draw the same device-side instruction text on focus
 - handle the USB plug path by completing HID-to-direct mode and marking direct USB connected
 - return the known USB handled status
+- avoid low absolute intra-applet `jsr` calls and unrelocated absolute string pointers
+- use the validated SmartApplet trap opcodes and trap-block call shape
 
 ## Validation
 

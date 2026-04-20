@@ -4,7 +4,7 @@
 
 **Goal:** Build `aplha-rust-native`, a native Cargo-based m68k Rust SmartApplet SDK and packer with an Alpha USB applet.
 
-**Architecture:** The workspace separates applet-side `no_std` SDK code, a native m68k applet crate, and a host-side packer CLI. `build.sh` orchestrates Cargo’s m68k build and host packaging into `.os3kapp`.
+**Architecture:** The workspace separates applet-side `no_std` SDK code, a native m68k applet crate, and a host-side packer CLI. `build.sh` orchestrates Cargo’s m68k build and host packaging into `.os3kapp`. The Alpha USB applet links a small binutils-assembled entry stub to avoid unrelocated absolute local references from rustc output.
 
 **Tech Stack:** Rust 2024, nightly `build-std`, `m68k-unknown-none-elf`, `m68k-elf-ld`, `goblin` for ELF parsing, shell wrapper for build orchestration.
 

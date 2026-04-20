@@ -11,22 +11,22 @@ alpha_neo_clear_screen:
 
     .global alpha_neo_set_text_row
 alpha_neo_set_text_row:
-    .short 0xA001
+    .short 0xA004
     rts
 
     .global alpha_neo_draw_char
 alpha_neo_draw_char:
-    .short 0xA002
+    .short 0xA010
     rts
 
     .global alpha_neo_flush_text
 alpha_neo_flush_text:
-    .short 0xA003
+    .short 0xA098
     rts
 
     .global alpha_neo_yield
 alpha_neo_yield:
-    .short 0xA004
+    .short 0xA25C
     rts
     "#
 );
@@ -46,7 +46,7 @@ pub fn clear() {
     #[cfg(target_arch = "m68k")]
     // SAFETY: Calls the NEO OS clear-screen trap with no borrowed Rust state crossing the ABI.
     unsafe {
-        alpha_neo_clear_screen()
+        alpha_neo_clear_screen();
     };
 }
 
@@ -73,7 +73,7 @@ pub fn idle_forever() -> ! {
         #[cfg(target_arch = "m68k")]
         // SAFETY: Yields cooperatively to the NEO OS; it does not return ownership of any data.
         unsafe {
-            alpha_neo_yield()
+            alpha_neo_yield();
         };
     }
 }
@@ -84,7 +84,7 @@ fn set_row(row: u8) {
     #[cfg(target_arch = "m68k")]
     // SAFETY: Calls the NEO OS row-selection trap with a scalar row argument.
     unsafe {
-        alpha_neo_set_text_row(u32::from(row))
+        alpha_neo_set_text_row(u32::from(row));
     };
 }
 
@@ -94,7 +94,7 @@ fn draw_char(byte: u8) {
     #[cfg(target_arch = "m68k")]
     // SAFETY: Calls the NEO OS character drawing trap with a scalar byte argument.
     unsafe {
-        alpha_neo_draw_char(u32::from(byte))
+        alpha_neo_draw_char(u32::from(byte));
     };
 }
 
@@ -104,6 +104,6 @@ fn flush() {
     #[cfg(target_arch = "m68k")]
     // SAFETY: Calls the NEO OS flush trap with no borrowed Rust state crossing the ABI.
     unsafe {
-        alpha_neo_flush_text()
+        alpha_neo_flush_text();
     };
 }

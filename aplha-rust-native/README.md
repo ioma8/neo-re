@@ -4,6 +4,8 @@ Native Rust experiment for AlphaSmart NEO SmartApplets.
 
 This workspace builds applet code with Cargo for `m68k-unknown-none-elf`, then packages the linked ELF into an AlphaSmart `.os3kapp` image.
 
+The current Alpha USB applet uses a small `m68k-elf-as` entry stub for the runtime-critical entrypoint. That avoids unsafe absolute intra-applet references and preserves the validated SmartApplet trap-call stack shape.
+
 ## Requirements
 
 - Rust nightly with `rust-src`
@@ -39,9 +41,18 @@ Release mode is intentional. The tested 2026-03-25 nightly segfaulted while comp
 
 - `crates/alpha-neo-sdk`: `no_std` applet-side SDK with message dispatch, display traps, and USB helpers.
 - `crates/alpha-neo-pack`: host-side ELF-to-OS3KApp packer.
-- `applets/alpha_usb`: native Rust Alpha USB applet.
+- `applets/alpha_usb`: native Cargo-built Alpha USB applet. Its `build.rs` assembles `src/entry.s` and links it into the m68k ELF.
 
 ## Scope
 
 This first iteration targets a functional native Rust Alpha USB applet. It is not byte-exact with the previous Python/generated Rust applet.
 
+## Static Safety Checks
+
+The generated native applet is checked for:
+
+- no low absolute `jsr 0x0000....` calls for intra-applet control flow
+- validated trap opcodes `A000`, `A004`, `A010`, `A098`, and `A25C`
+- validated direct USB OS call addresses
+- no ELF relocations in the linked output
+- valid OS3KApp header, info table, and add-applet fields via `poc/neotools`

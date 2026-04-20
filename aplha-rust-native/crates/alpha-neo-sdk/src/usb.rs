@@ -1,37 +1,60 @@
-type OsFn0 = unsafe extern "C" fn();
-type OsFn1 = unsafe extern "C" fn(u32);
+#[cfg(target_arch = "m68k")]
+use core::arch::global_asm;
 
-const COMPLETE_USB_STAGE_1: usize = 0x0041_F9A0;
-const DELAY_MS: usize = 0x0042_4780;
-const COMPLETE_USB_STAGE_2: usize = 0x0044_044E;
-const COMPLETE_USB_STAGE_3: usize = 0x0044_047C;
-const MARK_DIRECT_CONNECTED: usize = 0x0041_0B26;
-const USB_DIRECT_FLAG: *mut u8 = 0x0001_3CF9 as *mut u8;
+#[cfg(target_arch = "m68k")]
+global_asm!(
+    r#"
+    .global alpha_neo_complete_hid_to_direct
+alpha_neo_complete_hid_to_direct:
+    .short 0x42A7
+    .short 0x42A7
+    .short 0x4878, 0x0001
+    .short 0x4EB9
+    .long  0x0041F9A0
+    .short 0x4878, 0x0064
+    .short 0x4EB9
+    .long  0x00424780
+    .short 0x13FC, 0x0001, 0x0001, 0x3CF9
+    .short 0x4EB9
+    .long  0x0044044E
+    .short 0x4878, 0x0064
+    .short 0x4EB9
+    .long  0x00424780
+    .short 0x4FEF, 0x0014
+    .short 0x4EB9
+    .long  0x0044047C
+    rts
+
+    .global alpha_neo_mark_direct_connected
+alpha_neo_mark_direct_connected:
+    .short 0x4EB9
+    .long  0x00410B26
+    rts
+    "#
+);
+
+#[cfg(target_arch = "m68k")]
+unsafe extern "C" {
+    fn alpha_neo_complete_hid_to_direct();
+    fn alpha_neo_mark_direct_connected();
+}
 
 pub fn complete_hid_to_direct() {
-    call1(COMPLETE_USB_STAGE_1, 1);
-    call1(DELAY_MS, 100);
-    // SAFETY: This mirrors the validated Alpha USB applet write to the NEO USB mode flag.
-    unsafe { USB_DIRECT_FLAG.write_volatile(1) };
-    call0(COMPLETE_USB_STAGE_2);
-    call1(DELAY_MS, 100);
-    call0(COMPLETE_USB_STAGE_3);
+    #[cfg(not(target_arch = "m68k"))]
+    {}
+    #[cfg(target_arch = "m68k")]
+    // SAFETY: Calls the validated Alpha USB absolute OS sequence.
+    unsafe {
+        alpha_neo_complete_hid_to_direct();
+    }
 }
 
 pub fn mark_direct_connected() {
-    call0(MARK_DIRECT_CONNECTED);
-}
-
-fn call0(address: usize) {
-    // SAFETY: Addresses are fixed NEO OS entrypoints validated by the working Alpha USB applet.
-    let function: OsFn0 = unsafe { core::mem::transmute(address) };
-    // SAFETY: The selected OS entrypoint takes no arguments.
-    unsafe { function() };
-}
-
-fn call1(address: usize, arg: u32) {
-    // SAFETY: Addresses are fixed NEO OS entrypoints validated by the working Alpha USB applet.
-    let function: OsFn1 = unsafe { core::mem::transmute(address) };
-    // SAFETY: The selected OS entrypoint takes one scalar argument.
-    unsafe { function(arg) };
+    #[cfg(not(target_arch = "m68k"))]
+    {}
+    #[cfg(target_arch = "m68k")]
+    // SAFETY: Calls the validated NEO OS direct-connected marker.
+    unsafe {
+        alpha_neo_mark_direct_connected();
+    }
 }
