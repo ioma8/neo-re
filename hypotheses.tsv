@@ -213,3 +213,4 @@ Alpha-emu LCD pixels need a small GUI-only inset so glyphs do not sit against th
 Alpha-emu GUI key repeat is too fast because normal text keys are handled both as egui text events and physical held key events	proven
 Alpha-emu GUI Enter can double-fire because physical key events hold keys until release instead of queueing one short tap	proven
 Calculator applet keys stopped working because GUI printable keys were routed through egui text events instead of physical matrix taps	proven
+Alpha-emu full system omitted custom Alpha USB and Forth applets because the loader only scanned stock A*.os3kapp dumps	proven

@@ -19,6 +19,10 @@ const LCD_LEFT_END: u32 = 0x0100_8002;
 const ASIC_REGISTER_START: u32 = 0x0200_0000;
 const ASIC_REGISTER_END: u32 = 0x0200_0008;
 const STOCK_APPLET_BASE: usize = 0x0047_0000;
+const EXTRA_APPLET_PATHS: &[&str] = &[
+    "../exports/applets/alpha-usb.os3kapp",
+    "../exports/applets/forth-mini.os3kapp",
+];
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
@@ -307,12 +311,10 @@ fn read_be32(bytes: &[u8], addr: usize) -> Option<u32> {
 
 fn load_stock_applets(bytes: &mut [u8]) {
     let applet_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analysis/device-dumps/applets");
-    let Ok(entries) = std::fs::read_dir(applet_dir) else {
-        return;
-    };
-
-    let mut applets = entries
-        .filter_map(Result::ok)
+    let mut applets = std::fs::read_dir(applet_dir)
+        .ok()
+        .into_iter()
+        .flat_map(|entries| entries.filter_map(Result::ok))
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension().is_some_and(|ext| ext == "os3kapp")
@@ -323,10 +325,15 @@ fn load_stock_applets(bytes: &mut [u8]) {
         })
         .collect::<Vec<_>>();
     applets.sort();
+    let extra_applets = EXTRA_APPLET_PATHS
+        .iter()
+        .map(|path| Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+        .collect::<Vec<_>>();
+    let stock_limit = 31usize.saturating_sub(extra_applets.len());
 
     let mut cursor = STOCK_APPLET_BASE;
     let applet_start = cursor;
-    for path in applets.into_iter().take(31) {
+    for path in applets.into_iter().take(stock_limit).chain(extra_applets) {
         let Ok(image) = std::fs::read(&path) else {
             continue;
         };
@@ -583,5 +590,26 @@ mod tests {
             memory.release_key(crate::keyboard::MatrixKey::new(key));
         }
         Ok(())
+    }
+
+    #[test]
+    fn full_system_loads_exported_custom_applets() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
+        let memory = EmuMemory::load_small_rom(&firmware)?;
+        let applet_start = u32::from_be_bytes(memory.bytes[0x0e8a..0x0e8e].try_into()?) as usize;
+        let applet_end = u32::from_be_bytes(memory.bytes[0x0e8e..0x0e92].try_into()?) as usize;
+
+        assert!(applet_start >= super::STOCK_APPLET_BASE);
+        assert!(applet_end > applet_start);
+        let applet_storage = &memory.bytes[applet_start..applet_end];
+        assert!(contains_bytes(applet_storage, b"Alpha USB"));
+        assert!(contains_bytes(applet_storage, b"Forth Mini"));
+        Ok(())
+    }
+
+    fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
     }
 }
