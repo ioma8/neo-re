@@ -6,7 +6,7 @@ use m68000::exception::Vector;
 use thiserror::Error;
 
 use crate::firmware::{FirmwareError, FirmwareRuntime};
-use crate::keyboard::matrix_key_for_char;
+use crate::keyboard::{matrix_key_for_char, matrix_key_for_code};
 use crate::lcd::LcdSnapshot;
 use crate::memory::{EmuMemory, MemoryError};
 
@@ -97,6 +97,18 @@ impl FirmwareSession {
 
     pub fn release_char(&mut self, value: char) {
         if let Some(key) = matrix_key_for_char(value) {
+            self.memory.release_key(key);
+        }
+    }
+
+    pub fn press_matrix_code(&mut self, code: u8) {
+        if let Some(key) = matrix_key_for_code(code) {
+            self.memory.press_key(key);
+        }
+    }
+
+    pub fn release_matrix_code(&mut self, code: u8) {
+        if let Some(key) = matrix_key_for_code(code) {
             self.memory.release_key(key);
         }
     }

@@ -6,12 +6,11 @@ impl MatrixKey {
         Self(code)
     }
 
-    #[cfg(test)]
     pub(crate) const fn code(self) -> u8 {
         self.0
     }
 
-    const fn row(self) -> u8 {
+    pub(crate) const fn row(self) -> u8 {
         self.0 & 0x0f
     }
 
@@ -22,6 +21,173 @@ impl MatrixKey {
     fn is_visible_on_row(self, row: Option<u8>) -> bool {
         row.is_none_or(|row| row == self.row())
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct MatrixCell {
+    pub(crate) raw: MatrixKey,
+    pub(crate) row: u8,
+    pub(crate) col: u8,
+    pub(crate) logical: u8,
+}
+
+const MATRIX_EMPTY: u8 = 0xff;
+
+// Logical codes as found in `os3kneorom.os3kos` at firmware base 0x00400000,
+// table `0x0044c37b`. low nibble is row; bit index is column.
+const MATRIX_LOGICAL: [[u8; 8]; 16] = [
+    [0x00, 0x0a, 0x12, 0x1c, 0x25, 0x31, 0x3b, MATRIX_EMPTY],
+    [
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        0x26,
+        MATRIX_EMPTY,
+        0x50,
+        MATRIX_EMPTY,
+    ],
+    [
+        0x01,
+        MATRIX_EMPTY,
+        0x13,
+        0x1d,
+        0x27,
+        0x32,
+        0x3d,
+        MATRIX_EMPTY,
+    ],
+    [0x02, 0x0b, 0x14, 0x1e, 0x28, 0x33, MATRIX_EMPTY, 0x47],
+    [
+        MATRIX_EMPTY,
+        0x0c,
+        MATRIX_EMPTY,
+        0x1f,
+        MATRIX_EMPTY,
+        0x34,
+        MATRIX_EMPTY,
+        0x48,
+    ],
+    [
+        MATRIX_EMPTY,
+        0x0d,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        0x3e,
+        0x49,
+    ],
+    [
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        0x29,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        0x4a,
+    ],
+    [
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        0x2a,
+        MATRIX_EMPTY,
+        0x3f,
+        0x4b,
+    ],
+    [
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+    ],
+    [0x03, 0x0e, 0x15, MATRIX_EMPTY, 0x2b, 0x35, 0x40, 0x4c],
+    [0x04, 0x0f, 0x16, 0x20, 0x2c, 0x36, 0x41, MATRIX_EMPTY],
+    [
+        0x05,
+        MATRIX_EMPTY,
+        0x17,
+        0x21,
+        0x2d,
+        0x37,
+        0x42,
+        MATRIX_EMPTY,
+    ],
+    [0x06, MATRIX_EMPTY, 0x18, 0x22, 0x2e, 0x38, 0x43, 0x4d],
+    [0x07, 0x10, 0x19, 0x23, 0x2f, 0x39, 0x44, MATRIX_EMPTY],
+    [
+        0x08,
+        MATRIX_EMPTY,
+        0x1a,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        MATRIX_EMPTY,
+        0x45,
+        MATRIX_EMPTY,
+    ],
+    [0x09, 0x11, 0x1b, 0x24, 0x30, 0x3a, 0x46, 0x4f],
+];
+
+pub(crate) fn matrix_cells() -> Vec<MatrixCell> {
+    let mut cells = Vec::new();
+    for (row, row_data) in MATRIX_LOGICAL.iter().enumerate() {
+        for (col, logical) in row_data.iter().enumerate() {
+            if *logical == MATRIX_EMPTY {
+                continue;
+            }
+            let raw = ((col as u8) << 4) | (row as u8);
+            cells.push(MatrixCell {
+                raw: MatrixKey::new(raw),
+                row: row as u8,
+                col: col as u8,
+                logical: *logical,
+            });
+        }
+    }
+    cells
+}
+
+pub(crate) fn matrix_key_for_code(value: u8) -> Option<MatrixKey> {
+    let row = value & 0x0f;
+    let col = value >> 4;
+    if row > 0x0f || col > 7 {
+        return None;
+    }
+    let logical = MATRIX_LOGICAL[row as usize][col as usize];
+    if logical == MATRIX_EMPTY {
+        None
+    } else {
+        Some(MatrixKey::new(value))
+    }
+}
+
+pub(crate) fn matrix_code_to_char(value: u8) -> Option<char> {
+    match value {
+        0x3a => Some('e'),
+        0x3d => Some('r'),
+        0x7f => Some('n'),
+        0x30 => Some('i'),
+        _ => None,
+    }
+}
+
+pub(crate) fn matrix_key_label(value: u8) -> String {
+    if let Some(ch) = matrix_code_to_char(value) {
+        ch.to_string()
+    } else {
+        format!("0x{value:02x}")
+    }
+}
+
+pub(crate) fn matrix_key_is_alphanumeric(value: u8) -> bool {
+    matrix_code_to_char(value).is_some_and(|character| character.is_ascii_alphanumeric())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -113,7 +279,7 @@ pub(crate) fn matrix_key_for_char(value: char) -> Option<MatrixKey> {
 
 #[cfg(test)]
 mod tests {
-    use super::{Keyboard, MatrixKey, matrix_key_for_char};
+    use super::{Keyboard, MatrixKey, matrix_cells, matrix_key_for_char, matrix_key_for_code};
 
     #[test]
     fn known_small_rom_password_keys_match_firmware_table() {
@@ -121,6 +287,24 @@ mod tests {
         assert_eq!(matrix_key_for_char('r').map(MatrixKey::code), Some(0x3d));
         assert_eq!(matrix_key_for_char('n').map(MatrixKey::code), Some(0x7f));
         assert_eq!(matrix_key_for_char('i').map(MatrixKey::code), Some(0x30));
+    }
+
+    #[test]
+    fn matrix_cells_is_derived_from_firmware_keyboard_map() {
+        let cells = matrix_cells();
+        assert!(
+            cells
+                .iter()
+                .any(|cell| cell.row == 0x0f && cell.col == 4 && cell.raw.code() == 0x4f)
+        );
+        assert!(cells.iter().any(|cell| cell.raw.code() == 0x7f));
+    }
+
+    #[test]
+    fn matrix_key_for_code_only_accepts_non_empty_matrix_slots() {
+        assert_eq!(matrix_key_for_code(0x3a).map(MatrixKey::code), Some(0x3a));
+        assert_eq!(matrix_key_for_code(0x00).map(MatrixKey::code), Some(0x00));
+        assert_eq!(matrix_key_for_code(0x08), None);
     }
 
     #[test]

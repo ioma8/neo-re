@@ -5,6 +5,7 @@ use eframe::egui;
 
 use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::{FirmwareSession, FirmwareSnapshot};
+use crate::keyboard::{matrix_cells, matrix_key_is_alphanumeric, matrix_key_label};
 use crate::lcd::LcdSnapshot;
 
 /// Runs the desktop Small ROM emulator UI.
@@ -87,7 +88,6 @@ impl AlphaEmuApp {
                     ui.set_max_width(840.0);
                     render_header(ui, self);
                     ui.add_space(18.0);
-
                     match self.session.as_mut() {
                         Some(session) => {
                             let snapshot = session.snapshot();
@@ -271,7 +271,66 @@ fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
                 session.run_steps(250_000);
             }
         });
+        ui.add_space(14.0);
+        ui.separator();
+        ui.add_space(10.0);
+        ui.label(
+            egui::RichText::new("Special matrix keys")
+                .size(14.0)
+                .strong()
+                .color(text_primary()),
+        );
+        ui.label(
+            egui::RichText::new(
+                "Mapped from firmware matrix entries without typed alphanumeric mapping.",
+            )
+            .size(12.0)
+            .color(text_secondary()),
+        );
+        ui.add_space(8.0);
+        render_special_matrix_buttons(ui, session);
     });
+}
+
+fn render_special_matrix_buttons(ui: &mut egui::Ui, session: &mut FirmwareSession) {
+    let cells = matrix_cells();
+    let mut any_pressed = false;
+    for row in 0..16u8 {
+        ui.horizontal_wrapped(|ui| {
+            for cell in cells.iter().filter(|cell| cell.row == row) {
+                let raw = cell.raw.code();
+                if matrix_key_is_alphanumeric(raw) {
+                    continue;
+                }
+                let label = format!("{} (0x{:02x})", matrix_key_label(raw), cell.logical);
+                let response = button_for_matrix_key(
+                    ui,
+                    &label,
+                    format!("row {:02x}, col {:x}", cell.row, cell.col),
+                );
+                if response.clicked() {
+                    session.press_matrix_code(raw);
+                    session.release_matrix_code(raw);
+                    any_pressed = true;
+                }
+            }
+        });
+        ui.add_space(6.0);
+    }
+    if any_pressed {
+        session.run_steps(10_000);
+    }
+}
+
+fn button_for_matrix_key(ui: &mut egui::Ui, label: &str, hover: String) -> egui::Response {
+    let response = ui.add(
+        egui::Button::new(egui::RichText::new(label).size(11.0).color(text_primary()))
+            .fill(egui::Color32::from_rgb(238, 241, 245))
+            .stroke(border())
+            .corner_radius(8.0)
+            .min_size(egui::vec2(52.0, 28.0)),
+    );
+    response.on_hover_text(hover)
 }
 
 fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
