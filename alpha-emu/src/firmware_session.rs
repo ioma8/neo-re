@@ -15,6 +15,7 @@ pub struct FirmwareSnapshot {
     pub pc: u32,
     pub ssp: u32,
     pub steps: usize,
+    pub cycles: u64,
     pub stopped: bool,
     pub last_exception: Option<String>,
     pub trace: Vec<String>,
@@ -35,6 +36,7 @@ pub struct FirmwareSession {
     cpu: M68000<Mc68000>,
     memory: EmuMemory,
     steps: usize,
+    cycles: u64,
     last_exception: Option<String>,
     trace: Vec<String>,
     mmio_accesses: Vec<String>,
@@ -71,6 +73,7 @@ impl FirmwareSession {
             cpu,
             memory,
             steps: 0,
+            cycles: 0,
             last_exception: None,
             trace: vec![format!("Small ROM reset: ssp=0x{ssp:08x} pc=0x{pc:08x}")],
             mmio_accesses: Vec::new(),
@@ -83,10 +86,11 @@ impl FirmwareSession {
                 break;
             }
 
-            let (pc, disassembly, _, exception) = self
+            let (pc, disassembly, cycles, exception) = self
                 .cpu
                 .disassembler_interpreter_exception(&mut self.memory);
             self.steps = self.steps.saturating_add(1);
+            self.cycles = self.cycles.saturating_add(cycles as u64);
             if !disassembly.is_empty() {
                 self.push_trace(format!("0x{pc:08x}: {disassembly}"));
             }
@@ -101,22 +105,50 @@ impl FirmwareSession {
         }
     }
 
-    pub fn run_realtime_steps(&mut self, max_steps: usize) {
+    pub fn run_realtime_steps(&mut self, max_steps: usize) -> u64 {
         let previous_logging = self.memory.set_mmio_logging(false);
+        let start_cycles = self.cycles;
         for _ in 0..max_steps {
             if self.cpu.stop || self.last_exception.is_some() {
                 break;
             }
 
             let pc = self.cpu.regs.pc.0;
-            let (_, exception) = self.cpu.interpreter_exception(&mut self.memory);
+            let (cycles, exception) = self.cpu.interpreter_exception(&mut self.memory);
             self.steps = self.steps.saturating_add(1);
+            self.cycles = self.cycles.saturating_add(cycles as u64);
             if let Some(vector) = exception {
                 self.last_exception = Some(format_exception(vector, pc));
                 break;
             }
         }
         self.memory.set_mmio_logging(previous_logging);
+        self.cycles.saturating_sub(start_cycles)
+    }
+
+    pub fn run_realtime_cycles(&mut self, cycle_budget: u64, max_steps: usize) -> u64 {
+        let previous_logging = self.memory.set_mmio_logging(false);
+        let start_cycles = self.cycles;
+        let start_steps = self.steps;
+        while self.cycles.saturating_sub(start_cycles) < cycle_budget {
+            if self.cpu.stop || self.last_exception.is_some() {
+                break;
+            }
+            if self.steps.saturating_sub(start_steps) >= max_steps {
+                break;
+            }
+
+            let pc = self.cpu.regs.pc.0;
+            let (cycles, exception) = self.cpu.interpreter_exception(&mut self.memory);
+            self.steps = self.steps.saturating_add(1);
+            self.cycles = self.cycles.saturating_add(cycles as u64);
+            if let Some(vector) = exception {
+                self.last_exception = Some(format_exception(vector, pc));
+                break;
+            }
+        }
+        self.memory.set_mmio_logging(previous_logging);
+        self.cycles.saturating_sub(start_cycles)
     }
 
     #[must_use]
@@ -166,6 +198,7 @@ impl FirmwareSession {
             pc: self.cpu.regs.pc.0,
             ssp: self.cpu.regs.ssp.0,
             steps: self.steps,
+            cycles: self.cycles,
             stopped: self.cpu.stop,
             last_exception: self.last_exception.clone(),
             trace: self.trace.clone(),
@@ -241,7 +274,21 @@ mod tests {
         let snapshot = session.snapshot();
 
         assert_eq!(snapshot.steps, 200);
+        assert!(snapshot.cycles > 0);
         assert_eq!(snapshot.trace.len(), initial_trace_len);
+        assert!(snapshot.last_exception.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn realtime_cycle_runner_honors_cycle_budget() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = FirmwareSession::boot_small_rom_default()?;
+        let elapsed = session.run_realtime_cycles(1_000, 10_000);
+        let snapshot = session.snapshot();
+
+        assert!(elapsed >= 1_000);
+        assert_eq!(snapshot.cycles, elapsed);
+        assert!(snapshot.steps <= 10_000);
         assert!(snapshot.last_exception.is_none());
         Ok(())
     }

@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use eframe::egui;
@@ -13,8 +13,10 @@ const SHIFT_CODE: u8 = 0x0e;
 const COMMAND_CODE: u8 = 0x14;
 const OPTION_CODE: u8 = 0x41;
 const CTRL_CODE: u8 = 0x7c;
-const REALTIME_STEPS_PER_FRAME: usize = 8_000;
+const NEO_CPU_HZ: u64 = 33_000_000;
 const REALTIME_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const MAX_REALTIME_STEPS_PER_FRAME: usize = 250_000;
+const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(50);
 
 /// Runs the desktop Small ROM emulator UI.
 ///
@@ -46,6 +48,8 @@ struct AlphaEmuApp {
     session: Option<FirmwareSession>,
     load_error: Option<String>,
     modifier_state: ModifierMatrixState,
+    last_realtime_tick: Instant,
+    realtime_cycle_remainder: f64,
 }
 
 impl AlphaEmuApp {
@@ -55,6 +59,8 @@ impl AlphaEmuApp {
             session: None,
             load_error: None,
             modifier_state: ModifierMatrixState::default(),
+            last_realtime_tick: Instant::now(),
+            realtime_cycle_remainder: 0.0,
         };
         app.boot_path(path);
         app
@@ -81,6 +87,8 @@ impl AlphaEmuApp {
                 self.session = Some(session);
                 self.load_error = None;
                 self.modifier_state = ModifierMatrixState::default();
+                self.last_realtime_tick = Instant::now();
+                self.realtime_cycle_remainder = 0.0;
             }
             Err(error) => {
                 self.session = None;
@@ -132,10 +140,24 @@ impl AlphaEmuApp {
 
 impl eframe::App for AlphaEmuApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if let Some(session) = self.session.as_mut()
-            && session.is_running()
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(self.last_realtime_tick);
+        self.last_realtime_tick = now;
+        if self
+            .session
+            .as_ref()
+            .is_some_and(FirmwareSession::is_running)
         {
-            session.run_realtime_steps(REALTIME_STEPS_PER_FRAME);
+            let elapsed = elapsed.min(MAX_REALTIME_CATCHUP);
+            let target_cycles =
+                elapsed.as_secs_f64() * NEO_CPU_HZ as f64 + self.realtime_cycle_remainder;
+            let cycle_budget = target_cycles.floor() as u64;
+            self.realtime_cycle_remainder = target_cycles - cycle_budget as f64;
+            if cycle_budget > 0
+                && let Some(session) = self.session.as_mut()
+            {
+                session.run_realtime_cycles(cycle_budget, MAX_REALTIME_STEPS_PER_FRAME);
+            }
             ctx.request_repaint_after(REALTIME_FRAME_INTERVAL);
         }
     }
@@ -398,6 +420,7 @@ fn render_summary(ui: &mut egui::Ui, path: &Path, snapshot: &FirmwareSnapshot) {
             metadata_pill(ui, "PC", format!("0x{:08x}", snapshot.pc));
             metadata_pill(ui, "SSP", format!("0x{:08x}", snapshot.ssp));
             metadata_pill(ui, "Steps", snapshot.steps);
+            metadata_pill(ui, "Cycles", snapshot.cycles);
             metadata_pill(
                 ui,
                 "State",

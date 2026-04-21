@@ -31,9 +31,14 @@ The desktop UI shows:
 
 - emulated 320x128 LCD pixels
 - reset-vector boot state
-- current PC/SSP/step count
+- current PC/SSP/step/cycle count
 - recent m68k instruction trace
 - MMIO reads/writes observed while the firmware runs
+
+Realtime GUI execution is cycle-paced against a 33 MHz DragonBall VZ target,
+matching the commonly reported AlphaSmart NEO/NEO2 CPU clock. GUI repaint is
+capped to a 16 ms cadence, so the display updates at no more than about 60 FPS
+while the interpreter advances by elapsed emulated CPU cycles.
 
 For faster hardware probing without the UI:
 
