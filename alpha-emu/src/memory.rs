@@ -50,10 +50,6 @@ impl EmuMemory {
         })
     }
 
-    pub(crate) fn type_small_rom_password(&mut self) {
-        self.keyboard.type_small_rom_password();
-    }
-
     pub(crate) fn press_key(&mut self, key: MatrixKey) {
         self.keyboard.press(key);
     }
@@ -66,6 +62,10 @@ impl EmuMemory {
         self.keyboard.tap(key);
     }
 
+    pub(crate) fn hold_small_rom_entry_chord(&mut self) {
+        self.keyboard.hold_small_rom_entry_chord();
+    }
+
     pub(crate) fn drain_mmio_accesses(&mut self) -> Vec<String> {
         std::mem::take(&mut self.mmio_accesses)
     }
@@ -76,7 +76,7 @@ impl EmuMemory {
 
     fn record_mmio(&mut self, access: impl Into<String>) {
         self.mmio_accesses.push(access.into());
-        if self.mmio_accesses.len() > 64 {
+        if self.mmio_accesses.len() > 4096 {
             self.mmio_accesses.remove(0);
         }
     }
@@ -246,20 +246,6 @@ mod tests {
         let mut memory = EmuMemory::load_small_rom(&firmware)?;
 
         assert_eq!(memory.get_byte(0xffff_f419), Some(0xff));
-        Ok(())
-    }
-
-    #[test]
-    fn scripted_password_emits_first_expected_key_bit() -> Result<(), Box<dyn std::error::Error>> {
-        let firmware = FirmwareRuntime::load_small_rom_default()?;
-        let mut memory = EmuMemory::load_small_rom(&firmware)?;
-
-        memory.type_small_rom_password();
-        for _ in 0..80 {
-            assert_eq!(memory.get_byte(0xffff_f419), Some(0xff));
-        }
-
-        assert_eq!(memory.get_byte(0xffff_f419), Some(0xf7));
         Ok(())
     }
 }

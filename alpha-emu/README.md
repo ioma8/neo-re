@@ -41,11 +41,11 @@ For faster hardware probing without the UI:
 cargo +nightly run -- --headless --steps=2000000
 ```
 
-To inject the proven Small ROM password key sequence:
-
-```sh
-cargo +nightly run -- --headless --type-password --steps=6000000
-```
+Normal boot/open does not hold any synthetic keys. The GUI includes a separate
+`Reboot Small ROM with activating key chord` button for the special updater
+entry path. That button briefly presents the Small ROM entry key chord to the
+firmware and then releases it. It does not type the `ernie` password; the
+firmware waits for normal keyboard input at the password prompt.
 
 ## Current Hardware Map
 
@@ -65,9 +65,10 @@ Validated from the Small ROM boot path:
 
 The current emulation preserves MMIO register byte state, logs reads/writes, and
 lets the Small ROM pass CPU setup, LCD initialization/clear, and keyboard-matrix
-polling without a bus error. Labelled PC keyboard input is currently limited to
-the Small ROM password keys proven by firmware table `0x004053ee`: `e`, `r`,
-`n`, and `i`.
+polling without a bus error. Labelled PC keyboard input covers the firmware
+keyboard matrix entries currently mapped in `src/keyboard.rs`, including the
+Small ROM password keys proven by firmware table `0x004053ee`: `e`, `r`, `n`,
+and `i`.
 
 The LCD model implements the page/column/data behavior needed by the Small ROM
 boot path. It is intentionally minimal: unsupported controller commands are

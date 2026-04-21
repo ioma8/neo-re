@@ -38,6 +38,7 @@ covering half of the 320x128 display.
 | `0xfffff411` / `0x0000f411` | Observed row-select byte for the Small ROM scanner. | The scanner writes a row value before repeated reads from `0xf419`. |
 | `0x00400650` | Small ROM routine that tests one encoded key. | It takes an encoded byte, drives the low-nibble row, reads `0xf419`, then tests bit `encoded >> 4`. |
 | `0x00400732` | Small ROM debounce/scanner routine. | It cycles row values, samples `0xf419` until stable, and returns pressed/no-key state. |
+| `0x00401378` | Small ROM entry-chord gate. | It checks encoded keys `0x6e`, `0x60`, `0x62`, and `0x73`; only then does the boot flow call the password routine at `0x004013c0`. |
 | `0x004053ee` | Small ROM password key-code table. | Bytes `3a 3d 7f 30 3a` are compared against the password `ernie`. |
 
 The encoded keyboard byte format is:
@@ -54,6 +55,11 @@ Known labelled key codes from the Small ROM password:
 | `r` | `0x3d` | `0x0d` | `3` | `0xf7` |
 | `n` | `0x7f` | `0x0f` | `7` | `0x7f` |
 | `i` | `0x30` | `0x00` | `3` | `0xf7` |
+
+The emulator's normal boot path does not hold this chord. The GUI's explicit
+`Reboot Small ROM with activating key chord` action uses the entry-chord gate as
+boot state, then releases those keys before the password scanner. The firmware
+then waits for user input instead of receiving a scripted password.
 
 For full firmware-backed matrix layout and the complete raw-logical mapping, see:
 [AlphaSmart NEO Full Keyboard Matrix Map](/Users/jakubkolcar/customs/neo-re/docs/2026-04-21-keyboard-matrix-map.md).

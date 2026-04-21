@@ -46,8 +46,24 @@ impl FirmwareSession {
     }
 
     pub fn boot_small_rom(firmware: FirmwareRuntime) -> Result<Self, FirmwareSessionError> {
+        Self::boot_small_rom_inner(firmware, false)
+    }
+
+    pub fn boot_small_rom_with_entry_chord(
+        firmware: FirmwareRuntime,
+    ) -> Result<Self, FirmwareSessionError> {
+        Self::boot_small_rom_inner(firmware, true)
+    }
+
+    fn boot_small_rom_inner(
+        firmware: FirmwareRuntime,
+        hold_entry_chord: bool,
+    ) -> Result<Self, FirmwareSessionError> {
         let (ssp, pc) = firmware.reset_vectors()?;
-        let memory = EmuMemory::load_small_rom(&firmware)?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+        if hold_entry_chord {
+            memory.hold_small_rom_entry_chord();
+        }
         let mut cpu: M68000<Mc68000> = M68000::new_no_reset();
         cpu.regs.ssp = Wrapping(ssp);
         cpu.regs.pc = Wrapping(pc);
@@ -88,10 +104,6 @@ impl FirmwareSession {
     #[must_use]
     pub fn is_running(&self) -> bool {
         !self.cpu.stop && self.last_exception.is_none()
-    }
-
-    pub fn type_small_rom_password(&mut self) {
-        self.memory.type_small_rom_password();
     }
 
     pub fn press_char(&mut self, value: char) {
@@ -200,6 +212,29 @@ mod tests {
                 .iter()
                 .any(|access| access.contains("0x0000f000") || access.contains("0xfffff000"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn normal_small_rom_boot_skips_entry_chord() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = FirmwareSession::boot_small_rom_default()?;
+        session.run_steps(700_000);
+        let snapshot = session.snapshot();
+
+        assert_eq!(snapshot.pc, 0x0040_15ea);
+        assert!(snapshot.last_exception.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn entry_chord_boot_reaches_keyboard_scanner() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = crate::firmware::FirmwareRuntime::load_small_rom_default()?;
+        let mut session = FirmwareSession::boot_small_rom_with_entry_chord(firmware)?;
+        session.run_steps(700_000);
+        let snapshot = session.snapshot();
+
+        assert_eq!(snapshot.pc, 0x0040_0790);
+        assert!(snapshot.last_exception.is_none());
         Ok(())
     }
 }

@@ -286,8 +286,9 @@ fn hid_usage_to_special_label(usage: u8) -> Option<&'static str> {
 
 #[derive(Clone, Copy, Debug)]
 struct KeyPhase {
-    key_code: Option<MatrixKey>,
+    key_codes: [Option<MatrixKey>; 4],
     reads: usize,
+    all_rows: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -311,37 +312,38 @@ impl Keyboard {
     }
 
     pub(crate) fn tap(&mut self, key: MatrixKey) {
-        self.push_phase(Some(key), 120);
-        self.push_phase(None, 120);
+        self.push_phase([Some(key), None, None, None], 120, false);
+        self.push_phase([None, None, None, None], 120, false);
+    }
+
+    pub(crate) fn hold_small_rom_entry_chord(&mut self) {
+        self.push_phase(
+            [
+                Some(MatrixKey::new(0x6e)),
+                Some(MatrixKey::new(0x60)),
+                Some(MatrixKey::new(0x62)),
+                Some(MatrixKey::new(0x73)),
+            ],
+            4,
+            true,
+        );
     }
 
     pub(crate) fn select_row(&mut self, row: u8) {
         self.selected_row = Some(row & 0x0f);
     }
 
-    pub(crate) fn type_small_rom_password(&mut self) {
-        self.script.clear();
-        self.phase = 0;
-        self.reads_in_phase = 0;
-        self.push_phase(None, 80);
-        for key_code in [
-            MatrixKey::new(0x3a),
-            MatrixKey::new(0x3d),
-            MatrixKey::new(0x7f),
-            MatrixKey::new(0x30),
-            MatrixKey::new(0x3a),
-        ] {
-            self.push_phase(Some(key_code), 120);
-            self.push_phase(None, 120);
-        }
-    }
-
     pub(crate) fn read_matrix_input(&mut self) -> u8 {
         let mut active_columns = 0;
-        if let Some(script_key) = self.read_script_key()
-            && script_key.is_visible_on_row(None)
-        {
-            active_columns |= script_key.column_mask();
+        for script_key in self.read_script_keys() {
+            let visible_row = if script_key.all_rows {
+                None
+            } else {
+                self.selected_row
+            };
+            if script_key.key.is_visible_on_row(visible_row) {
+                active_columns |= script_key.column_mask();
+            }
         }
         for key in self.held.iter().copied() {
             if key.is_visible_on_row(self.selected_row) {
@@ -351,18 +353,44 @@ impl Keyboard {
         !active_columns
     }
 
-    fn read_script_key(&mut self) -> Option<MatrixKey> {
-        let phase = self.script.get(self.phase).copied()?;
+    fn read_script_keys(&mut self) -> Vec<ScriptKey> {
+        let Some(phase) = self.script.get(self.phase).copied() else {
+            return Vec::new();
+        };
         self.reads_in_phase = self.reads_in_phase.saturating_add(1);
         if self.reads_in_phase >= phase.reads {
             self.phase = self.phase.saturating_add(1);
             self.reads_in_phase = 0;
         }
-        phase.key_code
+        phase
+            .key_codes
+            .into_iter()
+            .flatten()
+            .map(|key| ScriptKey {
+                key,
+                all_rows: phase.all_rows,
+            })
+            .collect()
     }
 
-    fn push_phase(&mut self, key_code: Option<MatrixKey>, reads: usize) {
-        self.script.push(KeyPhase { key_code, reads });
+    fn push_phase(&mut self, key_codes: [Option<MatrixKey>; 4], reads: usize, all_rows: bool) {
+        self.script.push(KeyPhase {
+            key_codes,
+            reads,
+            all_rows,
+        });
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScriptKey {
+    key: MatrixKey,
+    all_rows: bool,
+}
+
+impl ScriptKey {
+    fn column_mask(self) -> u8 {
+        self.key.column_mask()
     }
 }
 
@@ -409,7 +437,8 @@ fn _validate_display_map() {
 #[cfg(test)]
 mod tests {
     use super::{
-        _assert_full_matrix_tables, matrix_cells, matrix_key_for_char, matrix_key_for_code, matrix_key_label,
+        _assert_full_matrix_tables, matrix_cells, matrix_key_for_char, matrix_key_for_code,
+        matrix_key_label,
     };
     use super::{_validate_display_map, Keyboard, MatrixKey};
 
@@ -466,6 +495,18 @@ mod tests {
     }
 
     #[test]
+    fn small_rom_entry_chord_is_visible_during_boot_gate_only() {
+        let mut keyboard = Keyboard::default();
+        keyboard.select_row(0x00);
+        keyboard.hold_small_rom_entry_chord();
+
+        for _ in 0..4 {
+            assert_ne!(keyboard.read_matrix_input(), 0xff);
+        }
+        assert_eq!(keyboard.read_matrix_input(), 0xff);
+    }
+
+    #[test]
     fn held_key_is_active_low_only_on_selected_row() {
         let mut keyboard = Keyboard::default();
         keyboard.press(MatrixKey::new(0x3a));
@@ -474,17 +515,6 @@ mod tests {
         assert_eq!(keyboard.read_matrix_input(), 0xff);
 
         keyboard.select_row(0x0a);
-        assert_eq!(keyboard.read_matrix_input(), 0xf7);
-    }
-
-    #[test]
-    fn scripted_password_ignores_row_selection_for_small_rom_boot_shortcut() {
-        let mut keyboard = Keyboard::default();
-        keyboard.type_small_rom_password();
-
-        for _ in 0..80 {
-            assert_eq!(keyboard.read_matrix_input(), 0xff);
-        }
         assert_eq!(keyboard.read_matrix_input(), 0xf7);
     }
 }

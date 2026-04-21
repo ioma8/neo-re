@@ -11,7 +11,6 @@ fn main() -> Result<()> {
 
     let mut headless = false;
     let mut lcd_ranges = false;
-    let mut type_password = false;
     let mut path = None;
     let mut steps = 10_000;
     for arg in std::env::args_os().skip(1) {
@@ -19,8 +18,6 @@ fn main() -> Result<()> {
             headless = true;
         } else if arg == "--lcd-ranges" {
             lcd_ranges = true;
-        } else if arg == "--type-password" {
-            type_password = true;
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--steps=")) {
             steps = value.parse()?;
         } else {
@@ -32,9 +29,6 @@ fn main() -> Result<()> {
     if headless {
         let firmware = FirmwareRuntime::load_small_rom(path)?;
         let mut session = FirmwareSession::boot_small_rom(firmware)?;
-        if type_password {
-            session.type_small_rom_password();
-        }
         session.run_steps(steps);
         let snapshot = session.snapshot();
         println!(

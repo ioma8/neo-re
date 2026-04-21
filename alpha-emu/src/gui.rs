@@ -61,11 +61,20 @@ impl AlphaEmuApp {
     }
 
     fn boot_path(&mut self, path: &Path) {
+        self.boot_path_with_entry_chord(path, false);
+    }
+
+    fn boot_path_with_entry_chord(&mut self, path: &Path, hold_entry_chord: bool) {
         self.firmware_path = path.to_path_buf();
         let loaded = FirmwareRuntime::load_small_rom(path)
             .map_err(|error| error.to_string())
             .and_then(|rom| {
-                FirmwareSession::boot_small_rom(rom).map_err(|error| error.to_string())
+                if hold_entry_chord {
+                    FirmwareSession::boot_small_rom_with_entry_chord(rom)
+                } else {
+                    FirmwareSession::boot_small_rom(rom)
+                }
+                .map_err(|error| error.to_string())
             });
         match loaded {
             Ok(session) => {
@@ -105,6 +114,11 @@ impl AlphaEmuApp {
                             ui.add_space(14.0);
                             render_summary(ui, &self.firmware_path, &snapshot);
                             ui.add_space(14.0);
+                            render_boot_controls(ui, self);
+                            ui.add_space(14.0);
+                            let Some(session) = self.session.as_mut() else {
+                                return;
+                            };
                             render_controls(ui, session);
                             ui.add_space(14.0);
                             render_trace(ui, &session.snapshot());
@@ -240,7 +254,18 @@ impl TextTap {
 fn tap_for_text_char(character: char) -> Option<TextTap> {
     let (character, needs_shift) = match character {
         'A'..='Z' => (character.to_ascii_lowercase(), true),
-        'a'..='z' | '0'..='9' | '-' | '=' | '[' | ']' | '\\' | ';' | '\'' | '`' | ',' | '.'
+        'a'..='z'
+        | '0'..='9'
+        | '-'
+        | '='
+        | '['
+        | ']'
+        | '\\'
+        | ';'
+        | '\''
+        | '`'
+        | ','
+        | '.'
         | '/' => (character, false),
         '!' => ('1', true),
         '@' => ('2', true),
@@ -389,6 +414,26 @@ fn render_summary(ui: &mut egui::Ui, path: &Path, snapshot: &FirmwareSnapshot) {
     });
 }
 
+fn render_boot_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
+    card(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            if secondary_button(ui, "Reboot normally").clicked() {
+                let path = app.firmware_path.clone();
+                app.boot_path(&path);
+            }
+            if primary_button(ui, "Reboot Small ROM with activating key chord").clicked() {
+                let path = app.firmware_path.clone();
+                app.boot_path_with_entry_chord(&path, true);
+            }
+            ui.label(
+                egui::RichText::new("Normal open/reboot does not hold the Small ROM key chord.")
+                    .size(12.0)
+                    .color(text_secondary()),
+            );
+        });
+    });
+}
+
 fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
     card(ui, |ui| {
         let status = if session.is_running() {
@@ -432,7 +477,9 @@ fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
                 .color(text_primary()),
         );
         ui.label(
-            egui::RichText::new("Buttons send firmware matrix codes through the validated HID key bridge.")
+            egui::RichText::new(
+                "Buttons send firmware matrix codes through the validated HID key bridge.",
+            )
             .size(12.0)
             .color(text_secondary()),
         );
@@ -623,7 +670,10 @@ mod tests {
             "Left",
             "Right",
         ] {
-            assert!(labels.iter().any(|label| label == expected), "missing {expected}");
+            assert!(
+                labels.iter().any(|label| label == expected),
+                "missing {expected}"
+            );
         }
     }
 }
