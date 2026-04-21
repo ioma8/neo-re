@@ -207,6 +207,7 @@ pub fn matrix_key_label(value: u8) -> String {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn matrix_key_is_character(value: u8) -> bool {
     matrix_code_to_char(value).is_some()
 }

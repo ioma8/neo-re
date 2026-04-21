@@ -6,7 +6,7 @@ use eframe::egui;
 
 use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::FirmwareSession;
-use crate::keyboard::{matrix_cells, matrix_key_for_char, matrix_key_is_character, matrix_key_label};
+use crate::keyboard::{matrix_key_for_char, matrix_key_label};
 use crate::lcd::LcdSnapshot;
 
 const SHIFT_CODE: u8 = 0x6e;
@@ -31,8 +31,8 @@ pub fn run(path: PathBuf) -> Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Alpha Emulator")
-            .with_inner_size([900.0, 640.0])
-            .with_min_inner_size([760.0, 520.0]),
+            .with_inner_size([920.0, 560.0])
+            .with_min_inner_size([760.0, 500.0]),
         ..Default::default()
     };
 
@@ -143,39 +143,27 @@ impl AlphaEmuApp {
     }
 
     fn render(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                ui.add_space(22.0);
-                ui.vertical_centered(|ui| {
-                    ui.set_max_width(840.0);
-                    render_header(ui, self);
-                    ui.add_space(18.0);
-                    match self.session.as_mut() {
-                        Some(session) => {
-                            let lcd = session.lcd_snapshot();
-                            let status = session.status_text().to_string();
-                            render_lcd(ui, &lcd);
-                            ui.add_space(14.0);
-                            render_summary(ui, &self.firmware_path, &status, self.measured_hz);
-                            ui.add_space(14.0);
-                            render_boot_controls(ui, self);
-                            ui.add_space(14.0);
-                            let Some(session) = self.session.as_mut() else {
-                                return;
-                            };
-                            render_controls(
-                                ui,
-                                session,
-                                self.measured_hz,
-                                self.last_target_cycles,
-                                self.last_actual_cycles,
-                            );
-                        }
-                        None => render_empty_state(ui, self.load_error.as_deref()),
-                    }
-                });
-            });
+        ui.add_space(10.0);
+        ui.vertical_centered(|ui| {
+            ui.set_max_width(880.0);
+            render_header(ui, self);
+            ui.add_space(10.0);
+            match self.session.as_mut() {
+                Some(session) => {
+                    let lcd = session.lcd_snapshot();
+                    let status = session.status_text().to_string();
+                    render_lcd(ui, &lcd);
+                    ui.add_space(8.0);
+                    render_session_controls(ui, self, &status);
+                    ui.add_space(8.0);
+                    let Some(session) = self.session.as_mut() else {
+                        return;
+                    };
+                    render_controls(ui, session);
+                }
+                None => render_empty_state(ui, self.load_error.as_deref()),
+            }
+        });
     }
 }
 
@@ -212,9 +200,15 @@ impl eframe::App for AlphaEmuApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_keyboard(ui.ctx());
-        egui::Frame::new()
-            .fill(app_bg())
-            .show(ui, |ui| self.render(ui));
+        let available = ui.available_size();
+        egui::Frame::new().fill(app_bg()).show(ui, |ui| {
+            ui.set_min_size(available);
+            self.render(ui);
+        });
+    }
+
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        app_bg().to_normalized_gamma_f32()
     }
 }
 
@@ -488,14 +482,14 @@ fn render_header(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
     ui.horizontal(|ui| {
         ui.vertical(|ui| {
             ui.label(
-                egui::RichText::new("AlphaSmart NEO firmware emulator")
-                    .size(24.0)
+                egui::RichText::new("AlphaSmart NEO Emulator")
+                    .size(20.0)
                     .strong()
                     .color(text_primary()),
             );
             ui.label(
-                egui::RichText::new("Small ROM boot, CPU trace, and MMIO logging.")
-                    .size(14.0)
+                egui::RichText::new("Firmware, LCD, and keyboard matrix")
+                    .size(12.0)
                     .color(text_secondary()),
             );
         });
@@ -522,31 +516,18 @@ fn render_empty_state(ui: &mut egui::Ui, error: Option<&str>) {
     });
 }
 
-fn render_summary(ui: &mut egui::Ui, path: &Path, status: &str, measured_hz: f64) {
-    card(ui, |ui| {
-        ui.label(
-            egui::RichText::new("Firmware session")
-                .size(18.0)
-                .strong()
-                .color(text_primary()),
-        );
-        ui.add_space(8.0);
+fn render_session_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp, status: &str) {
+    compact_panel(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            metadata_pill(ui, "File", path.display());
+            metadata_pill(ui, "File", compact_path(&app.firmware_path));
             metadata_pill(ui, "State", status);
-            metadata_pill(ui, "CPU", format_speed(measured_hz));
-        });
-    });
-}
-
-fn render_boot_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
-    card(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
+            metadata_pill(ui, "CPU", format_speed(app.measured_hz));
+            ui.separator();
             if secondary_button(ui, "Reboot normally").clicked() {
                 let path = app.firmware_path.clone();
                 app.boot_path(&path);
             }
-            if primary_button(ui, "Reboot Small ROM with activating key chord").clicked() {
+            if secondary_button(ui, "Small ROM chord").clicked() {
                 let path = app.firmware_path.clone();
                 app.boot_path_with_entry_chord(&path, true);
             }
@@ -554,78 +535,20 @@ fn render_boot_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
                 let path = app.firmware_path.clone();
                 app.boot_path_with_left_shift_tab(&path);
             }
-            ui.label(
-                egui::RichText::new("SmartApplets boot holds left shift + tab at reset.")
-                    .size(12.0)
-                    .color(text_secondary()),
-            );
         });
     });
 }
 
-fn render_controls(
-    ui: &mut egui::Ui,
-    session: &mut FirmwareSession,
-    measured_hz: f64,
-    last_target_cycles: u64,
-    last_actual_cycles: u64,
-) {
+fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
     card(ui, |ui| {
-        let status = if session.is_running() {
-            "running"
-        } else {
-            "stopped"
-        };
-        ui.horizontal_wrapped(|ui| {
-            ui.label(
-                egui::RichText::new("Realtime")
-                    .size(14.0)
-                    .strong()
-                    .color(text_primary()),
-            );
-            metadata_pill(ui, "CPU", status);
-            metadata_pill(ui, "Target", "33.0 MHz");
-            metadata_pill(ui, "Actual", format_speed(measured_hz));
-            ui.label(
-                egui::RichText::new(speed_note(
-                    measured_hz,
-                    last_target_cycles,
-                    last_actual_cycles,
-                ))
-                .size(12.0)
-                .color(text_secondary()),
-            );
-        });
-        ui.add_space(12.0);
-        ui.horizontal_wrapped(|ui| {
-            if primary_button(ui, "Step 200").clicked() {
-                session.run_steps(200);
-            }
-            if secondary_button(ui, "Step 5,000").clicked() {
-                session.run_steps(5_000);
-            }
-            if secondary_button(ui, "Run 250,000 fast").clicked() {
-                session.run_realtime_steps(250_000);
-            }
-        });
-        ui.add_space(14.0);
-        ui.separator();
-        ui.add_space(10.0);
         ui.label(
-            egui::RichText::new("NEO keyboard matrix")
+            egui::RichText::new("Functional keys")
                 .size(14.0)
                 .strong()
                 .color(text_primary()),
         );
-        ui.label(
-            egui::RichText::new(
-                "Buttons send firmware matrix codes through the validated HID key bridge.",
-            )
-            .size(12.0)
-            .color(text_secondary()),
-        );
         ui.add_space(8.0);
-        render_special_matrix_buttons(ui, session);
+        render_functional_keys(ui, session);
     });
 }
 
@@ -637,56 +560,110 @@ fn format_speed(hz: f64) -> String {
     }
 }
 
-fn speed_note(measured_hz: f64, last_target_cycles: u64, last_actual_cycles: u64) -> &'static str {
-    if measured_hz <= 0.0 {
-        "The emulator measures actual CPU throughput once per second."
-    } else if measured_hz >= NEO_CPU_HZ as f64 * 0.95 {
-        "The firmware is running at approximately the real NEO clock."
-    } else if last_actual_cycles < last_target_cycles {
-        "Host throughput is below the real NEO clock; run a release build for best speed."
-    } else {
-        "The firmware advances automatically while running."
-    }
-}
-
-fn render_special_matrix_buttons(ui: &mut egui::Ui, session: &mut FirmwareSession) {
-    let cells = matrix_cells();
+fn render_functional_keys(ui: &mut egui::Ui, session: &mut FirmwareSession) {
     let mut any_pressed = false;
-    for row in 0..16u8 {
-        ui.horizontal_wrapped(|ui| {
-            for cell in cells.iter().filter(|cell| cell.row == row) {
-                let raw = cell.raw.code();
-                if matrix_key_is_character(raw) {
-                    continue;
-                }
-                let label = format!("{} (0x{:02x})", matrix_key_label(raw), cell.logical);
-                let response = button_for_matrix_key(
-                    ui,
-                    &label,
-                    format!("row {:02x}, col {:x}", cell.row, cell.col),
-                );
-                if response.clicked() {
-                    session.tap_matrix_code_long(raw);
-                    any_pressed = true;
-                }
-            }
-        });
-        ui.add_space(6.0);
-    }
+    render_key_group(
+        ui,
+        "Files",
+        &[
+            ("F1", 0x4b),
+            ("F2", 0x4a),
+            ("F3", 0x0a),
+            ("F4", 0x1a),
+            ("F5", 0x19),
+            ("F6", 0x10),
+            ("F7", 0x02),
+            ("F8", 0x42),
+        ],
+        session,
+        &mut any_pressed,
+    );
+    render_key_group(
+        ui,
+        "Actions",
+        &[
+            ("Applets", 0x46),
+            ("Send", 0x47),
+            ("Print", 0x49),
+            ("Spell", 0x59),
+            ("Find", 0x67),
+            ("Clear", 0x54),
+        ],
+        session,
+        &mut any_pressed,
+    );
+    render_key_group(
+        ui,
+        "Navigation",
+        &[
+            ("Home", 0x34),
+            ("End", 0x65),
+            ("Up", 0x77),
+            ("Down", 0x15),
+            ("Left", 0x75),
+            ("Right", 0x76),
+        ],
+        session,
+        &mut any_pressed,
+    );
+    render_key_group(
+        ui,
+        "Edit / modifiers",
+        &[
+            ("Esc", 0x74),
+            ("Tab", 0x0c),
+            ("Backspace", 0x09),
+            ("Delete", 0x61),
+            ("Enter", 0x69),
+            ("Shift", SHIFT_CODE),
+            ("Ctrl", CTRL_CODE),
+            ("Option", OPTION_CODE),
+            ("Cmd", COMMAND_CODE),
+        ],
+        session,
+        &mut any_pressed,
+    );
     if any_pressed {
         session.run_realtime_steps(2_000);
     }
 }
 
-fn button_for_matrix_key(ui: &mut egui::Ui, label: &str, hover: String) -> egui::Response {
+fn render_key_group(
+    ui: &mut egui::Ui,
+    title: &str,
+    keys: &[(&str, u8)],
+    session: &mut FirmwareSession,
+    any_pressed: &mut bool,
+) {
+    ui.horizontal_wrapped(|ui| {
+        ui.add_sized(
+            egui::vec2(86.0, 26.0),
+            egui::Label::new(
+                egui::RichText::new(title)
+                    .size(12.0)
+                    .strong()
+                    .color(text_secondary()),
+            ),
+        );
+        for (label, raw) in keys {
+            if button_for_matrix_key(ui, label, *raw).clicked() {
+                session.tap_matrix_code_long(*raw);
+                *any_pressed = true;
+            }
+        }
+    });
+    ui.add_space(4.0);
+}
+
+fn button_for_matrix_key(ui: &mut egui::Ui, label: &str, raw: u8) -> egui::Response {
     let response = ui.add(
-        egui::Button::new(egui::RichText::new(label).size(11.0).color(text_primary()))
+        egui::Button::new(egui::RichText::new(label).size(12.0).color(text_primary()))
             .fill(egui::Color32::from_rgb(238, 241, 245))
             .stroke(border())
-            .corner_radius(8.0)
-            .min_size(egui::vec2(52.0, 28.0)),
+            .corner_radius(7.0)
+            .min_size(egui::vec2(54.0, 26.0)),
     );
-    response.on_hover_text(hover)
+    response.on_hover_text(format!("{} / raw 0x{raw:02x}", matrix_key_label(raw)))
 }
 
 fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
@@ -700,7 +677,7 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
         ui.add_space(10.0);
         let visible_height = NEO_VISIBLE_LCD_HEIGHT.min(lcd.height);
         let visible_width = NEO_VISIBLE_LCD_WIDTH.min(lcd.width);
-        let width = ui.available_width().min(visible_width as f32 * 3.0);
+        let width = ui.available_width().min(visible_width as f32 * 2.5);
         let height = width * visible_height as f32 / visible_width as f32;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
         let painter = ui.painter_at(rect);
@@ -737,6 +714,31 @@ fn card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
         .corner_radius(egui::CornerRadius::same(12))
         .inner_margin(egui::Margin::same(16))
         .show(ui, add_contents);
+}
+
+fn compact_panel(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .fill(card_bg())
+        .stroke(border())
+        .corner_radius(egui::CornerRadius::same(10))
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, add_contents);
+}
+
+fn compact_path(path: &Path) -> String {
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("firmware");
+    let parent = path
+        .parent()
+        .and_then(|parent| parent.file_name())
+        .and_then(|name| name.to_str());
+    if let Some(parent) = parent {
+        format!("{parent}/{file_name}")
+    } else {
+        file_name.to_string()
+    }
 }
 
 fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {

@@ -205,3 +205,5 @@ GUI Cmd+A failed because alphabet key events were ignored when macOS command sup
 AlphaWord editor modifier behavior is fully explained by HID-export modifier raw codes	disproven
 GUI shortcut handling can miss command because it syncs only frame-final modifiers rather than per-key event modifiers	proven
 LCD selection highlighting is invisible because reverse-display command 0xa7 was ignored	needs further investigation
+Alpha-emu GUI is cluttered because status, boot controls, realtime controls, and raw key rows are rendered as separate large cards	proven
+Alpha-emu GUI black right and bottom areas are caused by the root egui frame not claiming the full native viewport plus eframe's dark default clear color	proven

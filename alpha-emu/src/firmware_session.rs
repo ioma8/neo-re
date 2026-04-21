@@ -150,9 +150,7 @@ impl FirmwareSession {
             if self.cpu.regs.pc.0 == stop_pc {
                 hits = hits.saturating_add(1);
                 if hits >= wanted_hit {
-                    self.push_trace(format!(
-                        "stopped before pc=0x{stop_pc:08x} hit={hits}"
-                    ));
+                    self.push_trace(format!("stopped before pc=0x{stop_pc:08x} hit={hits}"));
                     return true;
                 }
             }
@@ -455,8 +453,8 @@ impl FirmwareSession {
         }
         addrs
             .into_iter()
-        .filter_map(|addr| self.memory.peek_long(addr).map(|value| (addr, value)))
-        .collect()
+            .filter_map(|addr| self.memory.peek_long(addr).map(|value| (addr, value)))
+            .collect()
     }
 
     fn enter_exception_handler(&mut self, vector: u8, fault_pc: u32) -> bool {
