@@ -204,7 +204,12 @@ impl EmuMemory {
             return self.keyboard.read_matrix_input();
         }
         if addr == 0xf202 {
-            let value = self.mmio_bytes.get(&addr).copied().unwrap_or(0).wrapping_add(1);
+            let value = self
+                .mmio_bytes
+                .get(&addr)
+                .copied()
+                .unwrap_or(0)
+                .wrapping_add(1);
             self.mmio_bytes.insert(addr, value);
             return value;
         }
@@ -272,7 +277,7 @@ fn find_last_system_package(image: &[u8]) -> Option<usize> {
         .windows(4)
         .enumerate()
         .filter_map(|(offset, window)| (window == [0xc0, 0xff, 0xee, 0xad]).then_some(offset))
-        .last()
+        .next_back()
 }
 
 fn write_be32(bytes: &mut [u8], addr: usize, value: u32) {

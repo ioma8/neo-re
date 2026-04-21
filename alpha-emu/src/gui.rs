@@ -16,7 +16,9 @@ const CTRL_CODE: u8 = 0x7c;
 const NEO_CPU_HZ: u64 = 33_000_000;
 const REALTIME_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const MAX_REALTIME_STEPS_PER_FRAME: usize = 250_000;
-const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(50);
+const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(16);
+const MAX_REALTIME_WORK_PER_FRAME: Duration = Duration::from_millis(12);
+const SPEED_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const NEO_VISIBLE_LCD_HEIGHT: usize = 64;
 const NEO_VISIBLE_LCD_WIDTH: usize = 256;
 
@@ -51,7 +53,12 @@ struct AlphaEmuApp {
     load_error: Option<String>,
     modifier_state: ModifierMatrixState,
     last_realtime_tick: Instant,
+    last_speed_sample: Instant,
+    last_speed_cycles: u64,
     realtime_cycle_remainder: f64,
+    measured_hz: f64,
+    last_target_cycles: u64,
+    last_actual_cycles: u64,
 }
 
 impl AlphaEmuApp {
@@ -62,7 +69,12 @@ impl AlphaEmuApp {
             load_error: None,
             modifier_state: ModifierMatrixState::default(),
             last_realtime_tick: Instant::now(),
+            last_speed_sample: Instant::now(),
+            last_speed_cycles: 0,
             realtime_cycle_remainder: 0.0,
+            measured_hz: 0.0,
+            last_target_cycles: 0,
+            last_actual_cycles: 0,
         };
         app.boot_path(path);
         app
@@ -89,7 +101,7 @@ impl AlphaEmuApp {
                 self.session = Some(session);
                 self.load_error = None;
                 self.modifier_state = ModifierMatrixState::default();
-                self.last_realtime_tick = Instant::now();
+                self.reset_realtime_metrics();
                 self.realtime_cycle_remainder = 0.0;
             }
             Err(error) => {
@@ -112,8 +124,7 @@ impl AlphaEmuApp {
                 self.session = Some(session);
                 self.load_error = None;
                 self.modifier_state = ModifierMatrixState::default();
-                self.last_realtime_tick = Instant::now();
-                self.realtime_cycle_remainder = 0.0;
+                self.reset_realtime_metrics();
             }
             Err(error) => {
                 self.session = None;
@@ -146,14 +157,20 @@ impl AlphaEmuApp {
                             let status = session.status_text().to_string();
                             render_lcd(ui, &lcd);
                             ui.add_space(14.0);
-                            render_summary(ui, &self.firmware_path, &status);
+                            render_summary(ui, &self.firmware_path, &status, self.measured_hz);
                             ui.add_space(14.0);
                             render_boot_controls(ui, self);
                             ui.add_space(14.0);
                             let Some(session) = self.session.as_mut() else {
                                 return;
                             };
-                            render_controls(ui, session);
+                            render_controls(
+                                ui,
+                                session,
+                                self.measured_hz,
+                                self.last_target_cycles,
+                                self.last_actual_cycles,
+                            );
                         }
                         None => render_empty_state(ui, self.load_error.as_deref()),
                     }
@@ -180,7 +197,14 @@ impl eframe::App for AlphaEmuApp {
             if cycle_budget > 0
                 && let Some(session) = self.session.as_mut()
             {
-                session.run_realtime_cycles(cycle_budget, MAX_REALTIME_STEPS_PER_FRAME);
+                let actual_cycles = session.run_realtime_cycles_for(
+                    cycle_budget,
+                    MAX_REALTIME_STEPS_PER_FRAME,
+                    MAX_REALTIME_WORK_PER_FRAME,
+                );
+                self.last_target_cycles = cycle_budget;
+                self.last_actual_cycles = actual_cycles;
+                self.sample_realtime_speed(now);
             }
             ctx.request_repaint_after(REALTIME_FRAME_INTERVAL);
         }
@@ -195,6 +219,36 @@ impl eframe::App for AlphaEmuApp {
 }
 
 impl AlphaEmuApp {
+    fn reset_realtime_metrics(&mut self) {
+        self.last_realtime_tick = Instant::now();
+        self.last_speed_sample = self.last_realtime_tick;
+        self.last_speed_cycles = self.session.as_ref().map_or(0, FirmwareSession::cycles);
+        self.realtime_cycle_remainder = 0.0;
+        self.measured_hz = 0.0;
+        self.last_target_cycles = 0;
+        self.last_actual_cycles = 0;
+    }
+
+    fn sample_realtime_speed(&mut self, now: Instant) {
+        let elapsed = now.saturating_duration_since(self.last_speed_sample);
+        if elapsed < SPEED_SAMPLE_INTERVAL {
+            return;
+        }
+        let Some(session) = self.session.as_ref() else {
+            return;
+        };
+        let cycles = session.cycles();
+        self.measured_hz =
+            cycles.saturating_sub(self.last_speed_cycles) as f64 / elapsed.as_secs_f64();
+        self.last_speed_cycles = cycles;
+        self.last_speed_sample = now;
+        tracing::info!(
+            target_hz = NEO_CPU_HZ,
+            achieved_hz = self.measured_hz,
+            "alpha-emu realtime speed sample"
+        );
+    }
+
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
         let Some(session) = self.session.as_mut() else {
             return;
@@ -430,7 +484,7 @@ fn render_empty_state(ui: &mut egui::Ui, error: Option<&str>) {
     });
 }
 
-fn render_summary(ui: &mut egui::Ui, path: &Path, status: &str) {
+fn render_summary(ui: &mut egui::Ui, path: &Path, status: &str, measured_hz: f64) {
     card(ui, |ui| {
         ui.label(
             egui::RichText::new("Firmware session")
@@ -442,6 +496,7 @@ fn render_summary(ui: &mut egui::Ui, path: &Path, status: &str) {
         ui.horizontal_wrapped(|ui| {
             metadata_pill(ui, "File", path.display());
             metadata_pill(ui, "State", status);
+            metadata_pill(ui, "CPU", format_speed(measured_hz));
         });
     });
 }
@@ -470,7 +525,13 @@ fn render_boot_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
     });
 }
 
-fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
+fn render_controls(
+    ui: &mut egui::Ui,
+    session: &mut FirmwareSession,
+    measured_hz: f64,
+    last_target_cycles: u64,
+    last_actual_cycles: u64,
+) {
     card(ui, |ui| {
         let status = if session.is_running() {
             "running"
@@ -485,10 +546,16 @@ fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
                     .color(text_primary()),
             );
             metadata_pill(ui, "CPU", status);
+            metadata_pill(ui, "Target", "33.0 MHz");
+            metadata_pill(ui, "Actual", format_speed(measured_hz));
             ui.label(
-                egui::RichText::new("The firmware advances automatically while running.")
-                    .size(12.0)
-                    .color(text_secondary()),
+                egui::RichText::new(speed_note(
+                    measured_hz,
+                    last_target_cycles,
+                    last_actual_cycles,
+                ))
+                .size(12.0)
+                .color(text_secondary()),
             );
         });
         ui.add_space(12.0);
@@ -522,6 +589,26 @@ fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
         ui.add_space(8.0);
         render_special_matrix_buttons(ui, session);
     });
+}
+
+fn format_speed(hz: f64) -> String {
+    if hz <= 0.0 {
+        "measuring".to_string()
+    } else {
+        format!("{:.1} MHz", hz / 1_000_000.0)
+    }
+}
+
+fn speed_note(measured_hz: f64, last_target_cycles: u64, last_actual_cycles: u64) -> &'static str {
+    if measured_hz <= 0.0 {
+        "The emulator measures actual CPU throughput once per second."
+    } else if measured_hz >= NEO_CPU_HZ as f64 * 0.95 {
+        "The firmware is running at approximately the real NEO clock."
+    } else if last_actual_cycles < last_target_cycles {
+        "Host throughput is below the real NEO clock; run a release build for best speed."
+    } else {
+        "The firmware advances automatically while running."
+    }
 }
 
 fn render_special_matrix_buttons(ui: &mut egui::Ui, session: &mut FirmwareSession) {
@@ -603,6 +690,55 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
             }
         }
     });
+}
+
+fn card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::new()
+        .fill(card_bg())
+        .stroke(border())
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::same(16))
+        .show(ui, add_contents);
+}
+
+fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE))
+            .fill(accent_blue())
+            .stroke(egui::Stroke::NONE)
+            .corner_radius(8.0),
+    )
+}
+
+fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
+    ui.add(
+        egui::Button::new(egui::RichText::new(text).color(text_primary()))
+            .fill(egui::Color32::from_rgb(238, 241, 245))
+            .stroke(border())
+            .corner_radius(8.0),
+    )
+}
+
+fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
+    egui::Frame::new()
+        .fill(egui::Color32::from_rgb(239, 243, 248))
+        .corner_radius(egui::CornerRadius::same(12))
+        .inner_margin(egui::Margin::symmetric(10, 5))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(label)
+                        .size(12.0)
+                        .color(text_secondary()),
+                );
+                ui.label(
+                    egui::RichText::new(value.to_string())
+                        .size(12.0)
+                        .strong()
+                        .color(text_primary()),
+                );
+            });
+        });
 }
 
 #[cfg(test)]
@@ -737,53 +873,4 @@ mod tests {
         assert_eq!(NEO_VISIBLE_LCD_WIDTH, 256);
         assert_eq!(NEO_VISIBLE_LCD_HEIGHT, 64);
     }
-}
-
-fn card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::new()
-        .fill(card_bg())
-        .stroke(border())
-        .corner_radius(egui::CornerRadius::same(12))
-        .inner_margin(egui::Margin::same(16))
-        .show(ui, add_contents);
-}
-
-fn primary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).color(egui::Color32::WHITE))
-            .fill(accent_blue())
-            .stroke(egui::Stroke::NONE)
-            .corner_radius(8.0),
-    )
-}
-
-fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
-    ui.add(
-        egui::Button::new(egui::RichText::new(text).color(text_primary()))
-            .fill(egui::Color32::from_rgb(238, 241, 245))
-            .stroke(border())
-            .corner_radius(8.0),
-    )
-}
-
-fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
-    egui::Frame::new()
-        .fill(egui::Color32::from_rgb(239, 243, 248))
-        .corner_radius(egui::CornerRadius::same(12))
-        .inner_margin(egui::Margin::symmetric(10, 5))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(label)
-                        .size(12.0)
-                        .color(text_secondary()),
-                );
-                ui.label(
-                    egui::RichText::new(value.to_string())
-                        .size(12.0)
-                        .strong()
-                        .color(text_primary()),
-                );
-            });
-        });
 }

@@ -12,7 +12,7 @@ OS calls in Rust.
 
 ```sh
 cd alpha-emu
-cargo +nightly run
+cargo run
 ```
 
 The default firmware is:
@@ -24,13 +24,13 @@ The default firmware is:
 To boot another Small ROM-compatible image:
 
 ```sh
-cargo +nightly run -- ../analysis/cab/smallos3kneorom.os3kos
+cargo run -- ../analysis/cab/smallos3kneorom.os3kos
 ```
 
 Headless full System 3 firmware boot:
 
 ```sh
-cargo +nightly run -- --headless --steps=200000 ../analysis/cab/os3kneorom.os3kos
+cargo run -- --headless --steps=200000 ../analysis/cab/os3kneorom.os3kos
 ```
 
 Add `--verbose` to include recent MMIO and instruction trace lines.
@@ -51,10 +51,24 @@ matching the commonly reported AlphaSmart NEO/NEO2 CPU clock. GUI repaint is
 capped to a 16 ms cadence, so the display updates at no more than about 60 FPS
 while the interpreter advances by elapsed emulated CPU cycles.
 
+The GUI samples and logs actual emulator throughput once per second. Run with
+`RUST_LOG=alpha_emu=info cargo run -- ../analysis/cab/os3kneorom.os3kos` to see
+`target_hz` and `achieved_hz` in the terminal. On the current development
+machine, optimized `cargo run` measured about 24 MHz on the full System 3 boot
+loop, below the real 33 MHz target. The crate therefore uses an optimized dev
+profile; `cargo run --release` is still the best command for speed checks.
+
 For faster hardware probing without the UI:
 
 ```sh
-cargo +nightly run -- --headless --steps=2000000
+cargo run -- --headless --steps=2000000
+```
+
+Headless output includes `cycles`, `elapsed_ms`, `achieved_hz`, and
+`target_hz=33000000`:
+
+```sh
+cargo run --release -- --headless --steps=2000000 ../analysis/cab/os3kneorom.os3kos
 ```
 
 Normal boot/open does not hold any synthetic keys. The GUI includes a separate
@@ -68,7 +82,7 @@ left-shift + tab boot chord at reset. Headless validation stops at the
 SmartApplets menu resource with:
 
 ```sh
-cargo +nightly run -- --headless --boot-left-shift-tab \
+cargo run -- --headless --boot-left-shift-tab \
   --steps=18000000 --stop-at-resource=0x6b \
   ../analysis/cab/os3kneorom.os3kos
 ```
@@ -103,6 +117,6 @@ ignored until firmware execution reaches a path that needs them.
 ## Validation
 
 ```sh
-cargo +nightly check
-cargo +nightly test
+cargo check
+cargo test
 ```

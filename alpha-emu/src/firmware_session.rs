@@ -1,7 +1,8 @@
 use std::num::Wrapping;
+use std::time::{Duration, Instant};
 
-use m68000::MemoryAccess;
 use m68000::M68000;
+use m68000::MemoryAccess;
 use m68000::cpu_details::Mc68000;
 use m68000::exception::Vector;
 use thiserror::Error;
@@ -81,11 +82,7 @@ impl FirmwareSession {
     ) -> Result<Self, FirmwareSessionError> {
         let (ssp, pc) = firmware.boot_vectors()?;
         let mut memory = EmuMemory::load_small_rom(&firmware)?;
-        let keys = keys
-            .iter()
-            .copied()
-            .map(MatrixKey::new)
-            .collect::<Vec<_>>();
+        let keys = keys.iter().copied().map(MatrixKey::new).collect::<Vec<_>>();
         memory.hold_boot_keys_all_rows(&keys, reads);
         Self::boot_with_memory(ssp, pc, memory)
     }
@@ -199,14 +196,38 @@ impl FirmwareSession {
     }
 
     pub fn run_realtime_cycles(&mut self, cycle_budget: u64, max_steps: usize) -> u64 {
+        self.run_realtime_cycles_inner(cycle_budget, max_steps, None)
+    }
+
+    pub fn run_realtime_cycles_for(
+        &mut self,
+        cycle_budget: u64,
+        max_steps: usize,
+        max_wall_time: Duration,
+    ) -> u64 {
+        self.run_realtime_cycles_inner(cycle_budget, max_steps, Some(max_wall_time))
+    }
+
+    fn run_realtime_cycles_inner(
+        &mut self,
+        cycle_budget: u64,
+        max_steps: usize,
+        max_wall_time: Option<Duration>,
+    ) -> u64 {
         let previous_logging = self.memory.set_mmio_logging(false);
         let start_cycles = self.cycles;
         let start_steps = self.steps;
+        let started_at = Instant::now();
         while self.cycles.saturating_sub(start_cycles) < cycle_budget {
             if self.cpu.stop || self.last_exception.is_some() {
                 break;
             }
             if self.steps.saturating_sub(start_steps) >= max_steps {
+                break;
+            }
+            if self.steps.saturating_sub(start_steps).is_multiple_of(4096)
+                && max_wall_time.is_some_and(|limit| started_at.elapsed() >= limit)
+            {
                 break;
             }
 
@@ -241,11 +262,14 @@ impl FirmwareSession {
 
     #[must_use]
     pub fn status_text(&self) -> &str {
-        self.last_exception.as_deref().unwrap_or(if self.cpu.stop {
-            "stopped"
-        } else {
-            "running"
-        })
+        self.last_exception
+            .as_deref()
+            .unwrap_or(if self.cpu.stop { "stopped" } else { "running" })
+    }
+
+    #[must_use]
+    pub fn cycles(&self) -> u64 {
+        self.cycles
     }
 
     #[must_use]
@@ -521,9 +545,8 @@ mod tests {
 
     #[test]
     fn full_neo_system_image_reaches_display_code() -> Result<(), Box<dyn std::error::Error>> {
-        let firmware = crate::firmware::FirmwareRuntime::load_small_rom(
-            "../analysis/cab/os3kneorom.os3kos",
-        )?;
+        let firmware =
+            crate::firmware::FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
         let mut session = FirmwareSession::boot_small_rom(firmware)?;
         session.run_steps(3_000_000);
         let snapshot = session.snapshot();

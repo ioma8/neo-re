@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::Instant;
 
 use alpha_emu::firmware::FirmwareRuntime;
 use alpha_emu::firmware_session::FirmwareSession;
@@ -31,7 +32,10 @@ fn main() -> Result<()> {
             headless = true;
         } else if arg == "--boot-left-shift-tab" {
             boot_left_shift_tab = true;
-        } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--boot-keys=")) {
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--boot-keys="))
+        {
             boot_keys = Some(parse_key_list(value)?);
         } else if arg == "--lcd-ascii" {
             lcd_ascii = true;
@@ -52,7 +56,10 @@ fn main() -> Result<()> {
             all_row_key_events.push(parse_key_event(value)?);
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--type-at=")) {
             type_events.push(parse_type_event(value)?);
-        } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--stop-at-pc=")) {
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--stop-at-pc="))
+        {
             stop_at_pc = Some(parse_u32_arg(value)?);
         } else if let Some(value) = arg
             .to_str()
@@ -86,22 +93,36 @@ fn main() -> Result<()> {
             scan_special_keys(&session);
             return Ok(());
         }
+        let started_at = Instant::now();
         let stopped_at_pc = run_headless_steps(
             &mut session,
             steps,
-            &mut type_events,
-            &mut key_events,
-            &mut all_row_key_events,
-            &mut hold_events,
-            stop_at_pc,
-            stop_at_resource,
+            HeadlessEvents {
+                type_events: &mut type_events,
+                key_events: &mut key_events,
+                all_row_key_events: &mut all_row_key_events,
+                hold_events: &mut hold_events,
+            },
+            HeadlessStop {
+                pc: stop_at_pc,
+                resource: stop_at_resource,
+            },
         );
+        let elapsed = started_at.elapsed();
         let snapshot = session.snapshot();
+        let achieved_hz = if elapsed.is_zero() {
+            0.0
+        } else {
+            snapshot.cycles as f64 / elapsed.as_secs_f64()
+        };
         println!(
-            "pc=0x{:08x} ssp=0x{:08x} steps={} stopped={} stop_at={} exception={}",
+            "pc=0x{:08x} ssp=0x{:08x} steps={} cycles={} elapsed_ms={} achieved_hz={:.0} target_hz=33000000 stopped={} stop_at={} exception={}",
             snapshot.pc,
             snapshot.ssp,
             snapshot.steps,
+            snapshot.cycles,
+            elapsed.as_millis(),
+            achieved_hz,
             snapshot.stopped,
             stopped_at_pc
                 .map(|value| value.to_string())
@@ -198,16 +219,31 @@ fn parse_key_list(value: &str) -> Result<Vec<u8>> {
         .collect()
 }
 
+struct HeadlessEvents<'a> {
+    type_events: &'a mut [(usize, String)],
+    key_events: &'a mut [(usize, u8)],
+    all_row_key_events: &'a mut [(usize, u8)],
+    hold_events: &'a mut [(usize, usize, u8)],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HeadlessStop {
+    pc: Option<u32>,
+    resource: Option<u16>,
+}
+
 fn run_headless_steps(
     session: &mut FirmwareSession,
     total_steps: usize,
-    type_events: &mut [(usize, String)],
-    key_events: &mut [(usize, u8)],
-    all_row_key_events: &mut [(usize, u8)],
-    hold_events: &mut [(usize, usize, u8)],
-    stop_at_pc: Option<u32>,
-    stop_at_resource: Option<u16>,
+    events: HeadlessEvents<'_>,
+    stop: HeadlessStop,
 ) -> Option<bool> {
+    let HeadlessEvents {
+        type_events,
+        key_events,
+        all_row_key_events,
+        hold_events,
+    } = events;
     type_events.sort_by_key(|event| event.0);
     key_events.sort_by_key(|event| event.0);
     all_row_key_events.sort_by_key(|event| event.0);
@@ -280,18 +316,17 @@ fn run_headless_steps(
     }
     let current_steps = session.snapshot().steps;
     if current_steps < total_steps {
-        if let Some(stop_pc) = stop_at_pc {
+        if let Some(stop_pc) = stop.pc {
             return Some(session.run_until_pc_or_steps(stop_pc, total_steps - current_steps));
         }
-        if let Some(resource_id) = stop_at_resource {
-            return Some(session.run_until_resource_or_steps(
-                resource_id,
-                total_steps - current_steps,
-            ));
+        if let Some(resource_id) = stop.resource {
+            return Some(
+                session.run_until_resource_or_steps(resource_id, total_steps - current_steps),
+            );
         }
         session.run_steps(total_steps - current_steps);
     }
-    (stop_at_pc.is_some() || stop_at_resource.is_some()).then_some(false)
+    (stop.pc.is_some() || stop.resource.is_some()).then_some(false)
 }
 
 fn run_until_step(session: &mut FirmwareSession, step: usize) {
@@ -315,11 +350,7 @@ fn parse_hold_event(value: &str) -> Result<(usize, usize, u8)> {
     let Some((start, end)) = range.split_once('-') else {
         anyhow::bail!("--hold-key expects START-END:KEY");
     };
-    Ok((
-        start.parse()?,
-        end.parse()?,
-        matrix_code_for_key_name(key)?,
-    ))
+    Ok((start.parse()?, end.parse()?, matrix_code_for_key_name(key)?))
 }
 
 fn matrix_code_for_key_name(value: &str) -> Result<u8> {
