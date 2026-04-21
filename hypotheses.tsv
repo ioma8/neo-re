@@ -199,3 +199,5 @@ Firmware STOP at 0x00426752 is a wait-for-interrupt primitive, not a reset reque
 AlphaWord repeated splash after format is caused by treating firmware STOP as reset	proven
 AlphaWord text injection through all matrix rows produces wrong characters in full OS editor	proven
 GUI AlphaWord typing fails because it still uses all-row text taps instead of exact-row taps	proven
+GUI Applets button fails in AlphaWord because raw 0x47 was mislabelled Applets; behavioral scan proves raw 0x46 opens SmartApplets	proven
+State-clone matrix visibility scan from AlphaWord validates all 80 firmware-derived raw matrix cells against live 0xf419 reads	proven

@@ -1,12 +1,12 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct MatrixKey(u8);
+pub struct MatrixKey(u8);
 
 impl MatrixKey {
     pub(crate) const fn new(code: u8) -> Self {
         Self(code)
     }
 
-    pub(crate) const fn code(self) -> u8 {
+    pub const fn code(self) -> u8 {
         self.0
     }
 
@@ -24,11 +24,11 @@ impl MatrixKey {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct MatrixCell {
-    pub(crate) raw: MatrixKey,
-    pub(crate) row: u8,
-    pub(crate) col: u8,
-    pub(crate) logical: u8,
+pub struct MatrixCell {
+    pub raw: MatrixKey,
+    pub row: u8,
+    pub col: u8,
+    pub logical: u8,
 }
 
 const MATRIX_EMPTY: u8 = 0xff;
@@ -152,7 +152,7 @@ const LOGICAL_HID_USAGE: [u8; 0x51] = [
     0x4c,
 ];
 
-pub(crate) fn matrix_cells() -> Vec<MatrixCell> {
+pub fn matrix_cells() -> Vec<MatrixCell> {
     let mut cells = Vec::new();
     for (row, row_data) in MATRIX_LOGICAL.iter().enumerate() {
         for (col, logical) in row_data.iter().enumerate() {
@@ -193,7 +193,7 @@ pub(crate) fn matrix_code_to_char(value: u8) -> Option<char> {
     hid_usage_to_char(matrix_code_to_hid_usage(value)?)
 }
 
-pub(crate) fn matrix_key_label(value: u8) -> String {
+pub fn matrix_key_label(value: u8) -> String {
     if let Some(label) = physical_key_label(value) {
         label.to_string()
     } else if let Some(ch) = matrix_code_to_char(value) {
@@ -254,8 +254,8 @@ fn physical_key_label(value: u8) -> Option<&'static str> {
         0x54 => Some("Clear File"),
         0x34 => Some("Home"),
         0x65 => Some("End"),
-        0x47 => Some("Applets"),
-        0x46 => Some("Send"),
+        0x46 => Some("Applets"),
+        0x47 => Some("Send"),
         _ => hid_usage_to_special_label(matrix_code_to_hid_usage(value)?),
     }
 }
@@ -498,7 +498,8 @@ mod tests {
         assert_eq!(matrix_key_label(0x77), "Up");
         assert_eq!(matrix_key_label(0x75), "Left");
         assert_eq!(matrix_key_label(0x76), "Right");
-        assert_eq!(matrix_key_label(0x47), "Applets");
+        assert_eq!(matrix_key_label(0x46), "Applets");
+        assert_eq!(matrix_key_label(0x47), "Send");
     }
 
     #[test]

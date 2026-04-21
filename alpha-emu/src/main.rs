@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use alpha_emu::firmware::FirmwareRuntime;
 use alpha_emu::firmware_session::FirmwareSession;
+use alpha_emu::keyboard::{matrix_cells, matrix_key_label};
 use alpha_emu::lcd::LcdSnapshot;
 use anyhow::Result;
 
@@ -23,6 +24,8 @@ fn main() -> Result<()> {
     let mut stop_at_pc_hit = 1usize;
     let mut stop_at_resource = None;
     let mut scan_special_keys_at = None;
+    let mut scan_matrix_visibility_at = None;
+    let mut validate_key_map_at = None;
     let mut boot_left_shift_tab = false;
     let mut boot_keys = None;
     let mut boot_keys_exact = None;
@@ -83,6 +86,16 @@ fn main() -> Result<()> {
             .and_then(|arg| arg.strip_prefix("--scan-special-keys-at="))
         {
             scan_special_keys_at = Some(value.parse()?);
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--scan-matrix-visibility-at="))
+        {
+            scan_matrix_visibility_at = Some(value.parse()?);
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--validate-key-map-at="))
+        {
+            validate_key_map_at = Some(value.parse()?);
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--steps=")) {
             steps = value.parse()?;
         } else {
@@ -102,15 +115,14 @@ fn main() -> Result<()> {
         } else {
             FirmwareSession::boot_small_rom(firmware)?
         };
-        if let Some(step) = scan_special_keys_at {
-            run_until_step(&mut session, step, true);
-            scan_special_keys(&session);
-            return Ok(());
-        }
         let started_at = Instant::now();
+        let effective_steps = scan_special_keys_at
+            .or(scan_matrix_visibility_at)
+            .or(validate_key_map_at)
+            .unwrap_or(steps);
         let stopped_at_pc = run_headless_steps(
             &mut session,
-            steps,
+            effective_steps,
             HeadlessEvents {
                 type_events: &mut type_events,
                 key_events: &mut key_events,
@@ -124,6 +136,18 @@ fn main() -> Result<()> {
             },
             verbose,
         );
+        if scan_special_keys_at.is_some() {
+            scan_special_keys(&session);
+            return Ok(());
+        }
+        if scan_matrix_visibility_at.is_some() {
+            scan_matrix_visibility(&session);
+            return Ok(());
+        }
+        if validate_key_map_at.is_some() {
+            validate_key_map(&session);
+            return Ok(());
+        }
         let elapsed = started_at.elapsed();
         let snapshot = session.snapshot();
         let achieved_hz = if elapsed.is_zero() {
@@ -211,6 +235,97 @@ fn scan_special_keys(base_session: &FirmwareSession) {
             println!("hit raw=0x{raw:02x}");
         }
     }
+}
+
+fn scan_matrix_visibility(base_session: &FirmwareSession) {
+    let mut failures = Vec::new();
+    let cells = matrix_cells();
+    for cell in &cells {
+        let raw = cell.raw.code();
+        let mut session = base_session.clone();
+        session.press_matrix_code(raw);
+        let mut visible = false;
+        for _ in 0..100 {
+            session.run_steps(10_000);
+            let snapshot = session.snapshot();
+            visible = snapshot.mmio_accesses.iter().any(|access| {
+                access.contains("/0xf419->")
+                    && !access.ends_with("->0xff")
+                    && !access.ends_with("->0x00")
+            });
+            if visible {
+                break;
+            }
+        }
+        if !visible {
+            failures.push(format!(
+                "raw=0x{raw:02x} row=0x{:02x} col={} logical=0x{:02x} label={}",
+                cell.row,
+                cell.col,
+                cell.logical,
+                matrix_key_label(raw)
+            ));
+        }
+    }
+    println!(
+        "matrix_visibility checked={} visible={} failed={}",
+        cells.len(),
+        cells.len().saturating_sub(failures.len()),
+        failures.len()
+    );
+    for failure in failures {
+        println!("  {failure}");
+    }
+}
+
+fn validate_key_map(base_session: &FirmwareSession) {
+    const FILE_KEYS: &[(&str, u8)] = &[
+        ("File 1", 0x4b),
+        ("File 2", 0x4a),
+        ("File 3", 0x0a),
+        ("File 4", 0x1a),
+        ("File 5", 0x19),
+        ("File 6", 0x10),
+        ("File 7", 0x02),
+        ("File 8", 0x42),
+    ];
+    println!("key_map_validation");
+    for (label, raw) in FILE_KEYS {
+        let mut session = base_session.clone();
+        session.tap_matrix_code_long(*raw);
+        session.run_realtime_steps(20_000_000);
+        let snapshot = session.snapshot();
+        println!(
+            "  {label}: raw=0x{raw:02x} current_slot_state=0x{:08x} pc=0x{:08x}",
+            debug_word(&snapshot, 0x0000_35ec).unwrap_or(0),
+            snapshot.pc
+        );
+    }
+
+    for (label, raw) in [
+        ("Applets", 0x46),
+        ("Send", 0x47),
+        ("Print", 0x49),
+        ("Spell Check", 0x59),
+        ("Find", 0x67),
+        ("Clear File", 0x54),
+    ] {
+        let mut session = base_session.clone();
+        session.tap_matrix_code_long(raw);
+        let menu_hit = session.run_until_resource_or_steps(0x006b, 3_000_000);
+        let snapshot = session.snapshot();
+        println!(
+            "  {label}: raw=0x{raw:02x} menu_hit={} pc=0x{:08x}",
+            menu_hit, snapshot.pc
+        );
+    }
+}
+
+fn debug_word(snapshot: &alpha_emu::firmware_session::FirmwareSnapshot, addr: u32) -> Option<u32> {
+    snapshot
+        .debug_words
+        .iter()
+        .find_map(|(word_addr, value)| (*word_addr == addr).then_some(*value))
 }
 
 fn parse_type_event(value: &str) -> Result<(usize, String)> {
@@ -419,8 +534,8 @@ fn matrix_code_for_key_name(value: &str) -> Result<u8> {
         "esc" | "escape" => Ok(0x74),
         "tab" => Ok(0x0c),
         "backspace" => Ok(0x09),
-        "applets" => Ok(0x47),
-        "send" => Ok(0x46),
+        "applets" => Ok(0x46),
+        "send" => Ok(0x47),
         "find" => Ok(0x67),
         "print" => Ok(0x49),
         "spell-check" | "spellcheck" => Ok(0x59),

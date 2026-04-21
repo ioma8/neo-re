@@ -71,8 +71,8 @@ This routine takes a raw matrix byte and indexes the logical-key map.
 | Spell Check | `0x59` | `0x35` | `0x43` |
 | Find | `0x67` | `0x3f` | `0x44` |
 | Clear File | `0x54` | `0x34` | `0x45` |
-| Applets | `0x47` | `0x2a` | `0xff` |
-| Send | `0x46` | `0x29` | `0x58` |
+| Applets | `0x46` | `0x29` | `0x58` |
+| Send | `0x47` | `0x2a` | `0xff` |
 | Backspace | `0x09` | `0x03` | `0x2a` |
 | Tab | `0x0c` | `0x06` | `0x2b` |
 | Caps Lock | `0x0b` | `0x05` | `0x39` |
@@ -127,8 +127,8 @@ The table proves the key identities used by firmware and HID mode. The top-row
 local keys `Applets` and `Send` are currently assigned by matching the remaining
 top-row slots against the HID table and the user-provided physical layout:
 
-- `Applets`: raw `0x47`, no host HID usage.
-- `Send`: raw `0x46`, HID usage `0x58` (`Keypad Enter`).
+- `Applets`: raw `0x46`, behaviorally validated from AlphaWord by reaching the SmartApplets menu.
+- `Send`: raw `0x47`, adjacent remaining NEO-specific top-row key.
 
 This is the only remaining mapping that is not separately validated by a direct
 live key capture.

@@ -429,8 +429,28 @@ password anchors:
 | `I` | `0x30` | `0x1c` | `0x0c` |
 
 That table now labels the emulator's arrows, enter, modifiers, file keys, and
-ordinary printable keys. The only remaining non-live-captured assignment is the
-top-row pair:
+ordinary printable keys. The top-row Applets/Send pair was later behaviorally
+validated in the emulator by probing from the AlphaWord editor:
 
-- `Applets`: raw `0x47`, no host HID usage.
-- `Send`: raw `0x46`, HID usage `0x58` (`Keypad Enter`).
+- `Applets`: raw `0x46`; from AlphaWord it reaches the SmartApplets menu.
+- `Send`: raw `0x47`; adjacent remaining NEO-specific top-row key.
+
+Full-OS live-state clone validation:
+
+```sh
+cargo run -q --manifest-path alpha-emu/Cargo.toml -- \
+  --headless \
+  --scan-matrix-visibility-at=1450000000 \
+  --type-at=9000000:Y \
+  --key-at=18000000:enter \
+  analysis/cab/os3kneorom.os3kos
+```
+
+Result: `matrix_visibility checked=80 visible=80 failed=0`.
+
+This boots the full OS, lets firmware format the virtual AlphaWord filesystem,
+opens AlphaWord, clones that live editor state, then holds each raw matrix key
+and confirms the firmware scanner observes a non-idle `0xf419` value. That
+validates the full electrical matrix mapping. Behavioral validation from the
+same cloned state proved raw `0x46` reaches the SmartApplets menu from
+AlphaWord, correcting the earlier Applets/Send assignment.
