@@ -380,3 +380,57 @@ Values are shown only when printable ASCII (0x20..0x7e), otherwise raw hex, to a
 ## Confirmed password bytes from Small ROM path
 Small ROM checks encoded bytes `3a 3d 7f 30 3a` for `ernie`.
 These map to rows/columns: 0xa:3, 0xd:3, 0xf:7, 0x0:3, 0xa:3 (active-low `0xf419`).
+
+## Physical keyboard photo validation
+
+The user-provided physical keyboard table is useful, but it is not sufficient by
+itself to label every raw matrix byte.
+
+After collapsing shifted legends into one key, the physical table has exactly 80
+keys:
+
+- top function row: 17 keys (`on/off` through `send`)
+- number row: 14 keys
+- QWERTY row: 14 keys
+- home row: 13 keys
+- shift row: 12 keys
+- bottom modifier/arrow row: 10 keys
+
+That count matches the full firmware's apparent `0x00..0x4f` key-code space.
+However, the simple orderings do not validate against the Small ROM password
+anchors:
+
+| physical key | proven Small ROM byte |
+|---|---|
+| `E` | `0x3a` |
+| `R` | `0x3d` |
+| `N` | `0x7f` |
+| `I` | `0x30` |
+
+Checked mappings that do **not** align for all four anchors:
+
+- physical row-major order -> firmware logical code
+- physical row-major order -> non-empty matrix cells sorted by row/column
+- physical row-major order -> non-empty matrix cells sorted by column/row
+- physical row-major order -> non-empty matrix cells sorted by logical code
+
+Follow-up conclusion: the missing bridge table was found in the full OS firmware.
+See [Keyboard Matrix HID Bridge WIP](./2026-04-21-keyboard-hid-wip.md).
+
+The bridge is the logical-key-to-USB-HID usage table at file offset `0x3c32a`
+(`0x0043c32a` when mapped with `-m 0x400000`). It validates the Small ROM
+password anchors:
+
+| key | raw | logical | HID usage |
+|---|---:|---:|---:|
+| `E` | `0x3a` | `0x20` | `0x08` |
+| `R` | `0x3d` | `0x23` | `0x15` |
+| `N` | `0x7f` | `0x4f` | `0x11` |
+| `I` | `0x30` | `0x1c` | `0x0c` |
+
+That table now labels the emulator's arrows, enter, modifiers, file keys, and
+ordinary printable keys. The only remaining non-live-captured assignment is the
+top-row pair:
+
+- `Applets`: raw `0x47`, no host HID usage.
+- `Send`: raw `0x46`, HID usage `0x58` (`Keypad Enter`).

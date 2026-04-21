@@ -275,15 +275,13 @@ fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
         ui.separator();
         ui.add_space(10.0);
         ui.label(
-            egui::RichText::new("Special matrix keys")
+            egui::RichText::new("NEO keyboard matrix")
                 .size(14.0)
                 .strong()
                 .color(text_primary()),
         );
         ui.label(
-            egui::RichText::new(
-                "Mapped from firmware matrix entries without typed alphanumeric mapping.",
-            )
+            egui::RichText::new("Buttons send firmware matrix codes through the validated HID key bridge.")
             .size(12.0)
             .color(text_secondary()),
         );

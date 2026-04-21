@@ -121,7 +121,7 @@ const MATRIX_LOGICAL: [[u8; 8]; 16] = [
         MATRIX_EMPTY,
     ],
     [0x06, MATRIX_EMPTY, 0x18, 0x22, 0x2e, 0x38, 0x43, 0x4d],
-    [0x07, 0x10, 0x19, 0x23, 0x2f, 0x39, 0x44, MATRIX_EMPTY],
+    [0x07, 0x10, 0x19, 0x23, 0x2f, 0x39, 0x44, 0x4e],
     [
         0x08,
         MATRIX_EMPTY,
@@ -133,6 +133,23 @@ const MATRIX_LOGICAL: [[u8; 8]; 16] = [
         MATRIX_EMPTY,
     ],
     [0x09, 0x11, 0x1b, 0x24, 0x30, 0x3a, 0x46, 0x4f],
+];
+
+// Logical-key to USB HID usage table found in the full OS firmware at
+// `os3kneorom.os3kos` file offset 0x3c32a / mapped address 0x0043c32a.
+// It is indexed by the logical values returned from MATRIX_LOGICAL.
+const LOGICAL_HID_USAGE: [u8; 0x51] = [
+    0x30, 0x40, 0x2f, 0x2a, 0x3c, 0x39, 0x2b, 0x17, //
+    0xe1, 0x1c, 0x3f, 0x34, 0xe3, 0x51, 0x3e, 0x3d, //
+    0x0a, 0x0b, 0x0e, 0x0f, 0x33, 0x31, 0x07, 0x16, //
+    0x04, 0x09, 0xff, 0x0d, 0x0c, 0x12, 0x13, 0x4a, //
+    0x08, 0x1a, 0x14, 0x15, 0x18, 0x2e, 0xe2, 0x41, //
+    0x2d, 0x58, 0xff, 0x42, 0x3b, 0x3a, 0x35, 0x22, //
+    0x23, 0x25, 0x26, 0x27, 0x45, 0x43, 0x20, 0x1f, //
+    0x1e, 0x21, 0x24, 0x36, 0xe6, 0x37, 0x4d, 0x44, //
+    0x28, 0x06, 0x1b, 0x1d, 0x19, 0xe5, 0x10, 0x38, //
+    0x29, 0x50, 0x4f, 0x52, 0x2c, 0xe0, 0x05, 0x11, //
+    0x4c,
 ];
 
 pub(crate) fn matrix_cells() -> Vec<MatrixCell> {
@@ -154,7 +171,7 @@ pub(crate) fn matrix_cells() -> Vec<MatrixCell> {
     cells
 }
 
-pub(crate) fn matrix_key_for_code(value: u8) -> Option<MatrixKey> {
+fn matrix_code_to_logical(value: u8) -> Option<u8> {
     let row = value & 0x0f;
     let col = value >> 4;
     if row > 0x0f || col > 7 {
@@ -164,30 +181,107 @@ pub(crate) fn matrix_key_for_code(value: u8) -> Option<MatrixKey> {
     if logical == MATRIX_EMPTY {
         None
     } else {
-        Some(MatrixKey::new(value))
+        Some(logical)
     }
+}
+
+pub(crate) fn matrix_key_for_code(value: u8) -> Option<MatrixKey> {
+    matrix_code_to_logical(value).map(|_| MatrixKey::new(value))
 }
 
 pub(crate) fn matrix_code_to_char(value: u8) -> Option<char> {
-    match value {
-        0x3a => Some('e'),
-        0x3d => Some('r'),
-        0x7f => Some('n'),
-        0x30 => Some('i'),
-        _ => None,
-    }
+    hid_usage_to_char(matrix_code_to_hid_usage(value)?)
 }
 
 pub(crate) fn matrix_key_label(value: u8) -> String {
-    if let Some(ch) = matrix_code_to_char(value) {
+    if let Some(label) = physical_key_label(value) {
+        label.to_string()
+    } else if let Some(ch) = matrix_code_to_char(value) {
         ch.to_string()
     } else {
-        format!("0x{value:02x}")
+        if let Some(logical) = matrix_code_to_logical(value) {
+            format!("0x{value:02x} (L0x{logical:02x})")
+        } else {
+            format!("0x{value:02x}")
+        }
     }
 }
 
 pub(crate) fn matrix_key_is_alphanumeric(value: u8) -> bool {
     matrix_code_to_char(value).is_some_and(|character| character.is_ascii_alphanumeric())
+}
+
+fn matrix_code_to_hid_usage(value: u8) -> Option<u8> {
+    let logical = matrix_code_to_logical(value)?;
+    let usage = LOGICAL_HID_USAGE[logical as usize];
+    if usage == 0xff { None } else { Some(usage) }
+}
+
+fn hid_usage_to_char(usage: u8) -> Option<char> {
+    match usage {
+        0x04..=0x1d => Some((b'a' + (usage - 0x04)) as char),
+        0x1e..=0x26 => Some((b'1' + (usage - 0x1e)) as char),
+        0x27 => Some('0'),
+        0x2c => Some(' '),
+        0x2d => Some('-'),
+        0x2e => Some('='),
+        0x2f => Some('['),
+        0x30 => Some(']'),
+        0x31 => Some('\\'),
+        0x33 => Some(';'),
+        0x34 => Some('\''),
+        0x35 => Some('`'),
+        0x36 => Some(','),
+        0x37 => Some('.'),
+        0x38 => Some('/'),
+        _ => None,
+    }
+}
+
+fn physical_key_label(value: u8) -> Option<&'static str> {
+    match value {
+        0x4b => Some("File 1"),
+        0x4a => Some("File 2"),
+        0x0a => Some("File 3"),
+        0x1a => Some("File 4"),
+        0x19 => Some("File 5"),
+        0x10 => Some("File 6"),
+        0x02 => Some("File 7"),
+        0x42 => Some("File 8"),
+        0x49 => Some("Print"),
+        0x59 => Some("Spell Check"),
+        0x67 => Some("Find"),
+        0x54 => Some("Clear File"),
+        0x34 => Some("Home"),
+        0x65 => Some("End"),
+        0x47 => Some("Applets"),
+        0x46 => Some("Send"),
+        _ => hid_usage_to_special_label(matrix_code_to_hid_usage(value)?),
+    }
+}
+
+fn hid_usage_to_special_label(usage: u8) -> Option<&'static str> {
+    match usage {
+        0x28 => Some("Enter"),
+        0x29 => Some("Esc"),
+        0x2a => Some("Backspace"),
+        0x2b => Some("Tab"),
+        0x39 => Some("Caps Lock"),
+        0x4a => Some("Home"),
+        0x4c => Some("Delete"),
+        0x4d => Some("End"),
+        0x4f => Some("Right"),
+        0x50 => Some("Left"),
+        0x51 => Some("Down"),
+        0x52 => Some("Up"),
+        0xe0 => Some("Ctrl"),
+        0xe1 => Some("Shift"),
+        0xe2 => Some("Alt/Option"),
+        0xe3 => Some("Command"),
+        0xe5 => Some("Right Shift"),
+        0xe6 => Some("Right Alt"),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -268,18 +362,51 @@ impl Keyboard {
 }
 
 pub(crate) fn matrix_key_for_char(value: char) -> Option<MatrixKey> {
-    match value.to_ascii_lowercase() {
-        'e' => Some(MatrixKey::new(0x3a)),
-        'r' => Some(MatrixKey::new(0x3d)),
-        'n' => Some(MatrixKey::new(0x7f)),
-        'i' => Some(MatrixKey::new(0x30)),
-        _ => None,
+    let normalized = value.to_ascii_lowercase();
+    for row in 0..16u8 {
+        for col in 0..8u8 {
+            let raw = (col << 4) | row;
+            if matrix_code_to_char(raw) == Some(normalized) {
+                return Some(MatrixKey::new(raw));
+            }
+        }
+    }
+    None
+}
+
+fn _assert_full_matrix_tables() {
+    let count = matrix_cells().len();
+    assert!(
+        count == 80,
+        "firmware-derived matrix currently exposes 80 physical keys, got {count}"
+    );
+    assert!(
+        LOGICAL_HID_USAGE.len() == 0x51,
+        "logical HID usage map must remain 0x51 entries"
+    );
+}
+
+#[cfg(test)]
+fn _validate_display_map() {
+    for row in MATRIX_LOGICAL {
+        for logical in row {
+            if logical == MATRIX_EMPTY {
+                continue;
+            }
+            assert!(
+                (logical as usize) < LOGICAL_HID_USAGE.len(),
+                "logical code 0x{logical:02x} must be in HID usage table"
+            );
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Keyboard, MatrixKey, matrix_cells, matrix_key_for_char, matrix_key_for_code};
+    use super::{
+        _assert_full_matrix_tables, matrix_cells, matrix_key_for_char, matrix_key_for_code, matrix_key_label,
+    };
+    use super::{_validate_display_map, Keyboard, MatrixKey};
 
     #[test]
     fn known_small_rom_password_keys_match_firmware_table() {
@@ -287,6 +414,30 @@ mod tests {
         assert_eq!(matrix_key_for_char('r').map(MatrixKey::code), Some(0x3d));
         assert_eq!(matrix_key_for_char('n').map(MatrixKey::code), Some(0x7f));
         assert_eq!(matrix_key_for_char('i').map(MatrixKey::code), Some(0x30));
+    }
+
+    #[test]
+    fn firmware_char_map_is_consistent() {
+        _assert_full_matrix_tables();
+        _validate_display_map();
+    }
+
+    #[test]
+    fn char_lookup_falls_back_to_candidate_firmware_labels_when_available() {
+        assert_eq!(matrix_key_for_char('e').map(MatrixKey::code), Some(0x3a));
+        assert_eq!(matrix_key_for_char('d').map(MatrixKey::code), Some(0x2a));
+        assert_eq!(matrix_key_for_char('b').map(MatrixKey::code), Some(0x7d));
+        assert_eq!(matrix_key_for_char('`').map(MatrixKey::code), Some(0x4c));
+    }
+
+    #[test]
+    fn special_key_labels_use_firmware_hid_bridge() {
+        assert_eq!(matrix_key_label(0x69), "Enter");
+        assert_eq!(matrix_key_label(0x15), "Down");
+        assert_eq!(matrix_key_label(0x77), "Up");
+        assert_eq!(matrix_key_label(0x75), "Left");
+        assert_eq!(matrix_key_label(0x76), "Right");
+        assert_eq!(matrix_key_label(0x47), "Applets");
     }
 
     #[test]
