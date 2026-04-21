@@ -129,6 +129,47 @@ impl EmuMemory {
         previous
     }
 
+    pub(crate) fn service_deferred_timers(&mut self) {
+        const TIMER_QUEUE_BASE: usize = 0x0000_5d3c;
+        const TIMER_QUEUE_RECORD_LEN: usize = 14;
+        const TIMER_QUEUE_RECORDS: usize = 5;
+
+        self.timer_counter = self.timer_counter.wrapping_add(1);
+        for index in 0..TIMER_QUEUE_RECORDS {
+            let record = TIMER_QUEUE_BASE + index * TIMER_QUEUE_RECORD_LEN;
+            if self.bytes.get(record).copied() != Some(1) {
+                continue;
+            }
+            let deadline = u16::from_be_bytes([self.bytes[record + 2], self.bytes[record + 3]]);
+            if !timer_due(self.timer_counter, deadline) {
+                continue;
+            }
+
+            if let Some(state) = self.bytes.get_mut(record) {
+                *state = 0;
+            }
+            let completion_ptr = u32::from_be_bytes([
+                self.bytes[record + 6],
+                self.bytes[record + 7],
+                self.bytes[record + 8],
+                self.bytes[record + 9],
+            ]) as usize;
+            if let Some(completion) = self.bytes.get_mut(completion_ptr) {
+                *completion = 0xff;
+                self.record_mmio(format!(
+                    "deferred timer {index} completed byte 0x{completion_ptr:08x}=0xff"
+                ));
+            }
+        }
+    }
+
+    pub(crate) fn service_persistent_storage(&mut self) {
+        if self.peek_word(0x0000_0e94) == Some(0xa000) && self.peek_long(0x0000_0fda) == Some(0) {
+            seed_alpha_word_workspace(&mut self.bytes);
+            self.record_mmio("seeded AlphaWord default workspace table".to_string());
+        }
+    }
+
     pub(crate) fn peek_word(&self, addr: u32) -> Option<u16> {
         let addr = addr as usize;
         Some(u16::from_be_bytes([
@@ -222,6 +263,10 @@ impl EmuMemory {
     }
 }
 
+fn timer_due(now: u16, deadline: u16) -> bool {
+    now.wrapping_sub(deadline) < 0x8000
+}
+
 fn find_last_system_package(image: &[u8]) -> Option<usize> {
     image
         .windows(4)
@@ -278,6 +323,30 @@ fn load_stock_applets(bytes: &mut [u8]) {
     if cursor > applet_start {
         write_be32(bytes, 0x0000_0e8a, applet_start as u32);
         write_be32(bytes, 0x0000_0e8e, cursor as u32);
+    }
+}
+
+fn seed_alpha_word_workspace(bytes: &mut [u8]) {
+    const APP_FILE_TABLE: usize = 0x0000_0fd2;
+    const ALPHAWORD_APP_SLOT: usize = 1;
+    const ALPHAWORD_FILE_RECORDS: usize = 0x0006_0000;
+    const FILE_RECORD_LEN: usize = 0x48;
+    const FILE_NAME_OFFSET: usize = 0x34;
+    const FILE_SELECTOR_OFFSET: usize = 0x44;
+    const FILE_COUNT: usize = 8;
+
+    let table = APP_FILE_TABLE + ALPHAWORD_APP_SLOT * 8;
+    write_be32(bytes, table, ALPHAWORD_FILE_RECORDS as u32);
+    bytes[table + 4] = FILE_COUNT as u8;
+    bytes[table + 5] = 0;
+    write_be16(bytes, table + 6, 0);
+
+    for index in 0..FILE_COUNT {
+        let record = ALPHAWORD_FILE_RECORDS + index * FILE_RECORD_LEN;
+        let name = format!("File {}", index + 1);
+        write_bytes(bytes, record + FILE_NAME_OFFSET, name.as_bytes());
+        bytes[record + FILE_NAME_OFFSET + name.len()] = 0;
+        write_be16(bytes, record + FILE_SELECTOR_OFFSET, index as u16);
     }
 }
 

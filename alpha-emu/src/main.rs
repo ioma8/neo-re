@@ -22,6 +22,7 @@ fn main() -> Result<()> {
     let mut stop_at_resource = None;
     let mut scan_special_keys_at = None;
     let mut boot_left_shift_tab = false;
+    let mut boot_keys = None;
     let mut verbose = false;
     let mut path = None;
     let mut steps = 10_000;
@@ -30,6 +31,8 @@ fn main() -> Result<()> {
             headless = true;
         } else if arg == "--boot-left-shift-tab" {
             boot_left_shift_tab = true;
+        } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--boot-keys=")) {
+            boot_keys = Some(parse_key_list(value)?);
         } else if arg == "--lcd-ascii" {
             lcd_ascii = true;
         } else if arg == "--lcd-ranges" {
@@ -71,7 +74,9 @@ fn main() -> Result<()> {
 
     if headless {
         let firmware = FirmwareRuntime::load_small_rom(path)?;
-        let mut session = if boot_left_shift_tab {
+        let mut session = if let Some(keys) = boot_keys {
+            FirmwareSession::boot_with_keys(firmware, &keys, 512)?
+        } else if boot_left_shift_tab {
             FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?
         } else {
             FirmwareSession::boot_small_rom(firmware)?
@@ -184,6 +189,13 @@ fn parse_u32_arg(value: &str) -> Result<u32> {
     } else {
         Ok(value.parse()?)
     }
+}
+
+fn parse_key_list(value: &str) -> Result<Vec<u8>> {
+    value
+        .split(',')
+        .map(|item| Ok(parse_u32_arg(item)? as u8))
+        .collect()
 }
 
 fn run_headless_steps(

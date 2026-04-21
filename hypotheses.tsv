@@ -165,3 +165,12 @@ Full OS SmartApplets menu ignores row 0x05 keys because queued boot-chord idle p
 Full OS SmartApplets Down key becomes visible when f411 row-select is disabled for full System images	proven
 Full OS Enter key needs bit-based f408 row decoding because the firmware writes 0xa0 rather than exact 0x20	proven
 AlphaWord Opening in F1 remains a separate incomplete file/workspace emulation path	needs further investigation
+AlphaWord loading loop waits on completion byte A5+0x145 after A0E8 returns pending	proven
+AlphaWord empty filename is caused by missing File 1 string in the AlphaWord applet image	disproven
+AlphaWord loading failure is caused by missing AlphaWord file/workspace catalog state rather than a CPU exception	needs further investigation
+AlphaWord loading failure is caused by the emulator not servicing the System A0E8 deferred timer queue	proven
+Completing A0E8 timer records by only setting their completion byte is sufficient for AlphaWord to leave the old opening wait loop	proven
+AlphaWord needs A0E8 callback functions executed, not only completion byte writes	disproven
+AlphaWord blank screen after timer completion is caused by missing file/workspace state after leaving the opening wait	proven
+Blank LCD after AlphaWord opening is the normal empty editor state	disproven
+AlphaWord empty filename is caused by an unformatted emulated file/workspace store with no AlphaWord file table at 0x0fd2 + slot*8	proven

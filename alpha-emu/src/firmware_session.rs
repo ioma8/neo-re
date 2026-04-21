@@ -169,6 +169,7 @@ impl FirmwareSession {
             self.last_exception = Some(format_exception(vector, pc));
             return false;
         }
+        self.service_periodic_hardware();
         true
     }
 
@@ -191,6 +192,7 @@ impl FirmwareSession {
                 self.last_exception = Some(format_exception(vector, pc));
                 break;
             }
+            self.service_periodic_hardware();
         }
         self.memory.set_mmio_logging(previous_logging);
         self.cycles.saturating_sub(start_cycles)
@@ -219,9 +221,17 @@ impl FirmwareSession {
                 self.last_exception = Some(format_exception(vector, pc));
                 break;
             }
+            self.service_periodic_hardware();
         }
         self.memory.set_mmio_logging(previous_logging);
         self.cycles.saturating_sub(start_cycles)
+    }
+
+    fn service_periodic_hardware(&mut self) {
+        if self.steps.is_multiple_of(512) {
+            self.memory.service_persistent_storage();
+            self.memory.service_deferred_timers();
+        }
     }
 
     #[must_use]
@@ -332,12 +342,24 @@ impl FirmwareSession {
             0x0000_03ee,
             0x0000_0400,
             0x0000_0028,
+            0x0000_0070,
+            0x0000_0074,
+            0x0000_0078,
+            0x0000_007c,
+            0x0000_00e4,
+            0x0000_00e8,
+            0x0000_00ec,
+            0x0000_00f0,
             0x0000_0e0a,
             0x0000_0e0e,
             0x0000_0e8a,
             0x0000_0e8e,
             0x0000_0e92,
             0x0000_0e94,
+            0x0000_0fda,
+            0x0000_0fde,
+            0x0006_0034,
+            0x0006_0044,
             0x0000_355e,
             0x0000_3562,
             0x0000_35e2,
@@ -360,7 +382,6 @@ impl FirmwareSession {
         if handler == 0 {
             return false;
         }
-
         let status = u16::from(self.cpu.regs.sr);
         self.cpu.regs.sr.s = true;
         let return_pc = fault_pc;
