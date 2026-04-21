@@ -55,8 +55,7 @@ Known labelled key codes from the Small ROM password:
 | `n` | `0x7f` | `0x0f` | `7` | `0x7f` |
 | `i` | `0x30` | `0x00` | `3` | `0xf7` |
 
-This proves the matrix encoding but not the label for every row/column
-intersection. The emulator therefore treats the full matrix generically and only
-labels PC keys that are currently proven by firmware evidence. A complete
-labelled PC-key map still needs either a firmware translation-table decode or a
-live physical key probe.
+For full firmware-backed matrix layout and the complete raw-logical mapping, see:
+[AlphaSmart NEO Full Keyboard Matrix Map](/Users/jakubkolcar/customs/neo-re/docs/2026-04-21-keyboard-matrix-map.md).
+
+This proves the matrix encoding and full matrix placement across all rows/columns.

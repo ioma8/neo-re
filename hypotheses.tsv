@@ -129,3 +129,5 @@ Small ROM keyboard idle polls 0xfffff419 as a keyboard matrix input register aft
 Small ROM password table at 0x004053ee maps ernie to matrix bytes 3a 3d 7f 30 3a	proven
 Small ROM matrix key bytes encode column bit in the high nibble and row select in the low nibble	proven
 The 0x004053ee password table alone is sufficient to label the entire physical keyboard matrix	disproven
+The full OS exposes the complete raw matrix map at firmware address 0x0044c37b (encoded=(col<<4)|row) with the exact non-empty logical entries	proven
+The full OS exposes the layout transform table at 0x0044c3fb used for layout-aware key remapping (layout 0..2) and pass-through on layout 3	proven
