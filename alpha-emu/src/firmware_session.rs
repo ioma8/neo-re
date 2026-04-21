@@ -85,6 +85,11 @@ impl FirmwareSession {
         }
     }
 
+    #[must_use]
+    pub fn is_running(&self) -> bool {
+        !self.cpu.stop && self.last_exception.is_none()
+    }
+
     pub fn type_small_rom_password(&mut self) {
         self.memory.type_small_rom_password();
     }

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::Result;
 use eframe::egui;
@@ -12,6 +13,8 @@ const SHIFT_CODE: u8 = 0x0e;
 const COMMAND_CODE: u8 = 0x14;
 const OPTION_CODE: u8 = 0x41;
 const CTRL_CODE: u8 = 0x7c;
+const REALTIME_STEPS_PER_FRAME: usize = 50_000;
+const REALTIME_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// Runs the desktop Small ROM emulator UI.
 ///
@@ -65,8 +68,7 @@ impl AlphaEmuApp {
                 FirmwareSession::boot_small_rom(rom).map_err(|error| error.to_string())
             });
         match loaded {
-            Ok(mut session) => {
-                session.run_steps(300_000);
+            Ok(session) => {
                 self.session = Some(session);
                 self.load_error = None;
                 self.modifier_state = ModifierMatrixState::default();
@@ -115,6 +117,15 @@ impl AlphaEmuApp {
 }
 
 impl eframe::App for AlphaEmuApp {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(session) = self.session.as_mut()
+            && session.is_running()
+        {
+            session.run_steps(REALTIME_STEPS_PER_FRAME);
+            ctx.request_repaint_after(REALTIME_FRAME_INTERVAL);
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.handle_keyboard(ui.ctx());
         egui::Frame::new()
@@ -380,14 +391,34 @@ fn render_summary(ui: &mut egui::Ui, path: &Path, snapshot: &FirmwareSnapshot) {
 
 fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
     card(ui, |ui| {
+        let status = if session.is_running() {
+            "running"
+        } else {
+            "stopped"
+        };
         ui.horizontal_wrapped(|ui| {
-            if primary_button(ui, "Run 200 steps").clicked() {
+            ui.label(
+                egui::RichText::new("Realtime")
+                    .size(14.0)
+                    .strong()
+                    .color(text_primary()),
+            );
+            metadata_pill(ui, "CPU", status);
+            ui.label(
+                egui::RichText::new("The firmware advances automatically while running.")
+                    .size(12.0)
+                    .color(text_secondary()),
+            );
+        });
+        ui.add_space(12.0);
+        ui.horizontal_wrapped(|ui| {
+            if primary_button(ui, "Step 200").clicked() {
                 session.run_steps(200);
             }
-            if secondary_button(ui, "Run 5,000 steps").clicked() {
+            if secondary_button(ui, "Step 5,000").clicked() {
                 session.run_steps(5_000);
             }
-            if secondary_button(ui, "Run 250,000 steps").clicked() {
+            if secondary_button(ui, "Step 250,000").clicked() {
                 session.run_steps(250_000);
             }
         });
