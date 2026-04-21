@@ -6,10 +6,10 @@ use eframe::egui;
 
 use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::FirmwareSession;
-use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
+use crate::keyboard::{matrix_cells, matrix_key_for_char, matrix_key_is_character, matrix_key_label};
 use crate::lcd::LcdSnapshot;
 
-const SHIFT_CODE: u8 = 0x0e;
+const SHIFT_CODE: u8 = 0x6e;
 const COMMAND_CODE: u8 = 0x14;
 const OPTION_CODE: u8 = 0x41;
 const CTRL_CODE: u8 = 0x7c;
@@ -272,8 +272,10 @@ impl AlphaEmuApp {
                         key,
                         pressed,
                         repeat: false,
+                        modifiers,
                         ..
                     } => {
+                        handled |= self.modifier_state.sync(session, *modifiers);
                         if let Some(code) = matrix_code_for_key(*key) {
                             if *pressed {
                                 session.press_matrix_code(code);
@@ -398,6 +400,42 @@ fn tap_for_text_char(character: char) -> Option<TextTap> {
 
 fn matrix_code_for_key(key: egui::Key) -> Option<u8> {
     match key {
+        egui::Key::A => matrix_key_for_char('a').map(|key| key.code()),
+        egui::Key::B => matrix_key_for_char('b').map(|key| key.code()),
+        egui::Key::C => matrix_key_for_char('c').map(|key| key.code()),
+        egui::Key::D => matrix_key_for_char('d').map(|key| key.code()),
+        egui::Key::E => matrix_key_for_char('e').map(|key| key.code()),
+        egui::Key::F => matrix_key_for_char('f').map(|key| key.code()),
+        egui::Key::G => matrix_key_for_char('g').map(|key| key.code()),
+        egui::Key::H => matrix_key_for_char('h').map(|key| key.code()),
+        egui::Key::I => matrix_key_for_char('i').map(|key| key.code()),
+        egui::Key::J => matrix_key_for_char('j').map(|key| key.code()),
+        egui::Key::K => matrix_key_for_char('k').map(|key| key.code()),
+        egui::Key::L => matrix_key_for_char('l').map(|key| key.code()),
+        egui::Key::M => matrix_key_for_char('m').map(|key| key.code()),
+        egui::Key::N => matrix_key_for_char('n').map(|key| key.code()),
+        egui::Key::O => matrix_key_for_char('o').map(|key| key.code()),
+        egui::Key::P => matrix_key_for_char('p').map(|key| key.code()),
+        egui::Key::Q => matrix_key_for_char('q').map(|key| key.code()),
+        egui::Key::R => matrix_key_for_char('r').map(|key| key.code()),
+        egui::Key::S => matrix_key_for_char('s').map(|key| key.code()),
+        egui::Key::T => matrix_key_for_char('t').map(|key| key.code()),
+        egui::Key::U => matrix_key_for_char('u').map(|key| key.code()),
+        egui::Key::V => matrix_key_for_char('v').map(|key| key.code()),
+        egui::Key::W => matrix_key_for_char('w').map(|key| key.code()),
+        egui::Key::X => matrix_key_for_char('x').map(|key| key.code()),
+        egui::Key::Y => matrix_key_for_char('y').map(|key| key.code()),
+        egui::Key::Z => matrix_key_for_char('z').map(|key| key.code()),
+        egui::Key::Num0 => matrix_key_for_char('0').map(|key| key.code()),
+        egui::Key::Num1 => matrix_key_for_char('1').map(|key| key.code()),
+        egui::Key::Num2 => matrix_key_for_char('2').map(|key| key.code()),
+        egui::Key::Num3 => matrix_key_for_char('3').map(|key| key.code()),
+        egui::Key::Num4 => matrix_key_for_char('4').map(|key| key.code()),
+        egui::Key::Num5 => matrix_key_for_char('5').map(|key| key.code()),
+        egui::Key::Num6 => matrix_key_for_char('6').map(|key| key.code()),
+        egui::Key::Num7 => matrix_key_for_char('7').map(|key| key.code()),
+        egui::Key::Num8 => matrix_key_for_char('8').map(|key| key.code()),
+        egui::Key::Num9 => matrix_key_for_char('9').map(|key| key.code()),
         egui::Key::Backspace => Some(0x09),
         egui::Key::Delete => Some(0x61),
         egui::Key::Enter => Some(0x69),
@@ -819,19 +857,39 @@ mod tests {
     }
 
     #[test]
-    fn alphabet_keys_are_not_handled_as_physical_control_keys() {
-        for key in [
-            egui::Key::A,
-            egui::Key::E,
-            egui::Key::I,
-            egui::Key::K,
-            egui::Key::Q,
-            egui::Key::R,
-            egui::Key::T,
-            egui::Key::W,
-            egui::Key::Z,
-        ] {
-            assert_eq!(matrix_code_for_key(key), None);
+    fn alphabet_keys_are_available_for_keyboard_shortcuts() {
+        let expected = [
+            (egui::Key::A, 0x2c),
+            (egui::Key::E, 0x3a),
+            (egui::Key::I, 0x30),
+            (egui::Key::K, 0x20),
+            (egui::Key::Q, 0x3c),
+            (egui::Key::R, 0x3d),
+            (egui::Key::T, 0x0d),
+            (egui::Key::W, 0x3b),
+            (egui::Key::Z, 0x6c),
+        ];
+        for (key, code) in expected {
+            assert_eq!(matrix_code_for_key(key), Some(code));
+        }
+    }
+
+    #[test]
+    fn number_keys_are_available_for_keyboard_shortcuts() {
+        let expected = [
+            (egui::Key::Num0, 0x53),
+            (egui::Key::Num1, 0x5c),
+            (egui::Key::Num2, 0x5b),
+            (egui::Key::Num3, 0x5a),
+            (egui::Key::Num4, 0x5d),
+            (egui::Key::Num5, 0x4d),
+            (egui::Key::Num6, 0x4f),
+            (egui::Key::Num7, 0x5f),
+            (egui::Key::Num8, 0x50),
+            (egui::Key::Num9, 0x52),
+        ];
+        for (key, code) in expected {
+            assert_eq!(matrix_code_for_key(key), Some(code));
         }
     }
 

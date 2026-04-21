@@ -201,3 +201,7 @@ AlphaWord text injection through all matrix rows produces wrong characters in fu
 GUI AlphaWord typing fails because it still uses all-row text taps instead of exact-row taps	proven
 GUI Applets button fails in AlphaWord because raw 0x47 was mislabelled Applets; behavioral scan proves raw 0x46 opens SmartApplets	proven
 State-clone matrix visibility scan from AlphaWord validates all 80 firmware-derived raw matrix cells against live 0xf419 reads	proven
+GUI Cmd+A failed because alphabet key events were ignored when macOS command suppressed text events	proven
+AlphaWord editor modifier behavior is fully explained by HID-export modifier raw codes	disproven
+GUI shortcut handling can miss command because it syncs only frame-final modifiers rather than per-key event modifiers	proven
+LCD selection highlighting is invisible because reverse-display command 0xa7 was ignored	needs further investigation

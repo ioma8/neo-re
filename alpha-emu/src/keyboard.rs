@@ -18,8 +18,8 @@ impl MatrixKey {
         1 << (self.0 >> 4)
     }
 
-    fn is_visible_on_row(self, row: Option<u8>) -> bool {
-        row.is_none_or(|row| row == self.row())
+    fn is_visible_on_rows(self, rows: Option<u16>) -> bool {
+        rows.is_none_or(|rows| rows & (1 << self.row()) != 0)
     }
 }
 
@@ -297,7 +297,7 @@ pub(crate) struct Keyboard {
     script: Vec<KeyPhase>,
     phase: usize,
     reads_in_phase: usize,
-    selected_row: Option<u8>,
+    selected_rows: Option<u16>,
 }
 
 impl Keyboard {
@@ -355,7 +355,11 @@ impl Keyboard {
     }
 
     pub(crate) fn select_row(&mut self, row: u8) {
-        self.selected_row = Some(row & 0x0f);
+        self.select_rows(1 << (row & 0x0f));
+    }
+
+    pub(crate) fn select_rows(&mut self, rows: u16) {
+        self.selected_rows = Some(rows & 0xffff);
     }
 
     pub(crate) fn read_matrix_input(&mut self) -> u8 {
@@ -364,14 +368,14 @@ impl Keyboard {
             let visible_row = if script_key.all_rows {
                 None
             } else {
-                self.selected_row
+                self.selected_rows
             };
-            if script_key.key.is_visible_on_row(visible_row) {
+            if script_key.key.is_visible_on_rows(visible_row) {
                 active_columns |= script_key.column_mask();
             }
         }
         for key in self.held.iter().copied() {
-            if key.is_visible_on_row(self.selected_row) {
+            if key.is_visible_on_rows(self.selected_rows) {
                 active_columns |= key.column_mask();
             }
         }
@@ -419,7 +423,7 @@ impl ScriptKey {
     }
 }
 
-pub(crate) fn matrix_key_for_char(value: char) -> Option<MatrixKey> {
+pub fn matrix_key_for_char(value: char) -> Option<MatrixKey> {
     let normalized = value.to_ascii_lowercase();
     for row in 0..16u8 {
         for col in 0..8u8 {
@@ -564,5 +568,18 @@ mod tests {
 
         keyboard.select_row(0x0a);
         assert_eq!(keyboard.read_matrix_input(), 0xf7);
+    }
+
+    #[test]
+    fn held_keys_are_visible_on_any_selected_row() {
+        let mut keyboard = Keyboard::default();
+        keyboard.press(MatrixKey::new(0x14));
+        keyboard.press(MatrixKey::new(0x2c));
+
+        keyboard.select_rows((1 << 0x04) | (1 << 0x0c));
+        let value = keyboard.read_matrix_input();
+
+        assert_eq!(value & 0x02, 0x00);
+        assert_eq!(value & 0x04, 0x00);
     }
 }

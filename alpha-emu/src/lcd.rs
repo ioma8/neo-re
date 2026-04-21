@@ -23,6 +23,7 @@ struct Controller {
     page: usize,
     column: usize,
     display_on: bool,
+    reverse_display: bool,
     pixels: [[u8; CONTROLLER_WIDTH]; PAGES],
 }
 
@@ -57,8 +58,9 @@ impl Lcd {
                         let x = x_base + column;
                         let y = page * PAGE_HEIGHT + bit;
                         if x < LCD_WIDTH {
+                            let lit = value & (1 << bit) != 0;
                             pixels[y * LCD_WIDTH + x] =
-                                controller.display_on && value & (1 << bit) != 0;
+                                controller.display_on && (lit ^ controller.reverse_display);
                         }
                     }
                 }
@@ -86,6 +88,7 @@ impl Controller {
             page: 0,
             column: 0,
             display_on: true,
+            reverse_display: false,
             pixels: [[0; CONTROLLER_WIDTH]; PAGES],
         }
     }
@@ -98,7 +101,9 @@ impl Controller {
             0x00..=0x0f => self.column = (self.column & 0xf0) | usize::from(command),
             0x10..=0x1f => self.column = (self.column & 0x0f) | (usize::from(command & 0x0f) << 4),
             0x40..=0x7f => self.column = 0,
-            0xa0 | 0xa1 | 0xa3 | 0xa6 | 0xc0..=0xc8 | 0xe0..=0xee | 0xf8 => {}
+            0xa6 => self.reverse_display = false,
+            0xa7 => self.reverse_display = true,
+            0xa0 | 0xa1 | 0xa3 | 0xc0..=0xc8 | 0xe0..=0xee | 0xf8 => {}
             _ => {}
         }
         self.column = self.column.min(CONTROLLER_WIDTH - 1);
@@ -140,5 +145,17 @@ mod tests {
         let snapshot = lcd.snapshot();
         assert!(snapshot.pixels[132]);
         assert!(!snapshot.pixels[0]);
+    }
+
+    #[test]
+    fn reverse_display_command_inverts_visible_pixels() {
+        let mut lcd = Lcd::new();
+
+        lcd.write_command(0, 0xa7);
+        lcd.write_command(0, 0xb0);
+        lcd.write_data(0, 0x00);
+
+        let snapshot = lcd.snapshot();
+        assert!(snapshot.pixels[0]);
     }
 }

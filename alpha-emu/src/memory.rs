@@ -38,6 +38,7 @@ pub(crate) struct EmuMemory {
     timer_counter: u32,
     applet_storage_end: Option<u32>,
     f411_row_select_enabled: bool,
+    gpio_keyboard_rows: u16,
 }
 
 impl EmuMemory {
@@ -80,6 +81,7 @@ impl EmuMemory {
             timer_counter: 0,
             applet_storage_end,
             f411_row_select_enabled: !is_neo_system_image,
+            gpio_keyboard_rows: 0,
         })
     }
 
@@ -233,8 +235,10 @@ impl EmuMemory {
         let normalized = normalize_mmio(addr);
         if normalized == 0xf411 && self.f411_row_select_enabled {
             self.keyboard.select_row(value);
-        } else if let Some(row) = gpio_keyboard_row_select(normalized, value) {
-            self.keyboard.select_row(row);
+        } else if let Some(rows) = gpio_keyboard_row_select(normalized, value) {
+            let mask = gpio_keyboard_row_mask(normalized);
+            self.gpio_keyboard_rows = (self.gpio_keyboard_rows & !mask) | rows;
+            self.keyboard.select_rows(self.gpio_keyboard_rows);
         }
         match addr {
             0x0100_8000 => self.lcd.write_command(0, value),
@@ -451,7 +455,7 @@ fn find_applet_storage_end(bytes: &[u8]) -> Option<u32> {
     (cursor > start).then_some(cursor as u32)
 }
 
-fn gpio_keyboard_row_select(addr: u32, value: u8) -> Option<u8> {
+fn gpio_keyboard_row_select(addr: u32, value: u8) -> Option<u16> {
     match addr {
         0xf410 => {
             const ROWS: &[(u8, u8)] = &[
@@ -464,10 +468,9 @@ fn gpio_keyboard_row_select(addr: u32, value: u8) -> Option<u8> {
                 (0x02, 0x06),
                 (0x01, 0x07),
             ];
-            ROWS.iter()
-                .find_map(|(bit, row)| (value & bit != 0).then_some(*row))
+            Some(rows_from_bits(value, ROWS))
         }
-        0xf408 => (value & 0x20 != 0).then_some(0x09),
+        0xf408 => Some(if value & 0x20 != 0 { 1 << 0x09 } else { 0 }),
         0xf440 => {
             const ROWS: &[(u8, u8)] = &[
                 (0x80, 0x0a),
@@ -477,11 +480,29 @@ fn gpio_keyboard_row_select(addr: u32, value: u8) -> Option<u8> {
                 (0x08, 0x0e),
                 (0x04, 0x0f),
             ];
-            ROWS.iter()
-                .find_map(|(bit, row)| (value & bit != 0).then_some(*row))
+            Some(rows_from_bits(value, ROWS))
         }
         _ => None,
     }
+}
+
+fn gpio_keyboard_row_mask(addr: u32) -> u16 {
+    match addr {
+        0xf410 => 0x00ff,
+        0xf408 => 1 << 0x09,
+        0xf440 => 0xfc00,
+        _ => 0,
+    }
+}
+
+fn rows_from_bits(value: u8, rows: &[(u8, u8)]) -> u16 {
+    rows.iter().fold(0, |selected, (bit, row)| {
+        if value & bit != 0 {
+            selected | (1 << row)
+        } else {
+            selected
+        }
+    })
 }
 
 #[cfg(test)]
