@@ -62,6 +62,10 @@ impl EmuMemory {
         self.keyboard.release(key);
     }
 
+    pub(crate) fn tap_key(&mut self, key: MatrixKey) {
+        self.keyboard.tap(key);
+    }
+
     pub(crate) fn drain_mmio_accesses(&mut self) -> Vec<String> {
         std::mem::take(&mut self.mmio_accesses)
     }

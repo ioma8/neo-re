@@ -5,8 +5,13 @@ use eframe::egui;
 
 use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::{FirmwareSession, FirmwareSnapshot};
-use crate::keyboard::{matrix_cells, matrix_key_is_alphanumeric, matrix_key_label};
+use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
 use crate::lcd::LcdSnapshot;
+
+const SHIFT_CODE: u8 = 0x0e;
+const COMMAND_CODE: u8 = 0x14;
+const OPTION_CODE: u8 = 0x41;
+const CTRL_CODE: u8 = 0x7c;
 
 /// Runs the desktop Small ROM emulator UI.
 ///
@@ -37,6 +42,7 @@ struct AlphaEmuApp {
     firmware_path: PathBuf,
     session: Option<FirmwareSession>,
     load_error: Option<String>,
+    modifier_state: ModifierMatrixState,
 }
 
 impl AlphaEmuApp {
@@ -45,6 +51,7 @@ impl AlphaEmuApp {
             firmware_path: path.to_path_buf(),
             session: None,
             load_error: None,
+            modifier_state: ModifierMatrixState::default(),
         };
         app.boot_path(path);
         app
@@ -62,6 +69,7 @@ impl AlphaEmuApp {
                 session.run_steps(300_000);
                 self.session = Some(session);
                 self.load_error = None;
+                self.modifier_state = ModifierMatrixState::default();
             }
             Err(error) => {
                 self.session = None;
@@ -122,21 +130,35 @@ impl AlphaEmuApp {
         };
         let mut handled = false;
         ctx.input(|input| {
+            handled |= self.modifier_state.sync(session, input.modifiers);
             for event in &input.events {
-                if let egui::Event::Key {
-                    key,
-                    pressed,
-                    repeat: false,
-                    ..
-                } = event
-                    && let Some(value) = char_for_key(*key)
-                {
-                    if *pressed {
-                        session.press_char(value);
-                    } else {
-                        session.release_char(value);
+                match event {
+                    egui::Event::Text(text)
+                        if !input.modifiers.ctrl && !input.modifiers.mac_cmd =>
+                    {
+                        for character in text.chars() {
+                            if let Some(tap) = tap_for_text_char(character) {
+                                tap.apply(session, input.modifiers.shift);
+                                handled = true;
+                            }
+                        }
                     }
-                    handled = true;
+                    egui::Event::Key {
+                        key,
+                        pressed,
+                        repeat: false,
+                        ..
+                    } => {
+                        if let Some(code) = matrix_code_for_key(*key) {
+                            if *pressed {
+                                session.press_matrix_code(code);
+                            } else {
+                                session.release_matrix_code(code);
+                            }
+                            handled = true;
+                        }
+                    }
+                    _ => {}
                 }
             }
         });
@@ -146,12 +168,110 @@ impl AlphaEmuApp {
     }
 }
 
-fn char_for_key(key: egui::Key) -> Option<char> {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ModifierMatrixState {
+    shift: bool,
+    ctrl: bool,
+    command: bool,
+    option: bool,
+}
+
+impl ModifierMatrixState {
+    fn sync(&mut self, session: &mut FirmwareSession, modifiers: egui::Modifiers) -> bool {
+        let next = Self {
+            shift: modifiers.shift,
+            ctrl: modifiers.ctrl,
+            command: modifiers.mac_cmd,
+            option: modifiers.alt,
+        };
+        let mut changed = false;
+        changed |= sync_matrix_key(session, self.shift, next.shift, SHIFT_CODE);
+        changed |= sync_matrix_key(session, self.ctrl, next.ctrl, CTRL_CODE);
+        changed |= sync_matrix_key(session, self.command, next.command, COMMAND_CODE);
+        changed |= sync_matrix_key(session, self.option, next.option, OPTION_CODE);
+        *self = next;
+        changed
+    }
+}
+
+fn sync_matrix_key(session: &mut FirmwareSession, old: bool, new: bool, code: u8) -> bool {
+    match (old, new) {
+        (false, true) => {
+            session.press_matrix_code(code);
+            true
+        }
+        (true, false) => {
+            session.release_matrix_code(code);
+            true
+        }
+        _ => false,
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TextTap {
+    character: char,
+    needs_shift: bool,
+}
+
+impl TextTap {
+    fn apply(self, session: &mut FirmwareSession, shift_already_held: bool) {
+        if self.needs_shift && !shift_already_held {
+            session.press_matrix_code(SHIFT_CODE);
+        }
+        session.tap_char(self.character);
+        if self.needs_shift && !shift_already_held {
+            session.release_matrix_code(SHIFT_CODE);
+        }
+    }
+}
+
+fn tap_for_text_char(character: char) -> Option<TextTap> {
+    let (character, needs_shift) = match character {
+        'A'..='Z' => (character.to_ascii_lowercase(), true),
+        'a'..='z' | '0'..='9' | '-' | '=' | '[' | ']' | '\\' | ';' | '\'' | '`' | ',' | '.'
+        | '/' => (character, false),
+        '!' => ('1', true),
+        '@' => ('2', true),
+        '#' => ('3', true),
+        '$' => ('4', true),
+        '%' => ('5', true),
+        '^' => ('6', true),
+        '&' => ('7', true),
+        '*' => ('8', true),
+        '(' => ('9', true),
+        ')' => ('0', true),
+        '_' => ('-', true),
+        '+' => ('=', true),
+        '{' => ('[', true),
+        '}' => (']', true),
+        '|' => ('\\', true),
+        ':' => (';', true),
+        '"' => ('\'', true),
+        '~' => ('`', true),
+        '<' => (',', true),
+        '>' => ('.', true),
+        '?' => ('/', true),
+        _ => return None,
+    };
+    Some(TextTap {
+        character,
+        needs_shift,
+    })
+}
+
+fn matrix_code_for_key(key: egui::Key) -> Option<u8> {
     match key {
-        egui::Key::E => Some('e'),
-        egui::Key::R => Some('r'),
-        egui::Key::N => Some('n'),
-        egui::Key::I => Some('i'),
+        egui::Key::Backspace => Some(0x09),
+        egui::Key::Delete => Some(0x61),
+        egui::Key::Enter => Some(0x69),
+        egui::Key::Escape => Some(0x74),
+        egui::Key::Space => Some(0x79),
+        egui::Key::Tab => Some(0x0c),
+        egui::Key::ArrowUp => Some(0x77),
+        egui::Key::ArrowDown => Some(0x15),
+        egui::Key::ArrowLeft => Some(0x75),
+        egui::Key::ArrowRight => Some(0x76),
         _ => None,
     }
 }
@@ -297,7 +417,7 @@ fn render_special_matrix_buttons(ui: &mut egui::Ui, session: &mut FirmwareSessio
         ui.horizontal_wrapped(|ui| {
             for cell in cells.iter().filter(|cell| cell.row == row) {
                 let raw = cell.raw.code();
-                if matrix_key_is_alphanumeric(raw) {
+                if matrix_key_is_character(raw) {
                     continue;
                 }
                 let label = format!("{} (0x{:02x})", matrix_key_label(raw), cell.logical);
@@ -307,8 +427,7 @@ fn render_special_matrix_buttons(ui: &mut egui::Ui, session: &mut FirmwareSessio
                     format!("row {:02x}, col {:x}", cell.row, cell.col),
                 );
                 if response.clicked() {
-                    session.press_matrix_code(raw);
-                    session.release_matrix_code(raw);
+                    session.tap_matrix_code(raw);
                     any_pressed = true;
                 }
             }
@@ -375,6 +494,107 @@ fn render_trace(ui: &mut egui::Ui, snapshot: &FirmwareSnapshot) {
         trace_panel(&mut columns[0], "Recent CPU trace", &snapshot.trace);
         trace_panel(&mut columns[1], "MMIO accesses", &snapshot.mmio_accesses);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{matrix_code_for_key, tap_for_text_char};
+    use eframe::egui;
+
+    use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
+
+    #[test]
+    fn printable_text_keys_are_covered() {
+        for character in "abcdefghijklmnopqrstuvwxyz0123456789-=[]\\;'`,./".chars() {
+            let tap = tap_for_text_char(character);
+            assert_eq!(
+                tap.map(|tap| (tap.character, tap.needs_shift)),
+                Some((character, false)),
+                "missing unshifted character {character:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shifted_text_keys_are_covered() {
+        let expected = [
+            ('A', 'a'),
+            ('Z', 'z'),
+            ('!', '1'),
+            ('@', '2'),
+            ('#', '3'),
+            ('$', '4'),
+            ('%', '5'),
+            ('^', '6'),
+            ('&', '7'),
+            ('*', '8'),
+            ('(', '9'),
+            (')', '0'),
+            ('_', '-'),
+            ('+', '='),
+            ('{', '['),
+            ('}', ']'),
+            ('|', '\\'),
+            (':', ';'),
+            ('"', '\''),
+            ('~', '`'),
+            ('<', ','),
+            ('>', '.'),
+            ('?', '/'),
+        ];
+        for (input, base) in expected {
+            let tap = tap_for_text_char(input).expect("shifted key must be covered");
+            assert_eq!((tap.character, tap.needs_shift), (base, true));
+        }
+    }
+
+    #[test]
+    fn whitespace_and_editing_keys_are_covered_as_physical_keys() {
+        let expected = [
+            (egui::Key::Space, 0x79),
+            (egui::Key::Tab, 0x0c),
+            (egui::Key::Enter, 0x69),
+            (egui::Key::Backspace, 0x09),
+            (egui::Key::Delete, 0x61),
+            (egui::Key::Escape, 0x74),
+        ];
+        for (key, code) in expected {
+            assert_eq!(matrix_code_for_key(key), Some(code));
+        }
+    }
+
+    #[test]
+    fn arrows_are_covered_as_physical_keys() {
+        assert_eq!(matrix_code_for_key(egui::Key::ArrowUp), Some(0x77));
+        assert_eq!(matrix_code_for_key(egui::Key::ArrowDown), Some(0x15));
+        assert_eq!(matrix_code_for_key(egui::Key::ArrowLeft), Some(0x75));
+        assert_eq!(matrix_code_for_key(egui::Key::ArrowRight), Some(0x76));
+    }
+
+    #[test]
+    fn non_character_matrix_keys_are_gui_button_candidates() {
+        let labels = matrix_cells()
+            .into_iter()
+            .filter(|cell| !matrix_key_is_character(cell.raw.code()))
+            .map(|cell| matrix_key_label(cell.raw.code()))
+            .collect::<Vec<_>>();
+
+        for expected in [
+            "File 1",
+            "Print",
+            "Spell Check",
+            "Find",
+            "Clear File",
+            "Applets",
+            "Send",
+            "Up",
+            "Down",
+            "Left",
+            "Right",
+        ] {
+            assert!(labels.iter().any(|label| label == expected), "missing {expected}");
+        }
+    }
 }
 
 fn trace_panel(ui: &mut egui::Ui, title: &str, lines: &[String]) {

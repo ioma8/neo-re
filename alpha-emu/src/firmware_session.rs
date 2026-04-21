@@ -101,6 +101,12 @@ impl FirmwareSession {
         }
     }
 
+    pub fn tap_char(&mut self, value: char) {
+        if let Some(key) = matrix_key_for_char(value) {
+            self.memory.tap_key(key);
+        }
+    }
+
     pub fn press_matrix_code(&mut self, code: u8) {
         if let Some(key) = matrix_key_for_code(code) {
             self.memory.press_key(key);
@@ -110,6 +116,12 @@ impl FirmwareSession {
     pub fn release_matrix_code(&mut self, code: u8) {
         if let Some(key) = matrix_key_for_code(code) {
             self.memory.release_key(key);
+        }
+    }
+
+    pub fn tap_matrix_code(&mut self, code: u8) {
+        if let Some(key) = matrix_key_for_code(code) {
+            self.memory.tap_key(key);
         }
     }
 

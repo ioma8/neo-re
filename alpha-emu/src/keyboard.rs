@@ -207,8 +207,8 @@ pub(crate) fn matrix_key_label(value: u8) -> String {
     }
 }
 
-pub(crate) fn matrix_key_is_alphanumeric(value: u8) -> bool {
-    matrix_code_to_char(value).is_some_and(|character| character.is_ascii_alphanumeric())
+pub(crate) fn matrix_key_is_character(value: u8) -> bool {
+    matrix_code_to_char(value).is_some()
 }
 
 fn matrix_code_to_hid_usage(value: u8) -> Option<u8> {
@@ -308,6 +308,11 @@ impl Keyboard {
 
     pub(crate) fn release(&mut self, key: MatrixKey) {
         self.held.retain(|held| *held != key);
+    }
+
+    pub(crate) fn tap(&mut self, key: MatrixKey) {
+        self.push_phase(Some(key), 120);
+        self.push_phase(None, 120);
     }
 
     pub(crate) fn select_row(&mut self, row: u8) {
@@ -428,6 +433,8 @@ mod tests {
         assert_eq!(matrix_key_for_char('d').map(MatrixKey::code), Some(0x2a));
         assert_eq!(matrix_key_for_char('b').map(MatrixKey::code), Some(0x7d));
         assert_eq!(matrix_key_for_char('`').map(MatrixKey::code), Some(0x4c));
+        assert_eq!(matrix_key_for_char(' ').map(MatrixKey::code), Some(0x79));
+        assert_eq!(matrix_key_for_char('/').map(MatrixKey::code), Some(0x73));
     }
 
     #[test]
