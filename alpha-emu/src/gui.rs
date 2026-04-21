@@ -344,7 +344,7 @@ impl TextTap {
         if self.needs_shift && !shift_already_held {
             session.press_matrix_code(SHIFT_CODE);
         }
-        session.tap_char_all_rows(self.character);
+        session.tap_char(self.character);
         if self.needs_shift && !shift_already_held {
             session.release_matrix_code(SHIFT_CODE);
         }

@@ -198,3 +198,4 @@ Mapping os3kneorom.os3kos as declared load segments fixes the AlphaWord full OS 
 Firmware STOP at 0x00426752 is a wait-for-interrupt primitive, not a reset request	proven
 AlphaWord repeated splash after format is caused by treating firmware STOP as reset	proven
 AlphaWord text injection through all matrix rows produces wrong characters in full OS editor	proven
+GUI AlphaWord typing fails because it still uses all-row text taps instead of exact-row taps	proven
