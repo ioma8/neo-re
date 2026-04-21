@@ -20,10 +20,12 @@ fn main() -> Result<()> {
     let mut all_row_key_events = Vec::new();
     let mut type_events = Vec::new();
     let mut stop_at_pc = None;
+    let mut stop_at_pc_hit = 1usize;
     let mut stop_at_resource = None;
     let mut scan_special_keys_at = None;
     let mut boot_left_shift_tab = false;
     let mut boot_keys = None;
+    let mut boot_keys_exact = None;
     let mut verbose = false;
     let mut path = None;
     let mut steps = 10_000;
@@ -37,6 +39,11 @@ fn main() -> Result<()> {
             .and_then(|arg| arg.strip_prefix("--boot-keys="))
         {
             boot_keys = Some(parse_key_list(value)?);
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--boot-keys-exact="))
+        {
+            boot_keys_exact = Some(parse_key_list(value)?);
         } else if arg == "--lcd-ascii" {
             lcd_ascii = true;
         } else if arg == "--lcd-ranges" {
@@ -63,6 +70,11 @@ fn main() -> Result<()> {
             stop_at_pc = Some(parse_u32_arg(value)?);
         } else if let Some(value) = arg
             .to_str()
+            .and_then(|arg| arg.strip_prefix("--stop-at-pc-hit="))
+        {
+            stop_at_pc_hit = value.parse()?;
+        } else if let Some(value) = arg
+            .to_str()
             .and_then(|arg| arg.strip_prefix("--stop-at-resource="))
         {
             stop_at_resource = Some(parse_u32_arg(value)? as u16);
@@ -81,7 +93,9 @@ fn main() -> Result<()> {
 
     if headless {
         let firmware = FirmwareRuntime::load_small_rom(path)?;
-        let mut session = if let Some(keys) = boot_keys {
+        let mut session = if let Some(keys) = boot_keys_exact {
+            FirmwareSession::boot_with_exact_keys(firmware, &keys, 50_000)?
+        } else if let Some(keys) = boot_keys {
             FirmwareSession::boot_with_keys(firmware, &keys, 512)?
         } else if boot_left_shift_tab {
             FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?
@@ -105,6 +119,7 @@ fn main() -> Result<()> {
             },
             HeadlessStop {
                 pc: stop_at_pc,
+                pc_hit: stop_at_pc_hit,
                 resource: stop_at_resource,
             },
             verbose,
@@ -230,6 +245,7 @@ struct HeadlessEvents<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct HeadlessStop {
     pc: Option<u32>,
+    pc_hit: usize,
     resource: Option<u16>,
 }
 
@@ -288,21 +304,27 @@ fn run_headless_steps(
             let (step, text) = &type_events[text_index];
             run_until_step(session, *step, keep_trace);
             for value in text.chars() {
-                session.tap_char_all_rows(value);
-                run_short_settle(session, keep_trace);
+                session.tap_char(value);
+                if run_short_settle(session, keep_trace, stop) {
+                    return Some(true);
+                }
             }
             text_index += 1;
         } else if next_key_step <= next_all_row_key_step && next_key_step <= next_hold_step {
             let (step, code) = key_events[key_index];
             run_until_step(session, step, keep_trace);
             session.tap_matrix_code_long(code);
-            run_short_settle(session, keep_trace);
+            if run_short_settle(session, keep_trace, stop) {
+                return Some(true);
+            }
             key_index += 1;
         } else if next_all_row_key_step <= next_hold_step {
             let (step, code) = all_row_key_events[all_row_key_index];
             run_until_step(session, step, keep_trace);
             session.tap_matrix_code_all_rows(code);
-            run_short_settle(session, keep_trace);
+            if run_short_settle(session, keep_trace, stop) {
+                return Some(true);
+            }
             all_row_key_index += 1;
         } else {
             let (step, pressed, code) = expanded_hold_events[hold_index];
@@ -312,14 +334,23 @@ fn run_headless_steps(
             } else {
                 session.release_matrix_code(code);
             }
-            run_short_settle(session, keep_trace);
+            if run_short_settle(session, keep_trace, stop) {
+                return Some(true);
+            }
             hold_index += 1;
         }
     }
     let current_steps = session.snapshot().steps;
     if current_steps < total_steps {
         if let Some(stop_pc) = stop.pc {
-            return Some(session.run_until_pc_or_steps(stop_pc, total_steps - current_steps));
+            if stop.pc_hit <= 1 {
+                return Some(session.run_until_pc_or_steps(stop_pc, total_steps - current_steps));
+            }
+            return Some(session.run_until_pc_hit_or_steps(
+                stop_pc,
+                stop.pc_hit,
+                total_steps - current_steps,
+            ));
         }
         if let Some(resource_id) = stop.resource {
             return Some(
@@ -346,12 +377,19 @@ fn run_until_step(session: &mut FirmwareSession, step: usize, keep_trace: bool) 
     }
 }
 
-fn run_short_settle(session: &mut FirmwareSession, keep_trace: bool) {
+fn run_short_settle(session: &mut FirmwareSession, keep_trace: bool, stop: HeadlessStop) -> bool {
+    if let Some(stop_pc) = stop.pc {
+        if stop.pc_hit > 1 {
+            return session.run_until_pc_hit_or_steps(stop_pc, stop.pc_hit, 2_000);
+        }
+        return session.run_until_pc_or_steps(stop_pc, 2_000);
+    }
     if keep_trace {
         session.run_steps(2_000);
     } else {
         session.run_realtime_steps(2_000);
     }
+    false
 }
 
 fn parse_key_event(value: &str) -> Result<(usize, u8)> {

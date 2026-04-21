@@ -346,6 +346,14 @@ impl Keyboard {
         self.push_phase(key_codes, reads, true);
     }
 
+    pub(crate) fn hold_keys_exact_rows(&mut self, keys: &[MatrixKey], reads: usize) {
+        let mut key_codes = [None, None, None, None];
+        for (slot, key) in key_codes.iter_mut().zip(keys.iter().copied()) {
+            *slot = Some(key);
+        }
+        self.push_phase(key_codes, reads, false);
+    }
+
     pub(crate) fn select_row(&mut self, row: u8) {
         self.selected_row = Some(row & 0x0f);
     }

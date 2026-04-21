@@ -87,6 +87,18 @@ impl FirmwareSession {
         Self::boot_with_memory(ssp, pc, memory)
     }
 
+    pub fn boot_with_exact_keys(
+        firmware: FirmwareRuntime,
+        keys: &[u8],
+        reads: usize,
+    ) -> Result<Self, FirmwareSessionError> {
+        let (ssp, pc) = firmware.boot_vectors()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+        let keys = keys.iter().copied().map(MatrixKey::new).collect::<Vec<_>>();
+        memory.hold_boot_keys_exact_rows(&keys, reads);
+        Self::boot_with_memory(ssp, pc, memory)
+    }
+
     fn boot_with_memory(
         ssp: u32,
         pc: u32,
@@ -127,6 +139,30 @@ impl FirmwareSession {
         self.cpu.regs.pc.0 == stop_pc
     }
 
+    pub fn run_until_pc_hit_or_steps(
+        &mut self,
+        stop_pc: u32,
+        wanted_hit: usize,
+        max_steps: usize,
+    ) -> bool {
+        let mut hits = 0usize;
+        for _ in 0..max_steps {
+            if self.cpu.regs.pc.0 == stop_pc {
+                hits = hits.saturating_add(1);
+                if hits >= wanted_hit {
+                    self.push_trace(format!(
+                        "stopped before pc=0x{stop_pc:08x} hit={hits}"
+                    ));
+                    return true;
+                }
+            }
+            if !self.step_with_trace() {
+                break;
+            }
+        }
+        false
+    }
+
     pub fn run_until_resource_or_steps(&mut self, resource_id: u16, max_steps: usize) -> bool {
         for _ in 0..max_steps {
             if self.cpu.regs.pc.0 == 0x0042_4212
@@ -143,6 +179,9 @@ impl FirmwareSession {
     }
 
     fn step_with_trace(&mut self) -> bool {
+        if self.wake_after_firmware_stop() {
+            return true;
+        }
         if self.cpu.stop || self.last_exception.is_some() {
             return false;
         }
@@ -174,6 +213,9 @@ impl FirmwareSession {
         let previous_logging = self.memory.set_mmio_logging(false);
         let start_cycles = self.cycles;
         for _ in 0..max_steps {
+            if self.wake_after_firmware_stop() {
+                continue;
+            }
             if self.cpu.stop || self.last_exception.is_some() {
                 break;
             }
@@ -219,6 +261,9 @@ impl FirmwareSession {
         let start_steps = self.steps;
         let started_at = Instant::now();
         while self.cycles.saturating_sub(start_cycles) < cycle_budget {
+            if self.wake_after_firmware_stop() {
+                continue;
+            }
             if self.cpu.stop || self.last_exception.is_some() {
                 break;
             }
@@ -250,9 +295,20 @@ impl FirmwareSession {
 
     fn service_periodic_hardware(&mut self) {
         if self.steps.is_multiple_of(512) {
-            self.memory.service_persistent_storage();
             self.memory.service_deferred_timers();
         }
+    }
+
+    fn wake_after_firmware_stop(&mut self) -> bool {
+        if !self.cpu.stop || self.cpu.regs.pc.0 != 0x0042_6756 {
+            return false;
+        }
+        self.cpu.stop = false;
+        self.push_trace(format!(
+            "firmware STOP wake -> ssp=0x{:08x} pc=0x{:08x}",
+            self.cpu.regs.ssp.0, self.cpu.regs.pc.0
+        ));
+        true
     }
 
     #[must_use]
@@ -361,7 +417,7 @@ impl FirmwareSession {
     }
 
     fn debug_words(&self) -> Vec<(u32, u32)> {
-        [
+        let mut addrs = vec![
             0x0000_03e8,
             0x0000_03ee,
             0x0000_0400,
@@ -390,8 +446,15 @@ impl FirmwareSession {
             0x0000_35e6,
             0x0000_35ec,
             0x0000_3e8a,
-        ]
-        .into_iter()
+        ];
+        let sp = self.cpu.regs.sp();
+        addrs.extend((0..12).map(|index| sp.saturating_add(index * 4)));
+        for reg in [2, 3, 4, 6] {
+            let base = self.cpu.regs.a[reg].0;
+            addrs.extend([0, 4, 8, 0x0c, 0x10, 0x34, 0x44].map(|offset| base.wrapping_add(offset)));
+        }
+        addrs
+            .into_iter()
         .filter_map(|addr| self.memory.peek_long(addr).map(|value| (addr, value)))
         .collect()
     }
@@ -552,12 +615,6 @@ mod tests {
         let snapshot = session.snapshot();
 
         assert!(snapshot.last_exception.is_none());
-        assert!(
-            snapshot
-                .debug_words
-                .iter()
-                .any(|(addr, value)| *addr == 0x0000_3e8a && *value == 0x0047_0094)
-        );
         assert!(snapshot.lcd.pixels.iter().any(|pixel| *pixel));
         Ok(())
     }

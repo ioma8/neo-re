@@ -35,7 +35,7 @@ pub(crate) struct EmuMemory {
     mmio_accesses: Vec<String>,
     mmio_logging: bool,
     timebase_counter: u32,
-    timer_counter: u16,
+    timer_counter: u32,
     applet_storage_end: Option<u32>,
     f411_row_select_enabled: bool,
 }
@@ -57,12 +57,8 @@ impl EmuMemory {
                 write_be32(&mut bytes, 0x0000_0e0a, 0x0041_0000 + system_package as u32);
             }
             load_stock_applets(&mut bytes);
-            write_bytes(&mut bytes, 0x0000_0400, b"I am not corrupted!\0");
-            write_be16(&mut bytes, 0x0000_35f4, 0x2675);
-            write_be32(&mut bytes, 0x0000_35e2, 1);
-            write_be16(&mut bytes, 0x0000_35e6, 0xa000);
-            write_be32(&mut bytes, 0x0000_35ec, 1);
-            write_be16(&mut bytes, 0x0000_35f8, 0x2675);
+            // Persistent storage is intentionally left blank here; the full
+            // System firmware should own repair/format initialization.
             write_be32(&mut bytes, 0x0000_7dd8, 0x0000_0830);
         } else {
             if ROM_BASE.saturating_add(firmware.image().len()) > MEMORY_SIZE {
@@ -115,6 +111,10 @@ impl EmuMemory {
         self.keyboard.hold_keys_all_rows(keys, reads);
     }
 
+    pub(crate) fn hold_boot_keys_exact_rows(&mut self, keys: &[MatrixKey], reads: usize) {
+        self.keyboard.hold_keys_exact_rows(keys, reads);
+    }
+
     pub(crate) fn drain_mmio_accesses(&mut self) -> Vec<String> {
         std::mem::take(&mut self.mmio_accesses)
     }
@@ -134,14 +134,14 @@ impl EmuMemory {
         const TIMER_QUEUE_RECORD_LEN: usize = 14;
         const TIMER_QUEUE_RECORDS: usize = 5;
 
-        self.timer_counter = self.timer_counter.wrapping_add(1);
+        self.advance_timer_counter(1);
         for index in 0..TIMER_QUEUE_RECORDS {
             let record = TIMER_QUEUE_BASE + index * TIMER_QUEUE_RECORD_LEN;
             if self.bytes.get(record).copied() != Some(1) {
                 continue;
             }
             let deadline = u16::from_be_bytes([self.bytes[record + 2], self.bytes[record + 3]]);
-            if !timer_due(self.timer_counter, deadline) {
+            if !timer_due(self.timer_counter as u16, deadline) {
                 continue;
             }
 
@@ -160,13 +160,6 @@ impl EmuMemory {
                     "deferred timer {index} completed byte 0x{completion_ptr:08x}=0xff"
                 ));
             }
-        }
-    }
-
-    pub(crate) fn service_persistent_storage(&mut self) {
-        if self.peek_word(0x0000_0e94) == Some(0xa000) && self.peek_long(0x0000_0fda) == Some(0) {
-            seed_alpha_word_workspace(&mut self.bytes);
-            self.record_mmio("seeded AlphaWord default workspace table".to_string());
         }
     }
 
@@ -228,8 +221,8 @@ impl EmuMemory {
                 return 0;
             }
             0xf608 => {
-                self.timer_counter = self.timer_counter.wrapping_add(1);
-                return self.timer_counter;
+                self.advance_timer_counter(1);
+                return self.timer_counter as u16;
             }
             _ => {}
         }
@@ -266,6 +259,20 @@ impl EmuMemory {
         let hour = (seconds / 3600) % 24;
         (hour << 24) | (minute << 16) | second
     }
+
+    fn advance_timer_counter(&mut self, ticks: u32) {
+        let previous = self.timer_counter as u16;
+        self.timer_counter = self.timer_counter.wrapping_add(ticks);
+        let current = self.timer_counter as u16;
+        if current < previous {
+            const TIMER_HIGH_BASE: usize = 0x0000_5d94;
+            let base = read_be32(&self.bytes, TIMER_HIGH_BASE)
+                .unwrap_or(0)
+                .wrapping_add(0x0001_0000);
+            write_be32(&mut self.bytes, TIMER_HIGH_BASE, base);
+            self.record_mmio(format!("timer overflow high base -> 0x{base:08x}"));
+        }
+    }
 }
 
 fn timer_due(now: u16, deadline: u16) -> bool {
@@ -285,13 +292,13 @@ fn write_be32(bytes: &mut [u8], addr: usize, value: u32) {
     bytes[addr..addr + 4].copy_from_slice(&value);
 }
 
-fn write_be16(bytes: &mut [u8], addr: usize, value: u16) {
-    let value = value.to_be_bytes();
-    bytes[addr..addr + 2].copy_from_slice(&value);
-}
-
-fn write_bytes(bytes: &mut [u8], addr: usize, value: &[u8]) {
-    bytes[addr..addr + value.len()].copy_from_slice(value);
+fn read_be32(bytes: &[u8], addr: usize) -> Option<u32> {
+    Some(u32::from_be_bytes([
+        *bytes.get(addr)?,
+        *bytes.get(addr + 1)?,
+        *bytes.get(addr + 2)?,
+        *bytes.get(addr + 3)?,
+    ]))
 }
 
 fn load_stock_applets(bytes: &mut [u8]) {
@@ -328,30 +335,6 @@ fn load_stock_applets(bytes: &mut [u8]) {
     if cursor > applet_start {
         write_be32(bytes, 0x0000_0e8a, applet_start as u32);
         write_be32(bytes, 0x0000_0e8e, cursor as u32);
-    }
-}
-
-fn seed_alpha_word_workspace(bytes: &mut [u8]) {
-    const APP_FILE_TABLE: usize = 0x0000_0fd2;
-    const ALPHAWORD_APP_SLOT: usize = 1;
-    const ALPHAWORD_FILE_RECORDS: usize = 0x0006_0000;
-    const FILE_RECORD_LEN: usize = 0x48;
-    const FILE_NAME_OFFSET: usize = 0x34;
-    const FILE_SELECTOR_OFFSET: usize = 0x44;
-    const FILE_COUNT: usize = 8;
-
-    let table = APP_FILE_TABLE + ALPHAWORD_APP_SLOT * 8;
-    write_be32(bytes, table, ALPHAWORD_FILE_RECORDS as u32);
-    bytes[table + 4] = FILE_COUNT as u8;
-    bytes[table + 5] = 0;
-    write_be16(bytes, table + 6, 0);
-
-    for index in 0..FILE_COUNT {
-        let record = ALPHAWORD_FILE_RECORDS + index * FILE_RECORD_LEN;
-        let name = format!("File {}", index + 1);
-        write_bytes(bytes, record + FILE_NAME_OFFSET, name.as_bytes());
-        bytes[record + FILE_NAME_OFFSET + name.len()] = 0;
-        write_be16(bytes, record + FILE_SELECTOR_OFFSET, index as u16);
     }
 }
 
@@ -439,6 +422,7 @@ fn is_mmio(addr: u32) -> bool {
 fn is_watched_ram(addr: u32) -> bool {
     addr == 0x0000_0414
         || (0x0000_0e00..=0x0000_0eff).contains(&addr)
+        || (0x0000_0f00..=0x0000_1120).contains(&addr)
         || (0x0000_3550..=0x0000_357f).contains(&addr)
         || (0x0000_35e0..=0x0000_35ff).contains(&addr)
         || (0x0000_3e80..=0x0000_3e9f).contains(&addr)

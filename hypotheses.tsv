@@ -187,3 +187,14 @@ m68000 branch-heavy synthetic workload can easily exceed the 33 MHz target	prove
 m68000 RAM read-write synthetic workload can easily exceed the 33 MHz target	proven
 Normal alpha-emu headless speed measurement was dominated by disassembler_interpreter_exception rather than fast interpreter execution	proven
 Normal alpha-emu fast interpreter path can reach 33 MHz on the full OS boot workload	proven
+AlphaWord editor accepts normal keyboard text after the emulated File 1 workspace opens	proven
+AlphaWord text entry fails because an emulated OS memmove receives a null pointer from incomplete file/workspace state	disproven
+Bypassing the full OS catalog validator at 0x0043c832 lets the emulator reach AlphaWord startup instead of the memmove diagnostic	disproven
+Full OS AlphaWord startup memmove failure is caused by stale 0x00ffxxxx fields in synthetic low file descriptors	needs further investigation
+Full OS AlphaWord startup memmove failure is caused by seeding the AlphaWord app-file table before firmware low-descriptor compaction finishes	proven
+Full System repair prompt formats the virtual filesystem after Y+Enter and writes AlphaWord file table state	proven
+Firmware STOP at 0x00426752 is a restart request that must reboot with RAM preserved	disproven
+Mapping os3kneorom.os3kos as declared load segments fixes the AlphaWord full OS boot path	disproven
+Firmware STOP at 0x00426752 is a wait-for-interrupt primitive, not a reset request	proven
+AlphaWord repeated splash after format is caused by treating firmware STOP as reset	proven
+AlphaWord text injection through all matrix rows produces wrong characters in full OS editor	proven

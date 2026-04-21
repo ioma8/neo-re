@@ -43,17 +43,80 @@ The two full-OS entry stubs have different behavior:
 
 Current full-OS boot status:
 
-- The data-change prompt is avoided by seeding the RAM marker at `0x00000400`
-  with `I am not corrupted!`.
+- The data-change prompt is no longer bypassed. On a blank virtual persistent
+  store, the firmware shows:
+  `An unexpected data change occurred. Did you recently remove or replace the AlphaSmart's lithium backup battery?`
+  Answering `Y` and pressing Enter lets the System firmware run its own repair
+  and format path.
 - The TimeModule divide fault is avoided by seeding `0x00007dd8 = 0x00000830`
   and returning the timer-ready bit from `0xf449`.
 - The stock applet package chain is loaded from
   `analysis/device-dumps/applets/A*.os3kapp`, excluding font-only `AF*`
   packages, at `0x00470000`.
-- The normal boot path can enter AlphaWord by seeding current slot state
-  `0x35e2 = 1`, `0x35e6 = 0xa000`, and `0x35ec = 1`; the firmware then uses
-  its own rebuilt table entry and callback pointer rather than a synthetic
-  direct callback.
+- The normal boot path now reaches AlphaWord without synthetic AlphaWord file
+  records. The System firmware formats the virtual file workspace and writes the
+  AlphaWord state itself.
+
+## AlphaWord Virtual Filesystem Format
+
+Earlier emulator builds seeded AlphaWord-visible file records directly, including
+the applet file table around `0x00000fd2` and synthetic file records at
+`0x00060000`. That was the wrong layer. It overlapped low System file-descriptor
+state and could trip the firmware memmove/file-size diagnostics before
+AlphaWord opened `File 1`.
+
+The validated path is:
+
+1. Leave the emulated persistent store blank on full OS boot.
+2. Let the System firmware detect the data-change condition.
+3. Answer the firmware prompt with `Y`, then Enter.
+4. Let the firmware repair/format routine initialize the virtual filesystem.
+5. Continue normal boot. AlphaWord opens `Opening "File 1"...`, then reaches the
+   blank editor.
+
+Observed firmware-written state after the repair/format path:
+
+| Address | Observed value | Meaning |
+| --- | --- | --- |
+| `0x00000400` | `0x4920616d` | Start of restored `I am...` integrity marker. |
+| `0x00000e94` | `0xa000a001` | Runtime applet ID table includes AlphaWord and following applet IDs. |
+| `0x00000fda` | `0x00001822` | AlphaWord file/workspace table pointer/state written by firmware. |
+| `0x00000fde` | `0x08000001` or `0x08ff0000` during transition | AlphaWord slot/file count and current-state bytes. |
+| `0x000035e2` | `0x00000001` | Current applet slot state. |
+| `0x000035e6` | `0xa0000000` | Current applet id includes AlphaWord `0xa000`. |
+| `0x000035ec` | `0x00000001` | Current file/slot selector state. |
+
+The emulator must not synthesize AlphaWord file records in `EmuMemory`. The full
+System firmware owns this format path, and the emulator only needs to provide
+enough RAM, applet storage, timers, keyboard, and LCD behavior for it to run.
+
+Two hardware details were required for this to work:
+
+- `0xf608` is a 16-bit timer source, but firmware combines it with a high-word
+  base at `0x00005d94`. The emulator advances `0xf608` and increments
+  `0x00005d94` on 16-bit wrap so firmware delay arithmetic remains monotonic.
+- Firmware `STOP` at `0x00426752` resumes at `0x00426756` after an interrupt.
+  Treat it as a wakeable low-power wait, not as a reset. Resetting there caused
+  repeated splash-screen cycles after the filesystem was already formatted.
+
+Validated headless flow:
+
+```sh
+cargo run -q --manifest-path alpha-emu/Cargo.toml -- \
+  --headless \
+  --steps=1700000000 \
+  --type-at=9000000:Y \
+  --key-at=18000000:enter \
+  --type-at=1400000000:hello \
+  --lcd-pbm=/tmp/exact-type-lower-1_7b.pbm \
+  --lcd-ascii \
+  analysis/cab/os3kneorom.os3kos
+```
+
+The resulting LCD shows `hello` in the AlphaWord editor. Headless text injection
+must use exact-row key taps; all-row text taps are useful for early boot probes
+but can be decoded as the wrong character once the full OS matrix scanner is
+running.
 
 ## Line-A Trap Vectoring
 
