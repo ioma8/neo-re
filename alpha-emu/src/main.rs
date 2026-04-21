@@ -89,7 +89,7 @@ fn main() -> Result<()> {
             FirmwareSession::boot_small_rom(firmware)?
         };
         if let Some(step) = scan_special_keys_at {
-            run_until_step(&mut session, step);
+            run_until_step(&mut session, step, true);
             scan_special_keys(&session);
             return Ok(());
         }
@@ -107,6 +107,7 @@ fn main() -> Result<()> {
                 pc: stop_at_pc,
                 resource: stop_at_resource,
             },
+            verbose,
         );
         let elapsed = started_at.elapsed();
         let snapshot = session.snapshot();
@@ -237,6 +238,7 @@ fn run_headless_steps(
     total_steps: usize,
     events: HeadlessEvents<'_>,
     stop: HeadlessStop,
+    keep_trace: bool,
 ) -> Option<bool> {
     let HeadlessEvents {
         type_events,
@@ -284,33 +286,33 @@ fn run_headless_steps(
             && next_text_step <= next_hold_step
         {
             let (step, text) = &type_events[text_index];
-            run_until_step(session, *step);
+            run_until_step(session, *step, keep_trace);
             for value in text.chars() {
                 session.tap_char_all_rows(value);
-                session.run_steps(2_000);
+                run_short_settle(session, keep_trace);
             }
             text_index += 1;
         } else if next_key_step <= next_all_row_key_step && next_key_step <= next_hold_step {
             let (step, code) = key_events[key_index];
-            run_until_step(session, step);
+            run_until_step(session, step, keep_trace);
             session.tap_matrix_code_long(code);
-            session.run_steps(2_000);
+            run_short_settle(session, keep_trace);
             key_index += 1;
         } else if next_all_row_key_step <= next_hold_step {
             let (step, code) = all_row_key_events[all_row_key_index];
-            run_until_step(session, step);
+            run_until_step(session, step, keep_trace);
             session.tap_matrix_code_all_rows(code);
-            session.run_steps(2_000);
+            run_short_settle(session, keep_trace);
             all_row_key_index += 1;
         } else {
             let (step, pressed, code) = expanded_hold_events[hold_index];
-            run_until_step(session, step);
+            run_until_step(session, step, keep_trace);
             if pressed {
                 session.press_matrix_code(code);
             } else {
                 session.release_matrix_code(code);
             }
-            session.run_steps(2_000);
+            run_short_settle(session, keep_trace);
             hold_index += 1;
         }
     }
@@ -324,15 +326,31 @@ fn run_headless_steps(
                 session.run_until_resource_or_steps(resource_id, total_steps - current_steps),
             );
         }
-        session.run_steps(total_steps - current_steps);
+        if keep_trace {
+            session.run_steps(total_steps - current_steps);
+        } else {
+            session.run_realtime_steps(total_steps - current_steps);
+        }
     }
     (stop.pc.is_some() || stop.resource.is_some()).then_some(false)
 }
 
-fn run_until_step(session: &mut FirmwareSession, step: usize) {
+fn run_until_step(session: &mut FirmwareSession, step: usize, keep_trace: bool) {
     let current_steps = session.snapshot().steps;
     if current_steps < step {
-        session.run_steps(step - current_steps);
+        if keep_trace {
+            session.run_steps(step - current_steps);
+        } else {
+            session.run_realtime_steps(step - current_steps);
+        }
+    }
+}
+
+fn run_short_settle(session: &mut FirmwareSession, keep_trace: bool) {
+    if keep_trace {
+        session.run_steps(2_000);
+    } else {
+        session.run_realtime_steps(2_000);
     }
 }
 

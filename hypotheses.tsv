@@ -174,8 +174,16 @@ AlphaWord needs A0E8 callback functions executed, not only completion byte write
 AlphaWord blank screen after timer completion is caused by missing file/workspace state after leaving the opening wait	proven
 Blank LCD after AlphaWord opening is the normal empty editor state	disproven
 AlphaWord empty filename is caused by an unformatted emulated file/workspace store with no AlphaWord file table at 0x0fd2 + slot*8	proven
-alpha-emu debug build can sustain the 33 MHz target clock in headless execution	disproven
-alpha-emu release build can sustain the 33 MHz target clock in headless execution	disproven
+alpha-emu debug build can sustain the 33 MHz target clock in headless execution	proven
+alpha-emu release build can sustain the 33 MHz target clock in headless execution	proven
 alpha-emu GUI perceived slowness is caused by runtime throughput or step cap falling below the 33 MHz cycle budget	proven
 alpha-emu optimized dev profile restores normal cargo run throughput near release speed	proven
-alpha-emu currently achieves about 24 to 25 MHz on this host for the full OS headless boot loop, below the 33 MHz NEO target	proven
+alpha-emu currently achieves about 24 to 25 MHz on this host for the full OS headless boot loop, below the 33 MHz NEO target	not relevant
+Replacing per-instruction modulo service check with next-service-step gate materially improves alpha-emu throughput	disproven
+release target-cpu=native codegen is enough to reach 33 MHz on this host	disproven
+m68000 with built-in slice memory can easily exceed the 33 MHz target on a simple NOP workload	proven
+m68000 with a minimal custom MemoryAccess can easily exceed the 33 MHz target on a simple NOP workload	proven
+m68000 branch-heavy synthetic workload can easily exceed the 33 MHz target	proven
+m68000 RAM read-write synthetic workload can easily exceed the 33 MHz target	proven
+Normal alpha-emu headless speed measurement was dominated by disassembler_interpreter_exception rather than fast interpreter execution	proven
+Normal alpha-emu fast interpreter path can reach 33 MHz on the full OS boot workload	proven

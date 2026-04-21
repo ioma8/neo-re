@@ -2,6 +2,7 @@
 name = "alpha-emu"
 version = "0.1.0"
 edition = "2024"
+default-run = "alpha-emu"
 
 [dependencies]
 anyhow = "1.0.102"

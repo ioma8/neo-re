@@ -33,7 +33,9 @@ Headless full System 3 firmware boot:
 cargo run -- --headless --steps=200000 ../analysis/cab/os3kneorom.os3kos
 ```
 
-Add `--verbose` to include recent MMIO and instruction trace lines.
+Normal headless execution uses the fast interpreter path. Add `--verbose` to
+include recent MMIO and instruction trace lines; verbose and `--stop-at-*`
+diagnostic modes intentionally use the slower disassembler/trace path.
 Use `--lcd-pbm=/tmp/neo.pbm` or `--lcd-ascii` to inspect the headless LCD.
 Scripted keyboard input is available with `--type-at=STEP:TEXT` and
 `--key-at=STEP:enter|up|down|left|right|esc|tab|backspace`.
@@ -54,9 +56,9 @@ while the interpreter advances by elapsed emulated CPU cycles.
 The GUI samples and logs actual emulator throughput once per second. Run with
 `RUST_LOG=alpha_emu=info cargo run -- ../analysis/cab/os3kneorom.os3kos` to see
 `target_hz` and `achieved_hz` in the terminal. On the current development
-machine, optimized `cargo run` measured about 24 MHz on the full System 3 boot
-loop, below the real 33 MHz target. The crate therefore uses an optimized dev
-profile; `cargo run --release` is still the best command for speed checks.
+machine, normal optimized `cargo run` measured about 373 MHz on the full System
+3 boot workload, well above the real 33 MHz target. The crate still uses an
+optimized dev profile so plain `cargo run` stays useful for emulator work.
 
 For faster hardware probing without the UI:
 
@@ -70,6 +72,16 @@ Headless output includes `cycles`, `elapsed_ms`, `achieved_hz`, and
 ```sh
 cargo run --release -- --headless --steps=2000000 ../analysis/cab/os3kneorom.os3kos
 ```
+
+CPU backend microbenchmarks are available with:
+
+```sh
+cargo run --release --bin cpu_bench
+```
+
+These compare the current `m68000` crate against built-in slice memory and a
+minimal custom `MemoryAccess`; both exceed 33 MHz by a wide margin on simple
+NOP, branch, and RAM read/write workloads.
 
 Normal boot/open does not hold any synthetic keys. The GUI includes a separate
 `Reboot Small ROM with activating key chord` button for the special updater
