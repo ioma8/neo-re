@@ -253,16 +253,6 @@ impl AlphaEmuApp {
             handled |= self.modifier_state.sync(session, input.modifiers);
             for event in &input.events {
                 match event {
-                    egui::Event::Text(text)
-                        if !input.modifiers.ctrl && !input.modifiers.mac_cmd =>
-                    {
-                        for character in text.chars() {
-                            if let Some(tap) = tap_for_text_char(character) {
-                                tap.apply_as_text(session, input.modifiers.shift);
-                                handled = true;
-                            }
-                        }
-                    }
                     egui::Event::Key {
                         key,
                         pressed,
@@ -272,7 +262,7 @@ impl AlphaEmuApp {
                     } => {
                         handled |= self.modifier_state.sync(session, *modifiers);
                         if let Some(code) = matrix_code_for_key(*key) {
-                            if *pressed && should_tap_physical_key(*key, *modifiers) {
+                            if *pressed {
                                 session.tap_matrix_code(code);
                                 handled = true;
                             }
@@ -286,56 +276,6 @@ impl AlphaEmuApp {
             session.run_realtime_steps(2_000);
         }
     }
-}
-
-fn should_tap_physical_key(key: egui::Key, modifiers: egui::Modifiers) -> bool {
-    if modifiers.command || modifiers.ctrl || modifiers.alt {
-        return true;
-    }
-    !is_text_key(key)
-}
-
-fn is_text_key(key: egui::Key) -> bool {
-    matches!(
-        key,
-        egui::Key::A
-            | egui::Key::B
-            | egui::Key::C
-            | egui::Key::D
-            | egui::Key::E
-            | egui::Key::F
-            | egui::Key::G
-            | egui::Key::H
-            | egui::Key::I
-            | egui::Key::J
-            | egui::Key::K
-            | egui::Key::L
-            | egui::Key::M
-            | egui::Key::N
-            | egui::Key::O
-            | egui::Key::P
-            | egui::Key::Q
-            | egui::Key::R
-            | egui::Key::S
-            | egui::Key::T
-            | egui::Key::U
-            | egui::Key::V
-            | egui::Key::W
-            | egui::Key::X
-            | egui::Key::Y
-            | egui::Key::Z
-            | egui::Key::Num0
-            | egui::Key::Num1
-            | egui::Key::Num2
-            | egui::Key::Num3
-            | egui::Key::Num4
-            | egui::Key::Num5
-            | egui::Key::Num6
-            | egui::Key::Num7
-            | egui::Key::Num8
-            | egui::Key::Num9
-            | egui::Key::Space
-    )
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -378,69 +318,6 @@ fn sync_matrix_key(session: &mut FirmwareSession, old: bool, new: bool, code: u8
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct TextTap {
-    character: char,
-    needs_shift: bool,
-}
-
-impl TextTap {
-    fn apply_as_text(self, session: &mut FirmwareSession, shift_already_held: bool) {
-        if self.needs_shift && !shift_already_held {
-            session.press_matrix_code(SHIFT_CODE);
-        }
-        session.tap_char(self.character);
-        if self.needs_shift && !shift_already_held {
-            session.release_matrix_code(SHIFT_CODE);
-        }
-    }
-}
-
-fn tap_for_text_char(character: char) -> Option<TextTap> {
-    let (character, needs_shift) = match character {
-        'A'..='Z' => (character.to_ascii_lowercase(), true),
-        'a'..='z'
-        | '0'..='9'
-        | '-'
-        | '='
-        | '['
-        | ']'
-        | '\\'
-        | ';'
-        | '\''
-        | '`'
-        | ','
-        | '.'
-        | '/' => (character, false),
-        '!' => ('1', true),
-        '@' => ('2', true),
-        '#' => ('3', true),
-        '$' => ('4', true),
-        '%' => ('5', true),
-        '^' => ('6', true),
-        '&' => ('7', true),
-        '*' => ('8', true),
-        '(' => ('9', true),
-        ')' => ('0', true),
-        '_' => ('-', true),
-        '+' => ('=', true),
-        '{' => ('[', true),
-        '}' => (']', true),
-        '|' => ('\\', true),
-        ':' => (';', true),
-        '"' => ('\'', true),
-        '~' => ('`', true),
-        '<' => (',', true),
-        '>' => ('.', true),
-        '?' => ('/', true),
-        _ => return None,
-    };
-    Some(TextTap {
-        character,
-        needs_shift,
-    })
-}
-
 fn matrix_code_for_key(key: egui::Key) -> Option<u8> {
     match key {
         egui::Key::A => matrix_key_for_char('a').map(|key| key.code()),
@@ -479,6 +356,24 @@ fn matrix_code_for_key(key: egui::Key) -> Option<u8> {
         egui::Key::Num7 => matrix_key_for_char('7').map(|key| key.code()),
         egui::Key::Num8 => matrix_key_for_char('8').map(|key| key.code()),
         egui::Key::Num9 => matrix_key_for_char('9').map(|key| key.code()),
+        egui::Key::Exclamationmark => matrix_key_for_char('1').map(|key| key.code()),
+        egui::Key::OpenBracket | egui::Key::OpenCurlyBracket => {
+            matrix_key_for_char('[').map(|key| key.code())
+        }
+        egui::Key::CloseBracket | egui::Key::CloseCurlyBracket => {
+            matrix_key_for_char(']').map(|key| key.code())
+        }
+        egui::Key::Backslash | egui::Key::Pipe => matrix_key_for_char('\\').map(|key| key.code()),
+        egui::Key::Semicolon | egui::Key::Colon => matrix_key_for_char(';').map(|key| key.code()),
+        egui::Key::Quote => matrix_key_for_char('\'').map(|key| key.code()),
+        egui::Key::Backtick => matrix_key_for_char('`').map(|key| key.code()),
+        egui::Key::Comma => matrix_key_for_char(',').map(|key| key.code()),
+        egui::Key::Period => matrix_key_for_char('.').map(|key| key.code()),
+        egui::Key::Slash | egui::Key::Questionmark => {
+            matrix_key_for_char('/').map(|key| key.code())
+        }
+        egui::Key::Minus => matrix_key_for_char('-').map(|key| key.code()),
+        egui::Key::Equals | egui::Key::Plus => matrix_key_for_char('=').map(|key| key.code()),
         egui::Key::Backspace => Some(0x09),
         egui::Key::Delete => Some(0x61),
         egui::Key::Enter => Some(0x69),
@@ -833,58 +728,10 @@ fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, matrix_code_for_key,
-        should_tap_physical_key, tap_for_text_char,
-    };
+    use super::{NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, matrix_code_for_key};
     use eframe::egui;
 
     use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
-
-    #[test]
-    fn printable_text_keys_are_covered() {
-        for character in "abcdefghijklmnopqrstuvwxyz0123456789-=[]\\;'`,./".chars() {
-            let tap = tap_for_text_char(character);
-            assert_eq!(
-                tap.map(|tap| (tap.character, tap.needs_shift)),
-                Some((character, false)),
-                "missing unshifted character {character:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn shifted_text_keys_are_covered() {
-        let expected = [
-            ('A', 'a'),
-            ('Z', 'z'),
-            ('!', '1'),
-            ('@', '2'),
-            ('#', '3'),
-            ('$', '4'),
-            ('%', '5'),
-            ('^', '6'),
-            ('&', '7'),
-            ('*', '8'),
-            ('(', '9'),
-            (')', '0'),
-            ('_', '-'),
-            ('+', '='),
-            ('{', '['),
-            ('}', ']'),
-            ('|', '\\'),
-            (':', ';'),
-            ('"', '\''),
-            ('~', '`'),
-            ('<', ','),
-            ('>', '.'),
-            ('?', '/'),
-        ];
-        for (input, base) in expected {
-            let tap = tap_for_text_char(input).expect("shifted key must be covered");
-            assert_eq!((tap.character, tap.needs_shift), (base, true));
-        }
-    }
 
     #[test]
     fn whitespace_and_editing_keys_are_covered_as_physical_keys() {
@@ -947,29 +794,23 @@ mod tests {
     }
 
     #[test]
-    fn normal_text_keys_are_not_tapped_twice_as_physical_keys() {
-        assert!(!should_tap_physical_key(
-            egui::Key::A,
-            egui::Modifiers::default()
-        ));
-        assert!(!should_tap_physical_key(
-            egui::Key::Space,
-            egui::Modifiers::default()
-        ));
-    }
-
-    #[test]
-    fn shortcuts_and_non_text_keys_still_use_physical_taps() {
-        let command = egui::Modifiers {
-            command: true,
-            mac_cmd: true,
-            ..Default::default()
-        };
-        assert!(should_tap_physical_key(egui::Key::A, command));
-        assert!(should_tap_physical_key(
-            egui::Key::Enter,
-            egui::Modifiers::default()
-        ));
+    fn punctuation_and_calculator_operator_keys_are_physical_keys() {
+        let expected = [
+            (egui::Key::Minus, 0x43),
+            (egui::Key::Equals, 0x40),
+            (egui::Key::Plus, 0x40),
+            (egui::Key::Slash, 0x73),
+            (egui::Key::Questionmark, 0x73),
+            (egui::Key::Period, 0x62),
+            (egui::Key::Comma, 0x60),
+            (egui::Key::Semicolon, 0x23),
+            (egui::Key::Colon, 0x23),
+            (egui::Key::Backslash, 0x29),
+            (egui::Key::Pipe, 0x29),
+        ];
+        for (key, code) in expected {
+            assert_eq!(matrix_code_for_key(key), Some(code));
+        }
     }
 
     #[test]
