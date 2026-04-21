@@ -101,6 +101,24 @@ impl FirmwareSession {
         }
     }
 
+    pub fn run_realtime_steps(&mut self, max_steps: usize) {
+        let previous_logging = self.memory.set_mmio_logging(false);
+        for _ in 0..max_steps {
+            if self.cpu.stop || self.last_exception.is_some() {
+                break;
+            }
+
+            let pc = self.cpu.regs.pc.0;
+            let (_, exception) = self.cpu.interpreter_exception(&mut self.memory);
+            self.steps = self.steps.saturating_add(1);
+            if let Some(vector) = exception {
+                self.last_exception = Some(format_exception(vector, pc));
+                break;
+            }
+        }
+        self.memory.set_mmio_logging(previous_logging);
+    }
+
     #[must_use]
     pub fn is_running(&self) -> bool {
         !self.cpu.stop && self.last_exception.is_none()
@@ -212,6 +230,19 @@ mod tests {
                 .iter()
                 .any(|access| access.contains("0x0000f000") || access.contains("0xfffff000"))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn realtime_runner_advances_without_trace_growth() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = FirmwareSession::boot_small_rom_default()?;
+        let initial_trace_len = session.snapshot().trace.len();
+        session.run_realtime_steps(200);
+        let snapshot = session.snapshot();
+
+        assert_eq!(snapshot.steps, 200);
+        assert_eq!(snapshot.trace.len(), initial_trace_len);
+        assert!(snapshot.last_exception.is_none());
         Ok(())
     }
 

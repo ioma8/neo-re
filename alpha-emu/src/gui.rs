@@ -13,7 +13,7 @@ const SHIFT_CODE: u8 = 0x0e;
 const COMMAND_CODE: u8 = 0x14;
 const OPTION_CODE: u8 = 0x41;
 const CTRL_CODE: u8 = 0x7c;
-const REALTIME_STEPS_PER_FRAME: usize = 50_000;
+const REALTIME_STEPS_PER_FRAME: usize = 8_000;
 const REALTIME_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 
 /// Runs the desktop Small ROM emulator UI.
@@ -135,7 +135,7 @@ impl eframe::App for AlphaEmuApp {
         if let Some(session) = self.session.as_mut()
             && session.is_running()
         {
-            session.run_steps(REALTIME_STEPS_PER_FRAME);
+            session.run_realtime_steps(REALTIME_STEPS_PER_FRAME);
             ctx.request_repaint_after(REALTIME_FRAME_INTERVAL);
         }
     }
@@ -188,7 +188,7 @@ impl AlphaEmuApp {
             }
         });
         if handled {
-            session.run_steps(10_000);
+            session.run_realtime_steps(2_000);
         }
     }
 }
@@ -463,8 +463,8 @@ fn render_controls(ui: &mut egui::Ui, session: &mut FirmwareSession) {
             if secondary_button(ui, "Step 5,000").clicked() {
                 session.run_steps(5_000);
             }
-            if secondary_button(ui, "Step 250,000").clicked() {
-                session.run_steps(250_000);
+            if secondary_button(ui, "Run 250,000 fast").clicked() {
+                session.run_realtime_steps(250_000);
             }
         });
         ui.add_space(14.0);
@@ -513,7 +513,7 @@ fn render_special_matrix_buttons(ui: &mut egui::Ui, session: &mut FirmwareSessio
         ui.add_space(6.0);
     }
     if any_pressed {
-        session.run_steps(10_000);
+        session.run_realtime_steps(2_000);
     }
 }
 

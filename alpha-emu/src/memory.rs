@@ -29,6 +29,7 @@ pub(crate) struct EmuMemory {
     keyboard: Keyboard,
     mmio_bytes: BTreeMap<u32, u8>,
     mmio_accesses: Vec<String>,
+    mmio_logging: bool,
 }
 
 impl EmuMemory {
@@ -47,6 +48,7 @@ impl EmuMemory {
             keyboard: Keyboard::default(),
             mmio_bytes: BTreeMap::new(),
             mmio_accesses: Vec::new(),
+            mmio_logging: true,
         })
     }
 
@@ -74,7 +76,16 @@ impl EmuMemory {
         self.lcd.snapshot()
     }
 
+    pub(crate) fn set_mmio_logging(&mut self, enabled: bool) -> bool {
+        let previous = self.mmio_logging;
+        self.mmio_logging = enabled;
+        previous
+    }
+
     fn record_mmio(&mut self, access: impl Into<String>) {
+        if !self.mmio_logging {
+            return;
+        }
         self.mmio_accesses.push(access.into());
         if self.mmio_accesses.len() > 4096 {
             self.mmio_accesses.remove(0);
