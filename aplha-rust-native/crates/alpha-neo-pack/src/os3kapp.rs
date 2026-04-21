@@ -60,10 +60,8 @@ pub fn build_image(manifest: &AppletManifest, entry_code: &[u8]) -> Result<Vec<u
     payload.extend_from_slice(&2_u32.to_be_bytes());
     payload.extend_from_slice(entry_code);
 
-    let info_table = manifest
-        .alphaword_write_metadata
-        .then(build_alphaword_write_info_table);
-    let info_table_len = info_table.as_ref().map_or(0, Vec::len);
+    let info_table = build_info_table(manifest.alphaword_write_metadata);
+    let info_table_len = info_table.len();
     let file_size = HEADER_SIZE + payload.len() + info_table_len;
     let file_size_u32 =
         u32::try_from(file_size).map_err(|_| Os3kAppError::FileTooLarge(file_size))?;
@@ -87,9 +85,7 @@ pub fn build_image(manifest: &AppletManifest, entry_code: &[u8]) -> Result<Vec<u
     write_be32(&mut image, 0x80, manifest.extra_memory_size);
 
     image.extend_from_slice(&payload);
-    if let Some(info_table) = info_table {
-        image.extend_from_slice(&info_table);
-    }
+    image.extend_from_slice(&info_table);
     Ok(image)
 }
 
@@ -122,6 +118,15 @@ fn build_alphaword_write_info_table() -> Vec<u8> {
     for key in 0x8011..=0x8018 {
         records.extend_from_slice(&build_info_record(0xC001, key, b"write\0"));
     }
+    records
+}
+
+fn build_info_table(alphaword_write_metadata: bool) -> Vec<u8> {
+    let mut records = if alphaword_write_metadata {
+        build_alphaword_write_info_table()
+    } else {
+        Vec::new()
+    };
     records.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0xCA, 0xFE, 0xFE, 0xED]);
     records
 }
@@ -186,7 +191,7 @@ mod tests {
         assert_eq!(&image[0x14..0x18], &[0xA1, 0x31, 0x01, 0x00]);
         assert_eq!(&image[0x3C..0x40], &[0x00, 0x01, 0x00, 0x01]);
         assert_eq!(&image[0x94..0x96], &[0x4E, 0x75]);
-        assert_ne!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);
+        assert_eq!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);
         validate_image(&image)?;
         Ok(())
     }
