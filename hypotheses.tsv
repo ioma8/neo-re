@@ -207,3 +207,8 @@ GUI shortcut handling can miss command because it syncs only frame-final modifie
 LCD selection highlighting is invisible because reverse-display command 0xa7 was ignored	needs further investigation
 Alpha-emu GUI is cluttered because status, boot controls, realtime controls, and raw key rows are rendered as separate large cards	proven
 Alpha-emu GUI black right and bottom areas are caused by the root egui frame not claiming the full native viewport plus eframe's dark default clear color	proven
+Alpha-emu GUI functional buttons react with multi-second delay because they enqueue 50,000-read long taps intended for headless probes	proven
+Alpha-emu LCD crop is too tight because the visible viewport is limited to 256 columns; 264 columns is the corrected crop	proven
+Alpha-emu LCD pixels need a small GUI-only inset so glyphs do not sit against the display border	proven
+Alpha-emu GUI key repeat is too fast because normal text keys are handled both as egui text events and physical held key events	proven
+Alpha-emu GUI Enter can double-fire because physical key events hold keys until release instead of queueing one short tap	proven

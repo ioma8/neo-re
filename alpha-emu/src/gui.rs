@@ -20,7 +20,8 @@ const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(16);
 const MAX_REALTIME_WORK_PER_FRAME: Duration = Duration::from_millis(12);
 const SPEED_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const NEO_VISIBLE_LCD_HEIGHT: usize = 64;
-const NEO_VISIBLE_LCD_WIDTH: usize = 256;
+const NEO_VISIBLE_LCD_WIDTH: usize = 264;
+const LCD_INNER_PADDING: f32 = 4.0;
 
 /// Runs the desktop Small ROM emulator UI.
 ///
@@ -271,12 +272,10 @@ impl AlphaEmuApp {
                     } => {
                         handled |= self.modifier_state.sync(session, *modifiers);
                         if let Some(code) = matrix_code_for_key(*key) {
-                            if *pressed {
-                                session.press_matrix_code(code);
-                            } else {
-                                session.release_matrix_code(code);
+                            if *pressed && should_tap_physical_key(*key, *modifiers) {
+                                session.tap_matrix_code(code);
+                                handled = true;
                             }
-                            handled = true;
                         }
                     }
                     _ => {}
@@ -287,6 +286,56 @@ impl AlphaEmuApp {
             session.run_realtime_steps(2_000);
         }
     }
+}
+
+fn should_tap_physical_key(key: egui::Key, modifiers: egui::Modifiers) -> bool {
+    if modifiers.command || modifiers.ctrl || modifiers.alt {
+        return true;
+    }
+    !is_text_key(key)
+}
+
+fn is_text_key(key: egui::Key) -> bool {
+    matches!(
+        key,
+        egui::Key::A
+            | egui::Key::B
+            | egui::Key::C
+            | egui::Key::D
+            | egui::Key::E
+            | egui::Key::F
+            | egui::Key::G
+            | egui::Key::H
+            | egui::Key::I
+            | egui::Key::J
+            | egui::Key::K
+            | egui::Key::L
+            | egui::Key::M
+            | egui::Key::N
+            | egui::Key::O
+            | egui::Key::P
+            | egui::Key::Q
+            | egui::Key::R
+            | egui::Key::S
+            | egui::Key::T
+            | egui::Key::U
+            | egui::Key::V
+            | egui::Key::W
+            | egui::Key::X
+            | egui::Key::Y
+            | egui::Key::Z
+            | egui::Key::Num0
+            | egui::Key::Num1
+            | egui::Key::Num2
+            | egui::Key::Num3
+            | egui::Key::Num4
+            | egui::Key::Num5
+            | egui::Key::Num6
+            | egui::Key::Num7
+            | egui::Key::Num8
+            | egui::Key::Num9
+            | egui::Key::Space
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -647,7 +696,7 @@ fn render_key_group(
         );
         for (label, raw) in keys {
             if button_for_matrix_key(ui, label, *raw).clicked() {
-                session.tap_matrix_code_long(*raw);
+                session.tap_matrix_code(*raw);
                 *any_pressed = true;
             }
         }
@@ -690,14 +739,15 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
             egui::Stroke::new(1.5, egui::Color32::from_rgb(93, 105, 81)),
             egui::StrokeKind::Inside,
         );
-        let scale_x = rect.width() / visible_width as f32;
-        let scale_y = rect.height() / visible_height as f32;
+        let pixel_rect = rect.shrink(LCD_INNER_PADDING);
+        let scale_x = pixel_rect.width() / visible_width as f32;
+        let scale_y = pixel_rect.height() / visible_height as f32;
         for y in 0..visible_height {
             for x in 0..visible_width {
                 if lcd.pixels[y * lcd.width + x] {
                     let min = egui::pos2(
-                        rect.left() + x as f32 * scale_x,
-                        rect.top() + y as f32 * scale_y,
+                        pixel_rect.left() + x as f32 * scale_x,
+                        pixel_rect.top() + y as f32 * scale_y,
                     );
                     let max = egui::pos2(min.x + scale_x.max(1.0), min.y + scale_y.max(1.0));
                     painter.rect_filled(egui::Rect::from_min_max(min, max), 0.0, pixel);
@@ -784,7 +834,8 @@ fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
 #[cfg(test)]
 mod tests {
     use super::{
-        NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, matrix_code_for_key, tap_for_text_char,
+        NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, matrix_code_for_key,
+        should_tap_physical_key, tap_for_text_char,
     };
     use eframe::egui;
 
@@ -896,6 +947,32 @@ mod tests {
     }
 
     #[test]
+    fn normal_text_keys_are_not_tapped_twice_as_physical_keys() {
+        assert!(!should_tap_physical_key(
+            egui::Key::A,
+            egui::Modifiers::default()
+        ));
+        assert!(!should_tap_physical_key(
+            egui::Key::Space,
+            egui::Modifiers::default()
+        ));
+    }
+
+    #[test]
+    fn shortcuts_and_non_text_keys_still_use_physical_taps() {
+        let command = egui::Modifiers {
+            command: true,
+            mac_cmd: true,
+            ..Default::default()
+        };
+        assert!(should_tap_physical_key(egui::Key::A, command));
+        assert!(should_tap_physical_key(
+            egui::Key::Enter,
+            egui::Modifiers::default()
+        ));
+    }
+
+    #[test]
     fn non_character_matrix_keys_are_gui_button_candidates() {
         let labels = matrix_cells()
             .into_iter()
@@ -930,7 +1007,7 @@ mod tests {
 
     #[test]
     fn gui_uses_square_pixel_viewport_matching_neo_screen_ratio() {
-        assert_eq!(NEO_VISIBLE_LCD_WIDTH, 256);
+        assert_eq!(NEO_VISIBLE_LCD_WIDTH, 264);
         assert_eq!(NEO_VISIBLE_LCD_HEIGHT, 64);
     }
 }
