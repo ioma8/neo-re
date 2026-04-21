@@ -185,7 +185,7 @@ impl AlphaEmuApp {
                     {
                         for character in text.chars() {
                             if let Some(tap) = tap_for_text_char(character) {
-                                tap.apply(session, input.modifiers.shift);
+                                tap.apply_as_text(session, input.modifiers.shift);
                                 handled = true;
                             }
                         }
@@ -262,11 +262,11 @@ struct TextTap {
 }
 
 impl TextTap {
-    fn apply(self, session: &mut FirmwareSession, shift_already_held: bool) {
+    fn apply_as_text(self, session: &mut FirmwareSession, shift_already_held: bool) {
         if self.needs_shift && !shift_already_held {
             session.press_matrix_code(SHIFT_CODE);
         }
-        session.tap_char(self.character);
+        session.tap_char_all_rows(self.character);
         if self.needs_shift && !shift_already_held {
             session.release_matrix_code(SHIFT_CODE);
         }
@@ -670,6 +670,23 @@ mod tests {
         assert_eq!(matrix_code_for_key(egui::Key::ArrowDown), Some(0x15));
         assert_eq!(matrix_code_for_key(egui::Key::ArrowLeft), Some(0x75));
         assert_eq!(matrix_code_for_key(egui::Key::ArrowRight), Some(0x76));
+    }
+
+    #[test]
+    fn alphabet_keys_are_not_handled_as_physical_control_keys() {
+        for key in [
+            egui::Key::A,
+            egui::Key::E,
+            egui::Key::I,
+            egui::Key::K,
+            egui::Key::Q,
+            egui::Key::R,
+            egui::Key::T,
+            egui::Key::W,
+            egui::Key::Z,
+        ] {
+            assert_eq!(matrix_code_for_key(key), None);
+        }
     }
 
     #[test]

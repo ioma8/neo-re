@@ -174,6 +174,12 @@ impl FirmwareSession {
         }
     }
 
+    pub fn tap_char_all_rows(&mut self, value: char) {
+        if let Some(key) = matrix_key_for_char(value) {
+            self.memory.tap_key_all_rows(key);
+        }
+    }
+
     pub fn press_matrix_code(&mut self, code: u8) {
         if let Some(key) = matrix_key_for_code(code) {
             self.memory.press_key(key);

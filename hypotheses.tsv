@@ -131,3 +131,7 @@ Small ROM matrix key bytes encode column bit in the high nibble and row select i
 The 0x004053ee password table alone is sufficient to label the entire physical keyboard matrix	disproven
 The full OS exposes the complete raw matrix map at firmware address 0x0044c37b (encoded=(col<<4)|row) with the exact non-empty logical entries	proven
 The full OS exposes the layout transform table at 0x0044c3fb used for layout-aware key remapping (layout 0..2) and pass-through on layout 3	proven
+alpha-emu letter input fails for Q/W/E/R/T because egui does not emit physical Key events for those letters	disproven
+alpha-emu letter input fails for non-row-zero keys because Small ROM direct key tests select rows via GPIO registers f410/f408/f440, while emulator only tracks f411 row select	needs further investigation
+alpha-emu letter input fails because HID bridge raw key codes differ from local Small ROM scanner raw key codes	disproven
+alpha-emu GUI text letters are unreliable when represented only as row-scoped short taps or physical key events; semantic text events need scanner-safe all-row taps	proven

@@ -316,6 +316,11 @@ impl Keyboard {
         self.push_phase([None, None, None, None], 120, false);
     }
 
+    pub(crate) fn tap_all_rows(&mut self, key: MatrixKey) {
+        self.push_phase([Some(key), None, None, None], 240, true);
+        self.push_phase([None, None, None, None], 120, true);
+    }
+
     pub(crate) fn hold_small_rom_entry_chord(&mut self) {
         self.push_phase(
             [
@@ -504,6 +509,15 @@ mod tests {
             assert_ne!(keyboard.read_matrix_input(), 0xff);
         }
         assert_eq!(keyboard.read_matrix_input(), 0xff);
+    }
+
+    #[test]
+    fn all_row_text_tap_is_visible_independent_of_selected_row() {
+        let mut keyboard = Keyboard::default();
+        keyboard.select_row(0x00);
+        keyboard.tap_all_rows(MatrixKey::new(0x3a));
+
+        assert_eq!(keyboard.read_matrix_input(), 0xf7);
     }
 
     #[test]

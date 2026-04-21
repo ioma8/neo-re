@@ -64,6 +64,10 @@ impl EmuMemory {
         self.keyboard.tap(key);
     }
 
+    pub(crate) fn tap_key_all_rows(&mut self, key: MatrixKey) {
+        self.keyboard.tap_all_rows(key);
+    }
+
     pub(crate) fn hold_small_rom_entry_chord(&mut self) {
         self.keyboard.hold_small_rom_entry_chord();
     }
@@ -105,8 +109,11 @@ impl EmuMemory {
     }
 
     fn write_mmio_byte(&mut self, addr: u32, value: u8) {
-        if normalize_mmio(addr) == 0xf411 {
+        let normalized = normalize_mmio(addr);
+        if normalized == 0xf411 {
             self.keyboard.select_row(value);
+        } else if let Some(row) = gpio_keyboard_row_select(normalized, value) {
+            self.keyboard.select_row(row);
         }
         match addr {
             0x0100_8000 => self.lcd.write_command(0, value),
@@ -201,6 +208,27 @@ fn normalize_mmio(addr: u32) -> u32 {
     }
 }
 
+fn gpio_keyboard_row_select(addr: u32, value: u8) -> Option<u8> {
+    match (addr, value) {
+        (0xf410, 0x80) => Some(0x00),
+        (0xf410, 0x40) => Some(0x01),
+        (0xf410, 0x20) => Some(0x02),
+        (0xf410, 0x10) => Some(0x03),
+        (0xf410, 0x08) => Some(0x04),
+        (0xf410, 0x04) => Some(0x05),
+        (0xf410, 0x02) => Some(0x06),
+        (0xf410, 0x01) => Some(0x07),
+        (0xf408, 0x20) => Some(0x09),
+        (0xf440, 0x80) => Some(0x0a),
+        (0xf440, 0x40) => Some(0x0b),
+        (0xf440, 0x20) => Some(0x0c),
+        (0xf440, 0x10) => Some(0x0d),
+        (0xf440, 0x08) => Some(0x0e),
+        (0xf440, 0x04) => Some(0x0f),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use m68000::MemoryAccess;
@@ -257,6 +285,27 @@ mod tests {
         let mut memory = EmuMemory::load_small_rom(&firmware)?;
 
         assert_eq!(memory.get_byte(0xffff_f419), Some(0xff));
+        Ok(())
+    }
+
+    #[test]
+    fn gpio_row_select_exposes_nonzero_row_letter_keys() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+        let cases = [
+            (0x3c, 0xf440, 0x20, 0xf7), // Q row 0x0c, col 3
+            (0x3b, 0xf440, 0x40, 0xf7), // W row 0x0b, col 3
+            (0x3a, 0xf440, 0x80, 0xf7), // E row 0x0a, col 3
+            (0x3d, 0xf440, 0x10, 0xf7), // R row 0x0d, col 3
+            (0x0d, 0xf440, 0x10, 0xfe), // T row 0x0d, col 0
+        ];
+
+        for (key, row_addr, row_value, expected_input) in cases {
+            memory.press_key(crate::keyboard::MatrixKey::new(key));
+            assert_eq!(memory.set_byte(row_addr, row_value), Some(()));
+            assert_eq!(memory.get_byte(0xffff_f419), Some(expected_input));
+            memory.release_key(crate::keyboard::MatrixKey::new(key));
+        }
         Ok(())
     }
 }
