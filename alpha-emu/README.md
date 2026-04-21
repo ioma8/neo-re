@@ -2,11 +2,11 @@
 
 Small, firmware-first AlphaSmart NEO emulator experiment.
 
-Current scope is deliberately narrow: load the Small ROM image, initialize the
-m68k CPU from its reset vectors, run bounded instruction slices, and log MMIO
-accesses for hardware-mapping research. SmartApplet trap shims and direct
-applet execution were removed from this crate; the next emulator work should
-add hardware devices under the firmware, not reimplement NEO OS calls in Rust.
+Current scope is deliberately narrow: load NEO firmware images, run bounded m68k
+instruction slices, and log MMIO accesses for hardware-mapping research.
+SmartApplet trap shims and direct applet execution were removed from this crate;
+the emulator should add hardware devices under the firmware, not reimplement NEO
+OS calls in Rust.
 
 ## Run
 
@@ -27,13 +27,24 @@ To boot another Small ROM-compatible image:
 cargo +nightly run -- ../analysis/cab/smallos3kneorom.os3kos
 ```
 
+Headless full System 3 firmware boot:
+
+```sh
+cargo +nightly run -- --headless --steps=200000 ../analysis/cab/os3kneorom.os3kos
+```
+
+Add `--verbose` to include recent MMIO and instruction trace lines.
+Use `--lcd-pbm=/tmp/neo.pbm` or `--lcd-ascii` to inspect the headless LCD.
+Scripted keyboard input is available with `--type-at=STEP:TEXT` and
+`--key-at=STEP:enter|up|down|left|right|esc|tab|backspace`.
+Use `--boot-left-shift-tab` with the full System 3 image to emulate holding
+left shift + tab while powering on; this reaches the SmartApplets menu.
+
 The desktop UI shows:
 
-- emulated 320x128 LCD pixels
+- emulated NEO LCD active viewport, cropped to 256x64 square pixels from the 320x128 controller buffer
 - reset-vector boot state
-- current PC/SSP/step/cycle count
-- recent m68k instruction trace
-- MMIO reads/writes observed while the firmware runs
+- current running/stopped state
 
 Realtime GUI execution is cycle-paced against a 33 MHz DragonBall VZ target,
 matching the commonly reported AlphaSmart NEO/NEO2 CPU clock. GUI repaint is
@@ -51,6 +62,16 @@ Normal boot/open does not hold any synthetic keys. The GUI includes a separate
 entry path. That button briefly presents the Small ROM entry key chord to the
 firmware and then releases it. It does not type the `ernie` password; the
 firmware waits for normal keyboard input at the password prompt.
+
+For the full System 3 image, `Boot into SmartApplets list` holds the documented
+left-shift + tab boot chord at reset. Headless validation stops at the
+SmartApplets menu resource with:
+
+```sh
+cargo +nightly run -- --headless --boot-left-shift-tab \
+  --steps=18000000 --stop-at-resource=0x6b \
+  ../analysis/cab/os3kneorom.os3kos
+```
 
 ## Current Hardware Map
 

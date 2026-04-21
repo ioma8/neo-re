@@ -316,22 +316,34 @@ impl Keyboard {
         self.push_phase([None, None, None, None], 120, false);
     }
 
+    pub(crate) fn tap_long(&mut self, key: MatrixKey) {
+        self.push_phase([Some(key), None, None, None], 50_000, false);
+        self.push_phase([None, None, None, None], 5_000, false);
+    }
+
     pub(crate) fn tap_all_rows(&mut self, key: MatrixKey) {
-        self.push_phase([Some(key), None, None, None], 240, true);
-        self.push_phase([None, None, None, None], 120, true);
+        self.push_phase([Some(key), None, None, None], 50_000, true);
+        self.push_phase([None, None, None, None], 5_000, true);
     }
 
     pub(crate) fn hold_small_rom_entry_chord(&mut self) {
-        self.push_phase(
-            [
-                Some(MatrixKey::new(0x6e)),
-                Some(MatrixKey::new(0x60)),
-                Some(MatrixKey::new(0x62)),
-                Some(MatrixKey::new(0x73)),
+        self.hold_keys_all_rows(
+            &[
+                MatrixKey::new(0x6e),
+                MatrixKey::new(0x60),
+                MatrixKey::new(0x62),
+                MatrixKey::new(0x73),
             ],
             4,
-            true,
         );
+    }
+
+    pub(crate) fn hold_keys_all_rows(&mut self, keys: &[MatrixKey], reads: usize) {
+        let mut key_codes = [None, None, None, None];
+        for (slot, key) in key_codes.iter_mut().zip(keys.iter().copied()) {
+            *slot = Some(key);
+        }
+        self.push_phase(key_codes, reads, true);
     }
 
     pub(crate) fn select_row(&mut self, row: u8) {
@@ -518,6 +530,19 @@ mod tests {
         keyboard.tap_all_rows(MatrixKey::new(0x3a));
 
         assert_eq!(keyboard.read_matrix_input(), 0xf7);
+    }
+
+    #[test]
+    fn tap_appended_after_expired_boot_chord_becomes_visible() {
+        let mut keyboard = Keyboard::default();
+        keyboard.hold_keys_all_rows(&[MatrixKey::new(0x0e), MatrixKey::new(0x0c)], 1);
+        assert_eq!(keyboard.read_matrix_input(), 0xfe);
+        assert_eq!(keyboard.read_matrix_input(), 0xff);
+
+        keyboard.tap(MatrixKey::new(0x15));
+        keyboard.select_row(0x05);
+
+        assert_eq!(keyboard.read_matrix_input(), 0xfd);
     }
 
     #[test]

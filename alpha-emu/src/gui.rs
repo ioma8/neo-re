@@ -5,7 +5,7 @@ use anyhow::Result;
 use eframe::egui;
 
 use crate::firmware::FirmwareRuntime;
-use crate::firmware_session::{FirmwareSession, FirmwareSnapshot};
+use crate::firmware_session::FirmwareSession;
 use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
 use crate::lcd::LcdSnapshot;
 
@@ -17,6 +17,8 @@ const NEO_CPU_HZ: u64 = 33_000_000;
 const REALTIME_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const MAX_REALTIME_STEPS_PER_FRAME: usize = 250_000;
 const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(50);
+const NEO_VISIBLE_LCD_HEIGHT: usize = 64;
+const NEO_VISIBLE_LCD_WIDTH: usize = 256;
 
 /// Runs the desktop Small ROM emulator UI.
 ///
@@ -97,6 +99,29 @@ impl AlphaEmuApp {
         }
     }
 
+    fn boot_path_with_left_shift_tab(&mut self, path: &Path) {
+        self.firmware_path = path.to_path_buf();
+        let loaded = FirmwareRuntime::load_small_rom(path)
+            .map_err(|error| error.to_string())
+            .and_then(|rom| {
+                FirmwareSession::boot_with_keys(rom, &[0x0e, 0x0c], 512)
+                    .map_err(|error| error.to_string())
+            });
+        match loaded {
+            Ok(session) => {
+                self.session = Some(session);
+                self.load_error = None;
+                self.modifier_state = ModifierMatrixState::default();
+                self.last_realtime_tick = Instant::now();
+                self.realtime_cycle_remainder = 0.0;
+            }
+            Err(error) => {
+                self.session = None;
+                self.load_error = Some(format!("{}: {error}", path.display()));
+            }
+        }
+    }
+
     fn open_file_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new()
             .add_filter("AlphaSmart firmware", &["os3kos"])
@@ -117,10 +142,11 @@ impl AlphaEmuApp {
                     ui.add_space(18.0);
                     match self.session.as_mut() {
                         Some(session) => {
-                            let snapshot = session.snapshot();
-                            render_lcd(ui, &snapshot.lcd);
+                            let lcd = session.lcd_snapshot();
+                            let status = session.status_text().to_string();
+                            render_lcd(ui, &lcd);
                             ui.add_space(14.0);
-                            render_summary(ui, &self.firmware_path, &snapshot);
+                            render_summary(ui, &self.firmware_path, &status);
                             ui.add_space(14.0);
                             render_boot_controls(ui, self);
                             ui.add_space(14.0);
@@ -128,8 +154,6 @@ impl AlphaEmuApp {
                                 return;
                             };
                             render_controls(ui, session);
-                            ui.add_space(14.0);
-                            render_trace(ui, &session.snapshot());
                         }
                         None => render_empty_state(ui, self.load_error.as_deref()),
                     }
@@ -406,10 +430,10 @@ fn render_empty_state(ui: &mut egui::Ui, error: Option<&str>) {
     });
 }
 
-fn render_summary(ui: &mut egui::Ui, path: &Path, snapshot: &FirmwareSnapshot) {
+fn render_summary(ui: &mut egui::Ui, path: &Path, status: &str) {
     card(ui, |ui| {
         ui.label(
-            egui::RichText::new("Small ROM session")
+            egui::RichText::new("Firmware session")
                 .size(18.0)
                 .strong()
                 .color(text_primary()),
@@ -417,22 +441,7 @@ fn render_summary(ui: &mut egui::Ui, path: &Path, snapshot: &FirmwareSnapshot) {
         ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
             metadata_pill(ui, "File", path.display());
-            metadata_pill(ui, "PC", format!("0x{:08x}", snapshot.pc));
-            metadata_pill(ui, "SSP", format!("0x{:08x}", snapshot.ssp));
-            metadata_pill(ui, "Steps", snapshot.steps);
-            metadata_pill(ui, "Cycles", snapshot.cycles);
-            metadata_pill(
-                ui,
-                "State",
-                snapshot
-                    .last_exception
-                    .as_deref()
-                    .unwrap_or(if snapshot.stopped {
-                        "stopped"
-                    } else {
-                        "running"
-                    }),
-            );
+            metadata_pill(ui, "State", status);
         });
     });
 }
@@ -448,8 +457,12 @@ fn render_boot_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp) {
                 let path = app.firmware_path.clone();
                 app.boot_path_with_entry_chord(&path, true);
             }
+            if primary_button(ui, "Boot into SmartApplets list").clicked() {
+                let path = app.firmware_path.clone();
+                app.boot_path_with_left_shift_tab(&path);
+            }
             ui.label(
-                egui::RichText::new("Normal open/reboot does not hold the Small ROM key chord.")
+                egui::RichText::new("SmartApplets boot holds left shift + tab at reset.")
                     .size(12.0)
                     .color(text_secondary()),
             );
@@ -528,7 +541,7 @@ fn render_special_matrix_buttons(ui: &mut egui::Ui, session: &mut FirmwareSessio
                     format!("row {:02x}, col {:x}", cell.row, cell.col),
                 );
                 if response.clicked() {
-                    session.tap_matrix_code(raw);
+                    session.tap_matrix_code_long(raw);
                     any_pressed = true;
                 }
             }
@@ -554,14 +567,16 @@ fn button_for_matrix_key(ui: &mut egui::Ui, label: &str, hover: String) -> egui:
 fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
     card(ui, |ui| {
         ui.label(
-            egui::RichText::new("Emulated LCD")
+            egui::RichText::new("Emulated NEO LCD")
                 .size(15.0)
                 .strong()
                 .color(text_primary()),
         );
         ui.add_space(10.0);
-        let width = ui.available_width().min(800.0);
-        let height = width * lcd.height as f32 / lcd.width as f32;
+        let visible_height = NEO_VISIBLE_LCD_HEIGHT.min(lcd.height);
+        let visible_width = NEO_VISIBLE_LCD_WIDTH.min(lcd.width);
+        let width = ui.available_width().min(visible_width as f32 * 3.0);
+        let height = width * visible_height as f32 / visible_width as f32;
         let (rect, _) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
         let painter = ui.painter_at(rect);
         let lcd_bg = egui::Color32::from_rgb(196, 208, 174);
@@ -573,10 +588,10 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
             egui::Stroke::new(1.5, egui::Color32::from_rgb(93, 105, 81)),
             egui::StrokeKind::Inside,
         );
-        let scale_x = rect.width() / lcd.width as f32;
-        let scale_y = rect.height() / lcd.height as f32;
-        for y in 0..lcd.height {
-            for x in 0..lcd.width {
+        let scale_x = rect.width() / visible_width as f32;
+        let scale_y = rect.height() / visible_height as f32;
+        for y in 0..visible_height {
+            for x in 0..visible_width {
                 if lcd.pixels[y * lcd.width + x] {
                     let min = egui::pos2(
                         rect.left() + x as f32 * scale_x,
@@ -590,16 +605,11 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
     });
 }
 
-fn render_trace(ui: &mut egui::Ui, snapshot: &FirmwareSnapshot) {
-    ui.columns(2, |columns| {
-        trace_panel(&mut columns[0], "Recent CPU trace", &snapshot.trace);
-        trace_panel(&mut columns[1], "MMIO accesses", &snapshot.mmio_accesses);
-    });
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{matrix_code_for_key, tap_for_text_char};
+    use super::{
+        NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, matrix_code_for_key, tap_for_text_char,
+    };
     use eframe::egui;
 
     use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
@@ -716,34 +726,17 @@ mod tests {
             );
         }
     }
-}
 
-fn trace_panel(ui: &mut egui::Ui, title: &str, lines: &[String]) {
-    card(ui, |ui| {
-        ui.label(
-            egui::RichText::new(title)
-                .size(15.0)
-                .strong()
-                .color(text_primary()),
-        );
-        ui.add_space(8.0);
-        egui::ScrollArea::vertical()
-            .max_height(320.0)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                if lines.is_empty() {
-                    ui.label(egui::RichText::new("none").color(text_secondary()));
-                }
-                for line in lines {
-                    ui.label(
-                        egui::RichText::new(line)
-                            .monospace()
-                            .size(12.0)
-                            .color(text_secondary()),
-                    );
-                }
-            });
-    });
+    #[test]
+    fn gui_uses_neo_visible_lcd_viewport_height() {
+        assert_eq!(NEO_VISIBLE_LCD_HEIGHT, 64);
+    }
+
+    #[test]
+    fn gui_uses_square_pixel_viewport_matching_neo_screen_ratio() {
+        assert_eq!(NEO_VISIBLE_LCD_WIDTH, 256);
+        assert_eq!(NEO_VISIBLE_LCD_HEIGHT, 64);
+    }
 }
 
 fn card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {

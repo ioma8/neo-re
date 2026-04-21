@@ -1,5 +1,6 @@
 use m68000::MemoryAccess;
 use std::collections::BTreeMap;
+use std::path::Path;
 use thiserror::Error;
 
 use crate::firmware::FirmwareRuntime;
@@ -15,6 +16,9 @@ const LCD_RIGHT_START: u32 = 0x0100_0000;
 const LCD_RIGHT_END: u32 = 0x0100_0002;
 const LCD_LEFT_START: u32 = 0x0100_8000;
 const LCD_LEFT_END: u32 = 0x0100_8002;
+const ASIC_REGISTER_START: u32 = 0x0200_0000;
+const ASIC_REGISTER_END: u32 = 0x0200_0008;
+const STOCK_APPLET_BASE: usize = 0x0047_0000;
 
 #[derive(Debug, Error)]
 pub enum MemoryError {
@@ -30,18 +34,45 @@ pub(crate) struct EmuMemory {
     mmio_bytes: BTreeMap<u32, u8>,
     mmio_accesses: Vec<String>,
     mmio_logging: bool,
+    timebase_counter: u32,
+    timer_counter: u16,
+    applet_storage_end: Option<u32>,
+    f411_row_select_enabled: bool,
 }
 
 impl EmuMemory {
     pub(crate) fn load_small_rom(firmware: &FirmwareRuntime) -> Result<Self, MemoryError> {
-        if firmware.image().len() > MEMORY_SIZE
-            || ROM_BASE.saturating_add(firmware.image().len()) > MEMORY_SIZE
-        {
+        if firmware.image().len() > MEMORY_SIZE {
             return Err(MemoryError::ImageTooLarge);
         }
         let mut bytes = vec![0; MEMORY_SIZE];
-        bytes[..firmware.image().len()].copy_from_slice(firmware.image());
-        bytes[ROM_BASE..ROM_BASE + firmware.image().len()].copy_from_slice(firmware.image());
+        if firmware.is_neo_system_image() {
+            let start = 0x0041_0000usize;
+            let end = start.saturating_add(firmware.image().len());
+            if end > MEMORY_SIZE {
+                return Err(MemoryError::ImageTooLarge);
+            }
+            bytes[start..end].copy_from_slice(firmware.image());
+            if let Some(system_package) = find_last_system_package(firmware.image()) {
+                write_be32(&mut bytes, 0x0000_0e0a, 0x0041_0000 + system_package as u32);
+            }
+            load_stock_applets(&mut bytes);
+            write_bytes(&mut bytes, 0x0000_0400, b"I am not corrupted!\0");
+            write_be16(&mut bytes, 0x0000_35f4, 0x2675);
+            write_be32(&mut bytes, 0x0000_35e2, 1);
+            write_be16(&mut bytes, 0x0000_35e6, 0xa000);
+            write_be32(&mut bytes, 0x0000_35ec, 1);
+            write_be16(&mut bytes, 0x0000_35f8, 0x2675);
+            write_be32(&mut bytes, 0x0000_7dd8, 0x0000_0830);
+        } else {
+            if ROM_BASE.saturating_add(firmware.image().len()) > MEMORY_SIZE {
+                return Err(MemoryError::ImageTooLarge);
+            }
+            bytes[..firmware.image().len()].copy_from_slice(firmware.image());
+            bytes[ROM_BASE..ROM_BASE + firmware.image().len()].copy_from_slice(firmware.image());
+        }
+        let is_neo_system_image = firmware.is_neo_system_image();
+        let applet_storage_end = find_applet_storage_end(&bytes);
         Ok(Self {
             bytes,
             lcd: Lcd::new(),
@@ -49,6 +80,10 @@ impl EmuMemory {
             mmio_bytes: BTreeMap::new(),
             mmio_accesses: Vec::new(),
             mmio_logging: true,
+            timebase_counter: 0,
+            timer_counter: 0,
+            applet_storage_end,
+            f411_row_select_enabled: !is_neo_system_image,
         })
     }
 
@@ -64,12 +99,20 @@ impl EmuMemory {
         self.keyboard.tap(key);
     }
 
+    pub(crate) fn tap_key_long(&mut self, key: MatrixKey) {
+        self.keyboard.tap_long(key);
+    }
+
     pub(crate) fn tap_key_all_rows(&mut self, key: MatrixKey) {
         self.keyboard.tap_all_rows(key);
     }
 
     pub(crate) fn hold_small_rom_entry_chord(&mut self) {
         self.keyboard.hold_small_rom_entry_chord();
+    }
+
+    pub(crate) fn hold_boot_keys_all_rows(&mut self, keys: &[MatrixKey], reads: usize) {
+        self.keyboard.hold_keys_all_rows(keys, reads);
     }
 
     pub(crate) fn drain_mmio_accesses(&mut self) -> Vec<String> {
@@ -84,6 +127,24 @@ impl EmuMemory {
         let previous = self.mmio_logging;
         self.mmio_logging = enabled;
         previous
+    }
+
+    pub(crate) fn peek_word(&self, addr: u32) -> Option<u16> {
+        let addr = addr as usize;
+        Some(u16::from_be_bytes([
+            *self.bytes.get(addr)?,
+            *self.bytes.get(addr + 1)?,
+        ]))
+    }
+
+    pub(crate) fn peek_long(&self, addr: u32) -> Option<u32> {
+        let addr = addr as usize;
+        Some(u32::from_be_bytes([
+            *self.bytes.get(addr)?,
+            *self.bytes.get(addr + 1)?,
+            *self.bytes.get(addr + 2)?,
+            *self.bytes.get(addr + 3)?,
+        ]))
     }
 
     fn record_mmio(&mut self, access: impl Into<String>) {
@@ -101,16 +162,37 @@ impl EmuMemory {
         if addr == 0xf419 {
             return self.keyboard.read_matrix_input();
         }
+        if addr == 0xf202 {
+            let value = self.mmio_bytes.get(&addr).copied().unwrap_or(0).wrapping_add(1);
+            self.mmio_bytes.insert(addr, value);
+            return value;
+        }
+        if addr == 0xf449 {
+            return self.mmio_bytes.get(&addr).copied().unwrap_or(0) | 0x20;
+        }
         *self.mmio_bytes.get(&addr).unwrap_or(&0)
     }
 
     fn read_mmio_word(&mut self, addr: u32) -> u16 {
+        match normalize_mmio(addr) {
+            0xfb00 => return (self.packed_timebase() >> 16) as u16,
+            0xfb02 => return self.packed_timebase() as u16,
+            0xfb1a => {
+                self.timebase_counter = self.timebase_counter.wrapping_add(1);
+                return 0;
+            }
+            0xf608 => {
+                self.timer_counter = self.timer_counter.wrapping_add(1);
+                return self.timer_counter;
+            }
+            _ => {}
+        }
         u16::from_be_bytes([self.read_mmio_byte(addr), self.read_mmio_byte(addr + 1)])
     }
 
     fn write_mmio_byte(&mut self, addr: u32, value: u8) {
         let normalized = normalize_mmio(addr);
-        if normalized == 0xf411 {
+        if normalized == 0xf411 && self.f411_row_select_enabled {
             self.keyboard.select_row(value);
         } else if let Some(row) = gpio_keyboard_row_select(normalized, value) {
             self.keyboard.select_row(row);
@@ -129,6 +211,73 @@ impl EmuMemory {
         let bytes = value.to_be_bytes();
         self.write_mmio_byte(addr, bytes[0]);
         self.write_mmio_byte(addr + 1, bytes[1]);
+    }
+
+    fn packed_timebase(&self) -> u32 {
+        let seconds = self.timebase_counter;
+        let second = seconds % 60;
+        let minute = (seconds / 60) % 60;
+        let hour = (seconds / 3600) % 24;
+        (hour << 24) | (minute << 16) | second
+    }
+}
+
+fn find_last_system_package(image: &[u8]) -> Option<usize> {
+    image
+        .windows(4)
+        .enumerate()
+        .filter_map(|(offset, window)| (window == [0xc0, 0xff, 0xee, 0xad]).then_some(offset))
+        .last()
+}
+
+fn write_be32(bytes: &mut [u8], addr: usize, value: u32) {
+    let value = value.to_be_bytes();
+    bytes[addr..addr + 4].copy_from_slice(&value);
+}
+
+fn write_be16(bytes: &mut [u8], addr: usize, value: u16) {
+    let value = value.to_be_bytes();
+    bytes[addr..addr + 2].copy_from_slice(&value);
+}
+
+fn write_bytes(bytes: &mut [u8], addr: usize, value: &[u8]) {
+    bytes[addr..addr + value.len()].copy_from_slice(value);
+}
+
+fn load_stock_applets(bytes: &mut [u8]) {
+    let applet_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analysis/device-dumps/applets");
+    let Ok(entries) = std::fs::read_dir(applet_dir) else {
+        return;
+    };
+
+    let mut applets = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension().is_some_and(|ext| ext == "os3kapp")
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(|name| name.starts_with('A') && !name.starts_with("AF"))
+        })
+        .collect::<Vec<_>>();
+    applets.sort();
+
+    let mut cursor = STOCK_APPLET_BASE;
+    let applet_start = cursor;
+    for path in applets.into_iter().take(31) {
+        let Ok(image) = std::fs::read(&path) else {
+            continue;
+        };
+        if cursor + image.len() > bytes.len() || image.len() < 0x16 {
+            continue;
+        }
+        bytes[cursor..cursor + image.len()].copy_from_slice(&image);
+        cursor += image.len();
+    }
+    if cursor > applet_start {
+        write_be32(bytes, 0x0000_0e8a, applet_start as u32);
+        write_be32(bytes, 0x0000_0e8e, cursor as u32);
     }
 }
 
@@ -170,11 +319,20 @@ impl MemoryAccess for EmuMemory {
             ));
             return Some(());
         }
+        if is_watched_ram(addr) {
+            self.record_mmio(format!("write8 ram 0x{addr:08x}=0x{value:02x}"));
+        }
         *self.bytes.get_mut(addr as usize)? = value;
         Some(())
     }
 
     fn set_word(&mut self, addr: u32, value: u16) -> Option<()> {
+        if self.applet_storage_end.is_some() && (addr == 0x0000_0e8e || addr == 0x0000_0e90) {
+            self.record_mmio(format!(
+                "ignored applet storage bound write16 ram 0x{addr:08x}=0x{value:04x}"
+            ));
+            return Some(());
+        }
         if is_mmio(addr) {
             self.write_mmio_word(addr, value);
             self.record_mmio(format!(
@@ -182,6 +340,9 @@ impl MemoryAccess for EmuMemory {
                 normalize_mmio(addr)
             ));
             return Some(());
+        }
+        if is_watched_ram(addr) {
+            self.record_mmio(format!("write16 ram 0x{addr:08x}=0x{value:04x}"));
         }
         let addr = addr as usize;
         let bytes = value.to_be_bytes();
@@ -198,6 +359,15 @@ fn is_mmio(addr: u32) -> bool {
         || (LOW_MMIO_START..LOW_MMIO_END).contains(&addr)
         || (LCD_LEFT_START..LCD_LEFT_END).contains(&addr)
         || (LCD_RIGHT_START..LCD_RIGHT_END).contains(&addr)
+        || (ASIC_REGISTER_START..ASIC_REGISTER_END).contains(&addr)
+}
+
+fn is_watched_ram(addr: u32) -> bool {
+    addr == 0x0000_0414
+        || (0x0000_0e00..=0x0000_0eff).contains(&addr)
+        || (0x0000_3550..=0x0000_357f).contains(&addr)
+        || (0x0000_35e0..=0x0000_35ff).contains(&addr)
+        || (0x0000_3e80..=0x0000_3e9f).contains(&addr)
 }
 
 fn normalize_mmio(addr: u32) -> u32 {
@@ -208,23 +378,50 @@ fn normalize_mmio(addr: u32) -> u32 {
     }
 }
 
+fn find_applet_storage_end(bytes: &[u8]) -> Option<u32> {
+    let start = STOCK_APPLET_BASE;
+    let mut cursor = start;
+    while cursor + 8 <= bytes.len()
+        && bytes.get(cursor..cursor + 4) == Some([0xc0, 0xff, 0xee, 0xad].as_slice())
+    {
+        let length = u32::from_be_bytes(bytes[cursor + 4..cursor + 8].try_into().ok()?) as usize;
+        if length == 0 || cursor + length > bytes.len() {
+            break;
+        }
+        cursor += length;
+    }
+    (cursor > start).then_some(cursor as u32)
+}
+
 fn gpio_keyboard_row_select(addr: u32, value: u8) -> Option<u8> {
-    match (addr, value) {
-        (0xf410, 0x80) => Some(0x00),
-        (0xf410, 0x40) => Some(0x01),
-        (0xf410, 0x20) => Some(0x02),
-        (0xf410, 0x10) => Some(0x03),
-        (0xf410, 0x08) => Some(0x04),
-        (0xf410, 0x04) => Some(0x05),
-        (0xf410, 0x02) => Some(0x06),
-        (0xf410, 0x01) => Some(0x07),
-        (0xf408, 0x20) => Some(0x09),
-        (0xf440, 0x80) => Some(0x0a),
-        (0xf440, 0x40) => Some(0x0b),
-        (0xf440, 0x20) => Some(0x0c),
-        (0xf440, 0x10) => Some(0x0d),
-        (0xf440, 0x08) => Some(0x0e),
-        (0xf440, 0x04) => Some(0x0f),
+    match addr {
+        0xf410 => {
+            const ROWS: &[(u8, u8)] = &[
+                (0x80, 0x00),
+                (0x40, 0x01),
+                (0x20, 0x02),
+                (0x10, 0x03),
+                (0x08, 0x04),
+                (0x04, 0x05),
+                (0x02, 0x06),
+                (0x01, 0x07),
+            ];
+            ROWS.iter()
+                .find_map(|(bit, row)| (value & bit != 0).then_some(*row))
+        }
+        0xf408 => (value & 0x20 != 0).then_some(0x09),
+        0xf440 => {
+            const ROWS: &[(u8, u8)] = &[
+                (0x80, 0x0a),
+                (0x40, 0x0b),
+                (0x20, 0x0c),
+                (0x10, 0x0d),
+                (0x08, 0x0e),
+                (0x04, 0x0f),
+            ];
+            ROWS.iter()
+                .find_map(|(bit, row)| (value & bit != 0).then_some(*row))
+        }
         _ => None,
     }
 }

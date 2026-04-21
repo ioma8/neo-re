@@ -110,7 +110,7 @@ Betawise confirms OS services are direct Motorola 68k A-line trap stubs encoded 
 Betawise confirms compiled SmartApplets must reserve A5 and D7 and use PC-relative code, matching the live failures from unsafe A5-relative experiments	proven
 alpha-emu can use analysis/cab/os3kneorom.os3kos alone as a firmware-backed A-line trap executor	disproven
 alpha-emu needs the dumped System OS3KApp payload as an overlay because os3kneorom.os3kos has erased direct trap-handler target bytes	proven
-official firmware trap handlers can run inside the existing applet CPU/memory context with neutral MMIO stubs and Rust-shim fallback	partially proven
+official firmware trap handlers can run inside the existing applet CPU/memory context with neutral MMIO stubs	proven
 Alpha USB firmware-only A-line traps work if visual traps are no longer preempted by Rust shims	disproven
 Alpha USB firmware-only A-line traps require seeded System firmware globals before direct handler entry	needs further investigation
 Alpha USB firmware-only A-line traps render through firmware memory/MMIO paths that alpha-emu can observe	needs further investigation
@@ -135,3 +135,33 @@ alpha-emu letter input fails for Q/W/E/R/T because egui does not emit physical K
 alpha-emu letter input fails for non-row-zero keys because Small ROM direct key tests select rows via GPIO registers f410/f408/f440, while emulator only tracks f411 row select	needs further investigation
 alpha-emu letter input fails because HID bridge raw key codes differ from local Small ROM scanner raw key codes	disproven
 alpha-emu GUI text letters are unreliable when represented only as row-scoped short taps or physical key events; semantic text events need scanner-safe all-row taps	proven
+Full NEO OS package can boot in alpha-emu using raw reset vectors at file offset 0	disproven
+Full NEO OS package requires segment-table loading before CPU boot	disproven
+Full NEO OS package already embeds the dumped System SmartApplet bytes needed for initial boot experiments	proven
+Full NEO OS package should be mapped as a whole image at 0x00410000 for emulator execution	proven
+Full NEO OS package segment table is updater erase/program metadata rather than the direct emulator runtime mapping	proven
+Full NEO OS package needs the System package pointer seeded into the firmware RAM applet table	proven
+Full OS normal entry waits on changing byte register 0xf202 during early delay setup	proven
+Full OS normal entry uses 0x02000000..0x02000007 as a memory-mapped board register window	proven
+Full OS initialization needs a monotonic 0xfb00/0xfb1a timebase to leave the System 3.15 splash delay	proven
+Full OS normal boot currently stops at firmware diagnostic TimeModule.c number 562 because RTC/time module state is still incomplete	disproven
+Full OS runtime applet table entries seeded directly at 0x0e0e survive firmware boot	disproven
+Full OS rebuilds runtime applet tables from a persistent SmartApplet package chain bounded by 0x0e8a and 0x0e8e	proven
+Full OS applet storage starts at 0x00470000 for the emulator's stock applet chain	proven
+Full OS applet storage end must be protected from the current incomplete flash-CFI geometry probe	proven
+Full OS current slot 1 can enter AlphaWord once the firmware rebuilt slot 1 from the package chain	proven
+Full OS SmartApplet A-line traps need CPU Line-A exception vectoring into the firmware vector at 0x00000028	proven
+Full OS raw matrix 0x47 is the Clear File key	disproven
+Full OS raw matrix 0x54 is the Clear File key	proven
+Full OS raw matrix 0x47 is one of the NEO-only keys with no host HID usage, currently best labelled Applets	proven
+Full OS 0x47 and 0x54 key probes from the AlphaWord splash both entering the editor means splash-dismiss behavior cannot identify the key label	proven
+Full OS Applets key failure is caused by row-scoped versus all-row injection of raw 0x47	disproven
+Full OS left-shift plus tab held at reset reaches the SmartApplets menu resource 0x006b	proven
+alpha-emu previously lacked the documented left-shift plus tab full-OS SmartApplets boot path	proven
+Full OS raw 0x47 reaches the SmartApplets menu if injected after longer AlphaWord startup delay	disproven
+Full OS SmartApplets menu ignores keys because the left-shift plus tab boot chord remains held	proven
+Full OS SmartApplets menu ignores row 0x05 keys because f411 writes overwrite GPIO row selection	disproven
+Full OS SmartApplets menu ignores row 0x05 keys because queued boot-chord idle phase blocks later key taps	disproven
+Full OS SmartApplets Down key becomes visible when f411 row-select is disabled for full System images	proven
+Full OS Enter key needs bit-based f408 row decoding because the firmware writes 0xa0 rather than exact 0x20	proven
+AlphaWord Opening in F1 remains a separate incomplete file/workspace emulation path	needs further investigation

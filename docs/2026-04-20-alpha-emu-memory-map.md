@@ -9,7 +9,63 @@ Brief record of the memory and MMIO findings validated while booting
 | --- | --- | --- |
 | `0x00000000..` | Reset-vector mirror of the Small ROM image. | CPU reset vectors are read from address `0`; initial SSP is `0x0007fff0`, reset PC is `0x0040042a`. |
 | `0x00400000..` | Executable Small ROM mapping. | Small ROM code and strings disassemble/run at runtime base `0x00400000`. |
+| `0x00410000..` | Whole `os3kneorom.os3kos` System 3 Neo package mapping. | Full firmware branches and absolute calls line up only when the whole package, including its `0x70`-byte header, is mapped at `0x00410000`; the entry stub at `0x00410070` jumps to valid code at `0x00417914`. |
+| `0x00470000..` | Persistent SmartApplet package storage used by the full OS emulator path. | Full OS routine `0x004130fc` clears the runtime applet tables, then rebuilds them by walking a contiguous `0xc0ffeead`/`0xcafefeed` package chain starting at the storage pointer in `0x00000e8a`. |
+| `0x00000e0a` | Full-OS RAM applet pointer table, slot 0. | Full OS dispatch reads this table and then calls through the applet entry pointer at package offset `0x84`. Seeding slot 0 with the embedded System package address lets the full image reach LCD drawing and keyboard idle code. |
+| `0x00000e8a` | Full-OS persistent SmartApplet storage start pointer. | Firmware initialization writes `0x00470000` here before rebuilding the applet table. The emulator maps backed-up stock applets contiguously at that address. |
+| `0x00000e8e` | Full-OS persistent SmartApplet storage end pointer. | The firmware normally derives this from flash CFI geometry. The emulator currently protects the synthetic chain end because the flash query path is only minimally modeled and otherwise produces an invalid `0x003f0000` bound. |
+| `0x00000e92` | Full-OS runtime applet ID table. | After `0x004130fc` walks the package chain, slot 1 contains `0xa000` for AlphaWord and following slots contain the stock applet IDs. |
+| `0x0000355e` | Full-OS per-applet A5/base adjustment table. | During table rebuild, the firmware stores `0x0007d800 - package.data_offset` for each valid SmartApplet. AlphaWord slot 1 yields `0x0007ca70`. |
+| `0x00003e8a` | Current SmartApplet callback entry pointer. | The dispatcher stores `applet_base + header.entryPoint` here before calling the current applet. With stock AlphaWord loaded, this becomes `0x00470094`. |
 | `0x00000000..0x007fffff` | Current emulator backing memory. | Large enough for reset mirror, ROM mapping, RAM state, and observed Small ROM stack use. |
+
+`analysis/cab/os3kneorom.os3kos` is not reset-vector bootable as a flat ROM.
+Its header starts with `0xffffffff 00015379`, and treating those bytes as reset
+vectors immediately fails. The updater segment table at file offset `0x50`
+describes real-device erase/program bookkeeping:
+
+| Segment address | Length |
+| --- | --- |
+| `0x00410000` | `0x00060000` |
+| `0x00406000` | `0x00000014` |
+| `0x005ffc00` | `0x00000400` |
+
+For emulator execution, the package is mapped as a whole image at `0x00410000`;
+mapping only segment payloads shifts the code by `0x70` bytes and makes absolute
+branches land in the wrong instructions.
+
+The two full-OS entry stubs have different behavior:
+
+| Entry | Behavior |
+| --- | --- |
+| `0x00410070` | Updater path. It reaches the LCD message `Attempting to enter the Updater Mode. Attach an Updater cable. Start AlphaSmart Manager.` |
+| `0x00410082` | Normal System boot path. With the current RAM/timebase/storage seeds, it reaches the stock AlphaWord applet through the firmware SmartApplet dispatcher. |
+
+Current full-OS boot status:
+
+- The data-change prompt is avoided by seeding the RAM marker at `0x00000400`
+  with `I am not corrupted!`.
+- The TimeModule divide fault is avoided by seeding `0x00007dd8 = 0x00000830`
+  and returning the timer-ready bit from `0xf449`.
+- The stock applet package chain is loaded from
+  `analysis/device-dumps/applets/A*.os3kapp`, excluding font-only `AF*`
+  packages, at `0x00470000`.
+- The normal boot path can enter AlphaWord by seeding current slot state
+  `0x35e2 = 1`, `0x35e6 = 0xa000`, and `0x35ec = 1`; the firmware then uses
+  its own rebuilt table entry and callback pointer rather than a synthetic
+  direct callback.
+
+## Line-A Trap Vectoring
+
+SmartApplets call OS services through Motorola 68k Line-A opcodes such as the
+`0xa2b8` stub reached by AlphaWord at `0x00482ece`. The `m68000` crate reports
+Line-A as an exception to the host instead of automatically entering the vector.
+
+The full OS initializes vector `10` at low-memory vector table address
+`0x00000028` to `0x00426768`. The emulator now handles Line-A by pushing the
+standard 68000 exception frame (`SR`, return `PC`) on the supervisor stack and
+jumping to that firmware vector. This keeps the firmware responsible for the OS
+trap instead of reintroducing Rust-side A-line service shims.
 
 ## Internal Register Window
 
@@ -17,11 +73,18 @@ Brief record of the memory and MMIO findings validated while booting
 | --- | --- | --- |
 | `0x0000f000..0x0000ffff` | DragonBall-style internal register/MMIO window. | Small ROM accesses byte and word registers in this range during early hardware setup. |
 | `0xfffff000..0xffffffff` | Sign-extended alias of the same register window. | 68k absolute-short addressing reaches registers such as `0xfffff419`; preserving state between low and sign-extended aliases lets boot continue. |
+| `0xfffff202` / `0x0000f202` | Byte timer/delay register. | Full OS normal entry waits at `0x004266f6` until this byte changes. Returning a changing byte lets boot progress past the early hardware delay. |
+| `0xfffffb00..0xfffffb03` / `0x0000fb00..0x0000fb03` | Timebase high/low words. | Full OS routine `0x004247ca` combines these words with `0xfb1a` into an elapsed-time value used by initialization delays. |
+| `0xfffffb1a` / `0x0000fb1a` | Timebase fractional/low counter word. | The same routine masks this value with `0x01ff`; keeping it at zero traps the firmware on the initialization screen. |
+| `0x02000000..0x02000007` | ASIC/board register window used by System firmware. | Normal full-OS boot writes `0x0200000/2/6` through routines near `0x0043ff54`; treating it as byte-preserving MMIO avoids a bus error and matches command/data-style access. |
 
 ## LCD Controller Ports
 
 The NEO LCD behaves like two page/column byte-addressed controllers, each
-covering half of the 320x128 display.
+covering half of a 320x128 controller buffer. The GUI displays the active NEO
+viewport as the top-left 256x64 square-pixel crop. The lower and right-side
+controller rows/columns remain in the backing buffer for firmware compatibility
+but are not part of the normal visible NEO screen.
 
 | Address | Meaning | Evidence |
 | --- | --- | --- |

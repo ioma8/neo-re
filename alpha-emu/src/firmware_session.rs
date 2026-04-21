@@ -1,12 +1,13 @@
 use std::num::Wrapping;
 
+use m68000::MemoryAccess;
 use m68000::M68000;
 use m68000::cpu_details::Mc68000;
 use m68000::exception::Vector;
 use thiserror::Error;
 
 use crate::firmware::{FirmwareError, FirmwareRuntime};
-use crate::keyboard::{matrix_key_for_char, matrix_key_for_code};
+use crate::keyboard::{MatrixKey, matrix_key_for_char, matrix_key_for_code};
 use crate::lcd::LcdSnapshot;
 use crate::memory::{EmuMemory, MemoryError};
 
@@ -14,6 +15,10 @@ use crate::memory::{EmuMemory, MemoryError};
 pub struct FirmwareSnapshot {
     pub pc: u32,
     pub ssp: u32,
+    pub usp: u32,
+    pub d: [u32; 8],
+    pub a: [u32; 7],
+    pub debug_words: Vec<(u32, u32)>,
     pub steps: usize,
     pub cycles: u64,
     pub stopped: bool,
@@ -31,7 +36,7 @@ pub enum FirmwareSessionError {
     Memory(#[from] MemoryError),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct FirmwareSession {
     cpu: M68000<Mc68000>,
     memory: EmuMemory,
@@ -61,11 +66,35 @@ impl FirmwareSession {
         firmware: FirmwareRuntime,
         hold_entry_chord: bool,
     ) -> Result<Self, FirmwareSessionError> {
-        let (ssp, pc) = firmware.reset_vectors()?;
+        let (ssp, pc) = firmware.boot_vectors()?;
         let mut memory = EmuMemory::load_small_rom(&firmware)?;
         if hold_entry_chord {
             memory.hold_small_rom_entry_chord();
         }
+        Self::boot_with_memory(ssp, pc, memory)
+    }
+
+    pub fn boot_with_keys(
+        firmware: FirmwareRuntime,
+        keys: &[u8],
+        reads: usize,
+    ) -> Result<Self, FirmwareSessionError> {
+        let (ssp, pc) = firmware.boot_vectors()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+        let keys = keys
+            .iter()
+            .copied()
+            .map(MatrixKey::new)
+            .collect::<Vec<_>>();
+        memory.hold_boot_keys_all_rows(&keys, reads);
+        Self::boot_with_memory(ssp, pc, memory)
+    }
+
+    fn boot_with_memory(
+        ssp: u32,
+        pc: u32,
+        memory: EmuMemory,
+    ) -> Result<Self, FirmwareSessionError> {
         let mut cpu: M68000<Mc68000> = M68000::new_no_reset();
         cpu.regs.ssp = Wrapping(ssp);
         cpu.regs.pc = Wrapping(pc);
@@ -75,34 +104,72 @@ impl FirmwareSession {
             steps: 0,
             cycles: 0,
             last_exception: None,
-            trace: vec![format!("Small ROM reset: ssp=0x{ssp:08x} pc=0x{pc:08x}")],
+            trace: vec![format!("Firmware boot: ssp=0x{ssp:08x} pc=0x{pc:08x}")],
             mmio_accesses: Vec::new(),
         })
     }
 
     pub fn run_steps(&mut self, max_steps: usize) {
         for _ in 0..max_steps {
-            if self.cpu.stop || self.last_exception.is_some() {
-                break;
-            }
-
-            let (pc, disassembly, cycles, exception) = self
-                .cpu
-                .disassembler_interpreter_exception(&mut self.memory);
-            self.steps = self.steps.saturating_add(1);
-            self.cycles = self.cycles.saturating_add(cycles as u64);
-            if !disassembly.is_empty() {
-                self.push_trace(format!("0x{pc:08x}: {disassembly}"));
-            }
-            for access in self.memory.drain_mmio_accesses() {
-                self.push_mmio_access(access);
-            }
-
-            if let Some(vector) = exception {
-                self.last_exception = Some(format_exception(vector, pc));
+            if !self.step_with_trace() {
                 break;
             }
         }
+    }
+
+    pub fn run_until_pc_or_steps(&mut self, stop_pc: u32, max_steps: usize) -> bool {
+        for _ in 0..max_steps {
+            if self.cpu.regs.pc.0 == stop_pc {
+                self.push_trace(format!("stopped before pc=0x{stop_pc:08x}"));
+                return true;
+            }
+            if !self.step_with_trace() {
+                break;
+            }
+        }
+        self.cpu.regs.pc.0 == stop_pc
+    }
+
+    pub fn run_until_resource_or_steps(&mut self, resource_id: u16, max_steps: usize) -> bool {
+        for _ in 0..max_steps {
+            if self.cpu.regs.pc.0 == 0x0042_4212
+                && self.memory.peek_word(self.cpu.regs.sp() + 6) == Some(resource_id)
+            {
+                self.push_trace(format!("stopped before resource_id=0x{resource_id:04x}"));
+                return true;
+            }
+            if !self.step_with_trace() {
+                break;
+            }
+        }
+        false
+    }
+
+    fn step_with_trace(&mut self) -> bool {
+        if self.cpu.stop || self.last_exception.is_some() {
+            return false;
+        }
+
+        let (pc, disassembly, cycles, exception) = self
+            .cpu
+            .disassembler_interpreter_exception(&mut self.memory);
+        self.steps = self.steps.saturating_add(1);
+        self.cycles = self.cycles.saturating_add(cycles as u64);
+        if !disassembly.is_empty() {
+            self.push_trace(format!("0x{pc:08x}: {disassembly}"));
+        }
+        for access in self.memory.drain_mmio_accesses() {
+            self.push_mmio_access(access);
+        }
+
+        if let Some(vector) = exception {
+            if self.enter_exception_handler(vector, pc) {
+                return true;
+            }
+            self.last_exception = Some(format_exception(vector, pc));
+            return false;
+        }
+        true
     }
 
     pub fn run_realtime_steps(&mut self, max_steps: usize) -> u64 {
@@ -118,6 +185,9 @@ impl FirmwareSession {
             self.steps = self.steps.saturating_add(1);
             self.cycles = self.cycles.saturating_add(cycles as u64);
             if let Some(vector) = exception {
+                if self.enter_exception_handler(vector, pc) {
+                    continue;
+                }
                 self.last_exception = Some(format_exception(vector, pc));
                 break;
             }
@@ -143,6 +213,9 @@ impl FirmwareSession {
             self.steps = self.steps.saturating_add(1);
             self.cycles = self.cycles.saturating_add(cycles as u64);
             if let Some(vector) = exception {
+                if self.enter_exception_handler(vector, pc) {
+                    continue;
+                }
                 self.last_exception = Some(format_exception(vector, pc));
                 break;
             }
@@ -154,6 +227,20 @@ impl FirmwareSession {
     #[must_use]
     pub fn is_running(&self) -> bool {
         !self.cpu.stop && self.last_exception.is_none()
+    }
+
+    #[must_use]
+    pub fn status_text(&self) -> &str {
+        self.last_exception.as_deref().unwrap_or(if self.cpu.stop {
+            "stopped"
+        } else {
+            "running"
+        })
+    }
+
+    #[must_use]
+    pub fn lcd_snapshot(&self) -> LcdSnapshot {
+        self.memory.lcd_snapshot()
     }
 
     pub fn press_char(&mut self, value: char) {
@@ -198,11 +285,37 @@ impl FirmwareSession {
         }
     }
 
+    pub fn tap_matrix_code_long(&mut self, code: u8) {
+        if let Some(key) = matrix_key_for_code(code) {
+            self.memory.tap_key_long(key);
+        }
+    }
+
+    pub fn tap_matrix_code_all_rows(&mut self, code: u8) {
+        if let Some(key) = matrix_key_for_code(code) {
+            self.memory.tap_key_all_rows(key);
+        }
+    }
+
+    #[cfg(test)]
+    fn select_keyboard_row_for_test(&mut self, row_addr: u32, row_value: u8) {
+        let _ = self.memory.set_byte(row_addr, row_value);
+    }
+
+    #[cfg(test)]
+    fn read_keyboard_input_for_test(&mut self) -> Option<u8> {
+        self.memory.get_byte(0xffff_f419)
+    }
+
     #[must_use]
     pub fn snapshot(&self) -> FirmwareSnapshot {
         FirmwareSnapshot {
             pc: self.cpu.regs.pc.0,
             ssp: self.cpu.regs.ssp.0,
+            usp: self.cpu.regs.usp.0,
+            d: self.cpu.regs.d.map(|value| value.0),
+            a: self.cpu.regs.a.map(|value| value.0),
+            debug_words: self.debug_words(),
             steps: self.steps,
             cycles: self.cycles,
             stopped: self.cpu.stop,
@@ -211,6 +324,58 @@ impl FirmwareSession {
             mmio_accesses: self.mmio_accesses.clone(),
             lcd: self.memory.lcd_snapshot(),
         }
+    }
+
+    fn debug_words(&self) -> Vec<(u32, u32)> {
+        [
+            0x0000_03e8,
+            0x0000_03ee,
+            0x0000_0400,
+            0x0000_0028,
+            0x0000_0e0a,
+            0x0000_0e0e,
+            0x0000_0e8a,
+            0x0000_0e8e,
+            0x0000_0e92,
+            0x0000_0e94,
+            0x0000_355e,
+            0x0000_3562,
+            0x0000_35e2,
+            0x0000_35e6,
+            0x0000_35ec,
+            0x0000_3e8a,
+        ]
+        .into_iter()
+        .filter_map(|addr| self.memory.peek_long(addr).map(|value| (addr, value)))
+        .collect()
+    }
+
+    fn enter_exception_handler(&mut self, vector: u8, fault_pc: u32) -> bool {
+        if vector != Vector::LineAEmulator as u8 {
+            return false;
+        }
+        let Some(handler) = self.memory.peek_long(u32::from(vector) * 4) else {
+            return false;
+        };
+        if handler == 0 {
+            return false;
+        }
+
+        let status = u16::from(self.cpu.regs.sr);
+        self.cpu.regs.sr.s = true;
+        let return_pc = fault_pc;
+        let sp = self.cpu.regs.sp().wrapping_sub(6);
+        *self.cpu.regs.sp_mut() = Wrapping(sp);
+        if self.memory.set_word(sp, status).is_none()
+            || self.memory.set_long(sp + 2, return_pc).is_none()
+        {
+            return false;
+        }
+        self.cpu.regs.pc = Wrapping(handler);
+        self.push_trace(format!(
+            "line-a vector -> handler=0x{handler:08x} return_pc=0x{return_pc:08x}"
+        ));
+        true
     }
 
     fn push_trace(&mut self, line: String) {
@@ -222,7 +387,7 @@ impl FirmwareSession {
 
     fn push_mmio_access(&mut self, access: String) {
         self.mmio_accesses.push(access);
-        if self.mmio_accesses.len() > 256 {
+        if self.mmio_accesses.len() > 4096 {
             self.mmio_accesses.remove(0);
         }
     }
@@ -251,7 +416,7 @@ mod tests {
 
         assert_eq!(snapshot.ssp, 0x0007_fff0);
         assert_eq!(snapshot.pc, 0x0040_042a);
-        assert!(snapshot.trace[0].contains("Small ROM reset"));
+        assert!(snapshot.trace[0].contains("Firmware boot"));
         Ok(())
     }
 
@@ -319,6 +484,37 @@ mod tests {
 
         assert_eq!(snapshot.pc, 0x0040_0790);
         assert!(snapshot.last_exception.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn long_matrix_tap_is_visible_on_selected_row() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = FirmwareSession::boot_small_rom_default()?;
+
+        session.tap_matrix_code_long(0x15);
+        session.select_keyboard_row_for_test(0xffff_f410, 0x04);
+
+        assert_eq!(session.read_keyboard_input_for_test(), Some(0xfd));
+        Ok(())
+    }
+
+    #[test]
+    fn full_neo_system_image_reaches_display_code() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = crate::firmware::FirmwareRuntime::load_small_rom(
+            "../analysis/cab/os3kneorom.os3kos",
+        )?;
+        let mut session = FirmwareSession::boot_small_rom(firmware)?;
+        session.run_steps(3_000_000);
+        let snapshot = session.snapshot();
+
+        assert!(snapshot.last_exception.is_none());
+        assert!(
+            snapshot
+                .debug_words
+                .iter()
+                .any(|(addr, value)| *addr == 0x0000_3e8a && *value == 0x0047_0094)
+        );
+        assert!(snapshot.lcd.pixels.iter().any(|pixel| *pixel));
         Ok(())
     }
 }
