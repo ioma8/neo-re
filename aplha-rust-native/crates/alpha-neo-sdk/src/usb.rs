@@ -1,5 +1,7 @@
 #[cfg(target_arch = "m68k")]
 use core::arch::global_asm;
+#[cfg(target_arch = "m68k")]
+use core::sync::atomic::{Ordering, compiler_fence};
 
 #[cfg(target_arch = "m68k")]
 global_asm!(
@@ -52,6 +54,8 @@ pub fn complete_hid_to_direct() {
     unsafe {
         alpha_neo_complete_hid_to_direct();
     }
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
 }
 
 #[allow(
@@ -67,4 +71,6 @@ pub fn mark_direct_connected() {
     unsafe {
         alpha_neo_mark_direct_connected();
     }
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
 }

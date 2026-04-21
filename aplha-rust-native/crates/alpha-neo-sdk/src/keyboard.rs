@@ -1,5 +1,7 @@
 #[cfg(target_arch = "m68k")]
 use core::arch::global_asm;
+#[cfg(target_arch = "m68k")]
+use core::sync::atomic::{Ordering, compiler_fence};
 
 #[cfg(target_arch = "m68k")]
 global_asm!(
@@ -29,6 +31,11 @@ unsafe extern "C" {
 }
 
 #[must_use]
+#[allow(
+    clippy::inline_always,
+    reason = "required to avoid 68020 long-branch wrapper thunks in SmartApplet output"
+)]
+#[inline(always)]
 pub fn is_ready() -> bool {
     #[cfg(not(target_arch = "m68k"))]
     {
@@ -37,11 +44,18 @@ pub fn is_ready() -> bool {
     #[cfg(target_arch = "m68k")]
     // SAFETY: Calls the NEO OS key-ready trap and reads its scalar return value.
     unsafe {
-        alpha_neo_is_key_ready() != 0
+        let value = alpha_neo_is_key_ready();
+        compiler_fence(Ordering::SeqCst);
+        value != 0
     }
 }
 
 #[must_use]
+#[allow(
+    clippy::inline_always,
+    reason = "required to avoid 68020 long-branch wrapper thunks in SmartApplet output"
+)]
+#[inline(always)]
 pub fn read_key() -> u32 {
     #[cfg(not(target_arch = "m68k"))]
     {
@@ -50,10 +64,17 @@ pub fn read_key() -> u32 {
     #[cfg(target_arch = "m68k")]
     // SAFETY: Calls the NEO OS read-key trap and reads its scalar return value.
     unsafe {
-        alpha_neo_read_key_code()
+        let value = alpha_neo_read_key_code();
+        compiler_fence(Ordering::SeqCst);
+        value
     }
 }
 
+#[allow(
+    clippy::inline_always,
+    reason = "required to avoid 68020 long-branch wrapper thunks in SmartApplet output"
+)]
+#[inline(always)]
 pub fn pump_events() {
     #[cfg(not(target_arch = "m68k"))]
     {}
@@ -61,5 +82,6 @@ pub fn pump_events() {
     // SAFETY: Calls the NEO OS event pump trap with no borrowed Rust state crossing the ABI.
     unsafe {
         alpha_neo_pump_ui_events();
-    }
+        compiler_fence(Ordering::SeqCst);
+    };
 }

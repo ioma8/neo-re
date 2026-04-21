@@ -1,5 +1,7 @@
 #[cfg(target_arch = "m68k")]
 use core::arch::global_asm;
+#[cfg(target_arch = "m68k")]
+use core::sync::atomic::{Ordering, compiler_fence};
 
 #[cfg(target_arch = "m68k")]
 global_asm!(
@@ -53,6 +55,8 @@ pub fn clear() {
     unsafe {
         alpha_neo_clear_screen();
     };
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
 }
 
 #[allow(
@@ -118,6 +122,8 @@ pub fn yield_once() {
     unsafe {
         alpha_neo_yield();
     };
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
 }
 
 #[allow(
@@ -133,6 +139,8 @@ fn set_row(row: u8) {
     unsafe {
         alpha_neo_set_text_row(u32::from(row), 1, 28);
     };
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
 }
 
 #[allow(
@@ -148,6 +156,8 @@ fn draw_char(byte: u8) {
     unsafe {
         alpha_neo_draw_char(u32::from(byte));
     };
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
 }
 
 #[allow(
@@ -163,4 +173,6 @@ pub fn flush() {
     unsafe {
         alpha_neo_flush_text();
     };
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
 }

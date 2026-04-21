@@ -216,3 +216,4 @@ Calculator applet keys stopped working because GUI printable keys were routed th
 Alpha-emu full system omitted custom Alpha USB and Forth applets because the loader only scanned stock A*.os3kapp dumps	proven
 Alpha USB native crashes in alpha-emu because Rust SDK helper wrappers emitted 68020 long branches that the 68000 emulator cannot execute	proven
 Forth Mini is omitted from SmartApplets menu because native packer omitted the empty cafefeed-terminated info table for applets without metadata	proven
+Forth Mini freezes on start because SDK trap wrappers and compiler-builtins memcpy emitted 68020 long branches that enter at odd addresses on 68000 execution	proven

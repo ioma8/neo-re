@@ -27,6 +27,7 @@ fn main() -> Result<()> {
     let mut scan_matrix_visibility_at = None;
     let mut validate_key_map_at = None;
     let mut validate_alpha_usb_native = false;
+    let mut validate_forth_mini = false;
     let mut boot_left_shift_tab = false;
     let mut boot_keys = None;
     let mut boot_keys_exact = None;
@@ -56,6 +57,8 @@ fn main() -> Result<()> {
             verbose = true;
         } else if arg == "--validate-alpha-usb-native" {
             validate_alpha_usb_native = true;
+        } else if arg == "--validate-forth-mini" {
+            validate_forth_mini = true;
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--lcd-pbm=")) {
             lcd_pbm = Some(PathBuf::from(value));
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--key-at=")) {
@@ -127,6 +130,20 @@ fn main() -> Result<()> {
             let snapshot = session.snapshot();
             println!(
                 "alpha_usb_native_validation=ok pc=0x{:08x} steps={} exception={}",
+                snapshot.pc,
+                snapshot.steps,
+                snapshot.last_exception.as_deref().unwrap_or("none")
+            );
+            return Ok(());
+        }
+        if validate_forth_mini {
+            session.run_realtime_steps(1_000_000);
+            session
+                .run_applet_message_for_validation("Forth Mini", 0x19, 500_000)
+                .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
+            let snapshot = session.snapshot();
+            println!(
+                "forth_mini_validation=ok pc=0x{:08x} steps={} exception={}",
                 snapshot.pc,
                 snapshot.steps,
                 snapshot.last_exception.as_deref().unwrap_or("none")
