@@ -9,4 +9,6 @@ rustflags = [
     "-C", "relocation-model=pic",
     "-C", "jump-tables=no",
     "-C", "panic=abort",
+    "-C", "target-cpu=M68000",
+    "-C", "target-feature=+reserve-a5,+reserve-d7",
 ]

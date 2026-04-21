@@ -214,3 +214,4 @@ Alpha-emu GUI key repeat is too fast because normal text keys are handled both a
 Alpha-emu GUI Enter can double-fire because physical key events hold keys until release instead of queueing one short tap	proven
 Calculator applet keys stopped working because GUI printable keys were routed through egui text events instead of physical matrix taps	proven
 Alpha-emu full system omitted custom Alpha USB and Forth applets because the loader only scanned stock A*.os3kapp dumps	proven
+Alpha USB native crashes in alpha-emu because Rust SDK helper wrappers emitted 68020 long branches that the 68000 emulator cannot execute	proven

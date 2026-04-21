@@ -26,6 +26,7 @@ fn main() -> Result<()> {
     let mut scan_special_keys_at = None;
     let mut scan_matrix_visibility_at = None;
     let mut validate_key_map_at = None;
+    let mut validate_alpha_usb_native = false;
     let mut boot_left_shift_tab = false;
     let mut boot_keys = None;
     let mut boot_keys_exact = None;
@@ -53,6 +54,8 @@ fn main() -> Result<()> {
             lcd_ranges = true;
         } else if arg == "--verbose" {
             verbose = true;
+        } else if arg == "--validate-alpha-usb-native" {
+            validate_alpha_usb_native = true;
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--lcd-pbm=")) {
             lcd_pbm = Some(PathBuf::from(value));
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--key-at=")) {
@@ -116,6 +119,20 @@ fn main() -> Result<()> {
             FirmwareSession::boot_small_rom(firmware)?
         };
         let started_at = Instant::now();
+        if validate_alpha_usb_native {
+            session.run_realtime_steps(1_000_000);
+            session
+                .run_applet_message_for_validation("Alpha USB", 0x19, 200_000)
+                .map_err(|error| anyhow::anyhow!("Alpha USB native validation failed: {error}"))?;
+            let snapshot = session.snapshot();
+            println!(
+                "alpha_usb_native_validation=ok pc=0x{:08x} steps={} exception={}",
+                snapshot.pc,
+                snapshot.steps,
+                snapshot.last_exception.as_deref().unwrap_or("none")
+            );
+            return Ok(());
+        }
         let effective_steps = scan_special_keys_at
             .or(scan_matrix_visibility_at)
             .or(validate_key_map_at)

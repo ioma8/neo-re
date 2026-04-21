@@ -20,7 +20,7 @@ const ASIC_REGISTER_START: u32 = 0x0200_0000;
 const ASIC_REGISTER_END: u32 = 0x0200_0008;
 const STOCK_APPLET_BASE: usize = 0x0047_0000;
 const EXTRA_APPLET_PATHS: &[&str] = &[
-    "../exports/applets/alpha-usb.os3kapp",
+    "../exports/applets/alpha-usb-native.os3kapp",
     "../exports/applets/forth-mini.os3kapp",
 ];
 
@@ -28,6 +28,16 @@ const EXTRA_APPLET_PATHS: &[&str] = &[
 pub enum MemoryError {
     #[error("firmware image does not fit emulator memory")]
     ImageTooLarge,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AppletMemoryValidation {
+    pub(crate) count: usize,
+    pub(crate) start: u32,
+    pub(crate) end: u32,
+    pub(crate) alpha_usb_native: Option<u32>,
+    pub(crate) forth_mini: Option<u32>,
+    pub(crate) valid: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -127,6 +137,72 @@ impl EmuMemory {
 
     pub(crate) fn lcd_snapshot(&self) -> LcdSnapshot {
         self.lcd.snapshot()
+    }
+
+    pub(crate) fn applet_memory_validation(&self) -> AppletMemoryValidation {
+        let mut cursor = STOCK_APPLET_BASE;
+        let start = cursor;
+        let mut count = 0usize;
+        let mut alpha_usb_native = None;
+        let mut forth_mini = None;
+        let mut valid = true;
+
+        while cursor + 0x84 <= self.bytes.len() {
+            if self.bytes.get(cursor..cursor + 4) != Some([0xc0, 0xff, 0xee, 0xad].as_slice()) {
+                break;
+            }
+            let Some(length) = read_be32(&self.bytes, cursor + 4).map(|value| value as usize)
+            else {
+                valid = false;
+                break;
+            };
+            if length < 0x94 || cursor + length > self.bytes.len() {
+                valid = false;
+                break;
+            }
+            let name = applet_name(&self.bytes[cursor + 0x18..cursor + 0x40]);
+            match name.as_deref() {
+                Some("Alpha USB") => alpha_usb_native = Some(cursor as u32),
+                Some("Forth Mini") => forth_mini = Some(cursor as u32),
+                _ => {}
+            }
+            count = count.saturating_add(1);
+            cursor += length;
+        }
+
+        valid &= count > 0
+            && self
+                .applet_storage_end
+                .is_some_and(|expected_end| expected_end as usize == cursor)
+            && alpha_usb_native.is_some()
+            && forth_mini.is_some();
+        AppletMemoryValidation {
+            count,
+            start: start as u32,
+            end: cursor as u32,
+            alpha_usb_native,
+            forth_mini,
+            valid,
+        }
+    }
+
+    pub(crate) fn find_applet_entry(&self, wanted_name: &str) -> Option<u32> {
+        let mut cursor = STOCK_APPLET_BASE;
+        while cursor + 0x94 <= self.bytes.len()
+            && self.bytes.get(cursor..cursor + 4) == Some([0xc0, 0xff, 0xee, 0xad].as_slice())
+        {
+            let length = read_be32(&self.bytes, cursor + 4)? as usize;
+            if length < 0x94 || cursor + length > self.bytes.len() {
+                return None;
+            }
+            let name = applet_name(&self.bytes[cursor + 0x18..cursor + 0x40])?;
+            if name == wanted_name {
+                let entry_offset = read_be32(&self.bytes, cursor + 0x84)?;
+                return Some(cursor as u32 + entry_offset);
+            }
+            cursor += length;
+        }
+        None
     }
 
     pub(crate) fn set_mmio_logging(&mut self, enabled: bool) -> bool {
@@ -307,6 +383,15 @@ fn read_be32(bytes: &[u8], addr: usize) -> Option<u32> {
         *bytes.get(addr + 2)?,
         *bytes.get(addr + 3)?,
     ]))
+}
+
+fn applet_name(bytes: &[u8]) -> Option<String> {
+    let len = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    let name = std::str::from_utf8(&bytes[..len]).ok()?.trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 fn load_stock_applets(bytes: &mut [u8]) {
@@ -604,6 +689,13 @@ mod tests {
         let applet_storage = &memory.bytes[applet_start..applet_end];
         assert!(contains_bytes(applet_storage, b"Alpha USB"));
         assert!(contains_bytes(applet_storage, b"Forth Mini"));
+
+        let validation = memory.applet_memory_validation();
+        assert!(validation.valid);
+        assert_eq!(validation.start as usize, applet_start);
+        assert_eq!(validation.end as usize, applet_end);
+        assert!(validation.alpha_usb_native.is_some());
+        assert!(validation.forth_mini.is_some());
         Ok(())
     }
 

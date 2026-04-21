@@ -331,6 +331,24 @@ impl FirmwareSession {
         self.memory.lcd_snapshot()
     }
 
+    #[must_use]
+    pub fn applet_memory_status(&self) -> String {
+        let validation = self.memory.applet_memory_validation();
+        let state = if validation.valid { "OK" } else { "check" };
+        let alpha_usb = validation
+            .alpha_usb_native
+            .map(|addr| format!("Alpha USB 0x{addr:08x}"))
+            .unwrap_or_else(|| "Alpha USB missing".to_string());
+        let forth = validation
+            .forth_mini
+            .map(|addr| format!("Forth 0x{addr:08x}"))
+            .unwrap_or_else(|| "Forth missing".to_string());
+        format!(
+            "{state}: {} applets 0x{:08x}-0x{:08x}; {alpha_usb}; {forth}",
+            validation.count, validation.start, validation.end
+        )
+    }
+
     pub fn press_char(&mut self, value: char) {
         if let Some(key) = matrix_key_for_char(value) {
             self.memory.press_key(key);
@@ -383,6 +401,41 @@ impl FirmwareSession {
         if let Some(key) = matrix_key_for_code(code) {
             self.memory.tap_key_all_rows(key);
         }
+    }
+
+    pub fn run_applet_message_for_validation(
+        &mut self,
+        applet_name: &str,
+        message: u32,
+        max_steps: usize,
+    ) -> Result<(), String> {
+        let entry = self
+            .memory
+            .find_applet_entry(applet_name)
+            .ok_or_else(|| format!("applet not found: {applet_name}"))?;
+        const VALIDATION_STACK: u32 = 0x0007_fb00;
+        const VALIDATION_STATUS: u32 = 0x0000_1200;
+        self.cpu.regs.pc = Wrapping(entry);
+        self.cpu.regs.ssp = Wrapping(VALIDATION_STACK);
+        self.last_exception = None;
+        self.memory
+            .set_long(VALIDATION_STACK, 0x0042_6752)
+            .ok_or_else(|| "failed to write validation return address".to_string())?;
+        self.memory
+            .set_long(VALIDATION_STACK + 4, message)
+            .ok_or_else(|| "failed to write validation message".to_string())?;
+        self.memory
+            .set_long(VALIDATION_STACK + 8, 0)
+            .ok_or_else(|| "failed to write validation param".to_string())?;
+        self.memory
+            .set_long(VALIDATION_STACK + 12, VALIDATION_STATUS)
+            .ok_or_else(|| "failed to write validation status pointer".to_string())?;
+
+        self.run_steps(max_steps);
+        if let Some(exception) = &self.last_exception {
+            return Err(exception.clone());
+        }
+        Ok(())
     }
 
     #[cfg(test)]

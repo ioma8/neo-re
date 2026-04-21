@@ -39,6 +39,11 @@ unsafe extern "C" {
     fn alpha_neo_mark_direct_connected();
 }
 
+#[allow(
+    clippy::inline_always,
+    reason = "required to avoid 68020 long-branch wrapper thunks in SmartApplet output"
+)]
+#[inline(always)]
 pub fn complete_hid_to_direct() {
     #[cfg(not(target_arch = "m68k"))]
     {}
@@ -49,6 +54,11 @@ pub fn complete_hid_to_direct() {
     }
 }
 
+#[allow(
+    clippy::inline_always,
+    reason = "required to avoid 68020 long-branch wrapper thunks in SmartApplet output"
+)]
+#[inline(always)]
 pub fn mark_direct_connected() {
     #[cfg(not(target_arch = "m68k"))]
     {}

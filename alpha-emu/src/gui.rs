@@ -153,9 +153,10 @@ impl AlphaEmuApp {
                 Some(session) => {
                     let lcd = session.lcd_snapshot();
                     let status = session.status_text().to_string();
+                    let applet_memory_status = session.applet_memory_status();
                     render_lcd(ui, &lcd);
                     ui.add_space(8.0);
-                    render_session_controls(ui, self, &status);
+                    render_session_controls(ui, self, &status, &applet_memory_status);
                     ui.add_space(8.0);
                     let Some(session) = self.session.as_mut() else {
                         return;
@@ -460,12 +461,18 @@ fn render_empty_state(ui: &mut egui::Ui, error: Option<&str>) {
     });
 }
 
-fn render_session_controls(ui: &mut egui::Ui, app: &mut AlphaEmuApp, status: &str) {
+fn render_session_controls(
+    ui: &mut egui::Ui,
+    app: &mut AlphaEmuApp,
+    status: &str,
+    applet_memory_status: &str,
+) {
     compact_panel(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             metadata_pill(ui, "File", compact_path(&app.firmware_path));
             metadata_pill(ui, "State", status);
             metadata_pill(ui, "CPU", format_speed(app.measured_hz));
+            metadata_pill(ui, "Applets", applet_memory_status);
             ui.separator();
             if secondary_button(ui, "Reboot normally").clicked() {
                 let path = app.firmware_path.clone();

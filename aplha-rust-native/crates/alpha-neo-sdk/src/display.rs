@@ -40,6 +40,11 @@ unsafe extern "C" {
     fn alpha_neo_yield();
 }
 
+#[allow(
+    clippy::inline_always,
+    reason = "required to avoid 68020 long-branch wrapper thunks in SmartApplet output"
+)]
+#[inline(always)]
 pub fn clear() {
     #[cfg(not(target_arch = "m68k"))]
     {}
