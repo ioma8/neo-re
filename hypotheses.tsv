@@ -250,3 +250,8 @@ Alpha-emu GUI still needs multi-second key holds because the emulated 0xf202 har
 The real 0xf202 timer rate can be inferred from firmware timer register setup near startup	proven
 Forth Mini freezes after input because every key redraw calls full-screen A000 clear and can leave firmware executing the 0x004266ea string-copy path	disproven
 Forth Mini freezes after input because prompt redraw calls the A098 display flush trap while the modal key loop is active	disproven
+Forth Mini backspace logical-key scenario produces 3 instead of expected 13 in expanded headless validator	not relevant
+Forth Mini cannot parse or print i32::MIN because negative parsing accumulates positive magnitude and write_i32 uses saturating_abs	proven
+AlphaWord cursor blink speed is governed by the 0xf608 deferred timer counter rather than the CPU instruction polling cadence	proven
+The real 0xf608 counter rate is the 32.768 kHz clock divided by firmware prescaler 0x20+1, approximately 993 Hz	proven
+Advancing 0xf608 once per deferred-timer queue service makes AlphaWord cursor timing far too fast	proven

@@ -34,6 +34,7 @@ fn main() -> Result<()> {
     let mut dump_memory = None;
     let mut reinit_memory = false;
     let mut recovery_seed_path = None;
+    let mut sample_lcd_after = None;
     let mut boot_left_shift_tab = false;
     let mut boot_keys = None;
     let mut boot_keys_exact = None;
@@ -89,6 +90,11 @@ fn main() -> Result<()> {
             recovery_seed_path = Some(PathBuf::from(value));
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--lcd-pbm=")) {
             lcd_pbm = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--sample-lcd-after="))
+        {
+            sample_lcd_after = Some(parse_sample_lcd_after(value)?);
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--key-at=")) {
             key_events.push(parse_key_event(value)?);
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--hold-key=")) {
@@ -333,6 +339,9 @@ fn main() -> Result<()> {
             validate_key_map(&session);
             return Ok(());
         }
+        if let Some((interval_steps, count)) = sample_lcd_after {
+            print_lcd_samples(&mut session, interval_steps, count);
+        }
         let elapsed = started_at.elapsed();
         let snapshot = session.snapshot();
         let achieved_hz = if elapsed.is_zero() {
@@ -515,6 +524,49 @@ fn debug_word(snapshot: &alpha_emu::firmware_session::FirmwareSnapshot, addr: u3
         .debug_words
         .iter()
         .find_map(|(word_addr, value)| (*word_addr == addr).then_some(*value))
+}
+
+fn parse_sample_lcd_after(value: &str) -> Result<(usize, usize)> {
+    let Some((interval, count)) = value.split_once(':') else {
+        anyhow::bail!("--sample-lcd-after expects INTERVAL_STEPS:COUNT");
+    };
+    Ok((interval.parse()?, count.parse()?))
+}
+
+fn print_lcd_samples(session: &mut FirmwareSession, interval_steps: usize, count: usize) {
+    let mut previous = session.lcd_snapshot();
+    println!(
+        "lcd_sample index=0 step={} cycles={} hash=0x{:016x} diff=0",
+        session.snapshot().steps,
+        session.snapshot().cycles,
+        lcd_hash(&previous)
+    );
+    for index in 1..=count {
+        session.run_realtime_steps(interval_steps);
+        let current = session.lcd_snapshot();
+        let diff = previous
+            .pixels
+            .iter()
+            .zip(&current.pixels)
+            .filter(|(left, right)| left != right)
+            .count();
+        println!(
+            "lcd_sample index={index} step={} cycles={} hash=0x{:016x} diff={diff}",
+            session.snapshot().steps,
+            session.snapshot().cycles,
+            lcd_hash(&current)
+        );
+        previous = current;
+    }
+}
+
+fn lcd_hash(snapshot: &LcdSnapshot) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for pixel in &snapshot.pixels {
+        hash ^= u64::from(*pixel);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn parse_type_event(value: &str) -> Result<(usize, String)> {

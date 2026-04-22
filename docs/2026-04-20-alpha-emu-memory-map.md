@@ -317,6 +317,11 @@ Two hardware details were required for this to work:
 - `0xf608` is a 16-bit timer source, but firmware combines it with a high-word
   base at `0x00005d94`. The emulator advances `0xf608` and increments
   `0x00005d94` on 16-bit wrap so firmware delay arithmetic remains monotonic.
+  Full OS timer setup at `0x00424df0..0x00424e02` writes `0xf602 = 0x0020`,
+  `0xf604 = 0xd6d8`, then `0xf600 = 0x0019`; this makes the `0xf608` counter
+  track the 32.768 kHz clock divided by `0x20 + 1`, about 993 Hz. Advancing it
+  from deferred-queue polling made AlphaWord timer behavior, including cursor
+  blink, run far too fast.
 - Firmware `STOP` at `0x00426752` resumes at `0x00426756` after an interrupt.
   Treat it as a wakeable low-power wait, not as a reset. Resetting there caused
   repeated splash-screen cycles after the filesystem was already formatted.

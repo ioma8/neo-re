@@ -338,10 +338,15 @@ fn parse_i32(token: &Token) -> Option<i32> {
             return None;
         }
         value = checked_mul10(value)?;
-        value = value.checked_add(i32::from(byte - b'0'))?;
+        let digit = i32::from(byte - b'0');
+        value = if negative {
+            value.checked_sub(digit)?
+        } else {
+            value.checked_add(digit)?
+        };
         index += 1;
     }
-    Some(if negative { -value } else { value })
+    Some(value)
 }
 
 fn checked_mul10(value: i32) -> Option<i32> {
@@ -365,18 +370,17 @@ fn write_i32(target: &mut [u8; LINE_WIDTH], mut offset: usize, value: i32) -> us
         line_set(target, offset, b'0');
         return offset + 1;
     }
-    let mut work = value;
-    if work < 0 {
+    let mut work = value.unsigned_abs();
+    if value < 0 {
         line_set(target, offset, b'-');
         offset += 1;
-        work = work.saturating_abs();
     }
     let mut digits = [0_u8; 10];
     let mut count = 0;
     while work > 0 && count < 10 {
         let digit = u8::try_from(work.wrapping_rem(10)).unwrap_or_default();
         digit_set(&mut digits, count, b'0' + digit);
-        work = work.wrapping_div(10);
+        work /= 10;
         count += 1;
     }
     while count > 0 && offset < LINE_WIDTH {
@@ -581,5 +585,67 @@ mod tests {
         repl.input_len = 3;
         repl.eval_line();
         assert_eq!(&repl.output[2][..12], b"unknown word");
+    }
+
+    #[test]
+    fn handles_backspace_before_evaluating() {
+        let mut repl = Repl::new();
+        for byte in b"12" {
+            repl.push_byte(*byte);
+        }
+        repl.backspace();
+        for byte in b"3 ." {
+            repl.push_byte(*byte);
+        }
+        repl.eval_line();
+        assert_eq!(&repl.output[2][..2], b"13");
+        assert_eq!(repl.depth, 0);
+    }
+
+    #[test]
+    fn evaluates_modulo_and_clear() {
+        let mut repl = Repl::new();
+        repl.input[..9].copy_from_slice(b"7 3 mod .");
+        repl.input_len = 9;
+        repl.eval_line();
+        assert_eq!(&repl.output[2][..1], b"1");
+
+        repl.input[..5].copy_from_slice(b"clear");
+        repl.input_len = 5;
+        repl.eval_line();
+        assert_eq!(&repl.output[2][..2], b"ok");
+        assert_eq!(repl.depth, 0);
+    }
+
+    #[test]
+    fn keeps_prompt_scrolled_to_latest_input() {
+        let mut repl = Repl::new();
+        for _ in 0..30 {
+            repl.push_byte(b'x');
+        }
+        let line = repl.prompt_line();
+        assert_eq!(line[0], b'>');
+        assert_eq!(line[1], b' ');
+        assert!(line[2..].iter().all(|byte| *byte == b'x'));
+    }
+
+    #[test]
+    fn reports_input_full_without_growing_buffer() {
+        let mut repl = Repl::new();
+        for _ in 0..=INPUT_CAPACITY {
+            repl.push_byte(b'x');
+        }
+        assert_eq!(repl.input_len, INPUT_CAPACITY);
+        assert_eq!(&repl.output[2][..10], b"input full");
+    }
+
+    #[test]
+    fn parses_and_prints_i32_min() {
+        let mut repl = Repl::new();
+        repl.input[..13].copy_from_slice(b"-2147483648 .");
+        repl.input_len = 13;
+        repl.eval_line();
+        assert_eq!(&repl.output[2][..11], b"-2147483648");
+        assert_eq!(repl.depth, 0);
     }
 }

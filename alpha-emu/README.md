@@ -42,6 +42,9 @@ Scripted keyboard input is available with `--type-at=STEP:TEXT` and
 Use `--boot-left-shift-tab` with the full System 3 image to emulate holding
 left shift + tab while powering on; this reaches the SmartApplets menu.
 
+Detailed headless command scenarios are documented in
+[`docs/2026-04-22-alpha-emu-headless-usage.md`](../docs/2026-04-22-alpha-emu-headless-usage.md).
+
 The desktop UI shows:
 
 - emulated NEO LCD active viewport, cropped to 256x64 square pixels from the 320x128 controller buffer

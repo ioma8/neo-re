@@ -22,6 +22,8 @@ const STOCK_APPLET_BASE: usize = 0x0047_0000;
 const CPU_HZ: u64 = 33_000_000;
 const PLL_CLK32_EDGE_HZ: u64 = 32_768;
 const PLL_CLK32_CYCLES_PER_EDGE: u64 = CPU_HZ / PLL_CLK32_EDGE_HZ;
+const TIMER_PRESCALER: u64 = 0x20 + 1;
+const TIMER_COUNTER_DENOMINATOR: u64 = CPU_HZ * TIMER_PRESCALER;
 const EXTRA_APPLET_PATHS: &[&str] = &[
     "../exports/applets/alpha-usb-native.os3kapp",
     "../exports/applets/forth-mini.os3kapp",
@@ -54,6 +56,7 @@ pub(crate) struct EmuMemory {
     timebase_counter: u32,
     timer_counter: u32,
     pll_clk32_cycles: u64,
+    timer_counter_phase: u64,
     applet_storage_end: Option<u32>,
     f411_row_select_enabled: bool,
     gpio_keyboard_rows: u16,
@@ -96,6 +99,7 @@ impl EmuMemory {
             timebase_counter: 0,
             timer_counter: 0,
             pll_clk32_cycles: 0,
+            timer_counter_phase: 0,
             applet_storage_end,
             f411_row_select_enabled: !is_neo_system_image,
             gpio_keyboard_rows: 0,
@@ -223,7 +227,6 @@ impl EmuMemory {
         const TIMER_QUEUE_RECORD_LEN: usize = 14;
         const TIMER_QUEUE_RECORDS: usize = 5;
 
-        self.advance_timer_counter(1);
         for index in 0..TIMER_QUEUE_RECORDS {
             let record = TIMER_QUEUE_BASE + index * TIMER_QUEUE_RECORD_LEN;
             if self.bytes.get(record).copied() != Some(1) {
@@ -258,6 +261,14 @@ impl EmuMemory {
             self.pll_clk32_cycles -= PLL_CLK32_CYCLES_PER_EDGE;
             let next = self.mmio_bytes.get(&0xf202).copied().unwrap_or(0) ^ 0x80;
             self.mmio_bytes.insert(0xf202, next);
+        }
+
+        self.timer_counter_phase = self
+            .timer_counter_phase
+            .saturating_add(cycles as u64 * PLL_CLK32_EDGE_HZ);
+        while self.timer_counter_phase >= TIMER_COUNTER_DENOMINATOR {
+            self.timer_counter_phase -= TIMER_COUNTER_DENOMINATOR;
+            self.advance_timer_counter(1);
         }
     }
 
@@ -341,7 +352,6 @@ impl EmuMemory {
                 return 0;
             }
             0xf608 => {
-                self.advance_timer_counter(1);
                 return self.timer_counter as u16;
             }
             _ => {}
@@ -712,6 +722,18 @@ mod tests {
             assert_eq!(memory.get_byte(0xffff_f419), Some(expected_input));
             memory.release_key(crate::keyboard::MatrixKey::new(key));
         }
+        Ok(())
+    }
+
+    #[test]
+    fn timer_counter_follows_prescaled_32768_hz_clock() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+
+        memory.advance_cpu_cycles(super::CPU_HZ as usize);
+
+        assert_eq!(memory.get_word(0xffff_f608), Some(992));
+        assert_eq!(memory.get_word(0xffff_f608), Some(992));
         Ok(())
     }
 
