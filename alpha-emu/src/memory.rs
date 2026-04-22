@@ -76,8 +76,6 @@ impl EmuMemory {
                 write_be32(&mut bytes, 0x0000_0e0a, 0x0041_0000 + system_package as u32);
             }
             load_stock_applets(&mut bytes);
-            // Persistent storage is intentionally left blank here; the full
-            // System firmware should own repair/format initialization.
             write_be32(&mut bytes, 0x0000_7dd8, 0x0000_0830);
         } else {
             if ROM_BASE.saturating_add(firmware.image().len()) > MEMORY_SIZE {
@@ -258,12 +256,7 @@ impl EmuMemory {
         self.pll_clk32_cycles = self.pll_clk32_cycles.saturating_add(cycles as u64);
         while self.pll_clk32_cycles >= PLL_CLK32_CYCLES_PER_EDGE {
             self.pll_clk32_cycles -= PLL_CLK32_CYCLES_PER_EDGE;
-            let next = self
-                .mmio_bytes
-                .get(&0xf202)
-                .copied()
-                .unwrap_or(0)
-                ^ 0x80;
+            let next = self.mmio_bytes.get(&0xf202).copied().unwrap_or(0) ^ 0x80;
             self.mmio_bytes.insert(0xf202, next);
         }
     }
@@ -288,6 +281,24 @@ impl EmuMemory {
             *self.bytes.get(addr + 2)?,
             *self.bytes.get(addr + 3)?,
         ]))
+    }
+
+    pub(crate) fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub(crate) fn overlay_bytes(&mut self, overlay: &[u8]) {
+        let len = self.bytes.len().min(overlay.len());
+        self.bytes[..len].copy_from_slice(&overlay[..len]);
+    }
+
+    pub(crate) fn overlay_range(&mut self, start: u32, overlay: &[u8]) {
+        let start = start as usize;
+        let end = start.saturating_add(overlay.len()).min(self.bytes.len());
+        if start >= end {
+            return;
+        }
+        self.bytes[start..end].copy_from_slice(&overlay[..end - start]);
     }
 
     fn record_mmio(&mut self, access: impl Into<String>) {

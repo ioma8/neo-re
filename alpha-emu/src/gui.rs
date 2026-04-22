@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -8,6 +10,7 @@ use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::FirmwareSession;
 use crate::keyboard::{matrix_key_for_char, matrix_key_label};
 use crate::lcd::LcdSnapshot;
+use crate::recovery_seed;
 
 const SHIFT_CODE: u8 = 0x6e;
 const COMMAND_CODE: u8 = 0x14;
@@ -60,6 +63,9 @@ struct AlphaEmuApp {
     measured_hz: f64,
     last_target_cycles: u64,
     last_actual_cycles: u64,
+    recovery_seed_path: PathBuf,
+    recovery_status: Option<String>,
+    recovery_task: Option<Receiver<RecoveryTaskMessage>>,
 }
 
 impl AlphaEmuApp {
@@ -76,6 +82,9 @@ impl AlphaEmuApp {
             measured_hz: 0.0,
             last_target_cycles: 0,
             last_actual_cycles: 0,
+            recovery_seed_path: recovery_seed::default_seed_path(),
+            recovery_status: None,
+            recovery_task: None,
         };
         app.boot_path(path);
         app
@@ -87,16 +96,13 @@ impl AlphaEmuApp {
 
     fn boot_path_with_entry_chord(&mut self, path: &Path, hold_entry_chord: bool) {
         self.firmware_path = path.to_path_buf();
-        let loaded = FirmwareRuntime::load_small_rom(path)
-            .map_err(|error| error.to_string())
-            .and_then(|rom| {
-                if hold_entry_chord {
-                    FirmwareSession::boot_small_rom_with_entry_chord(rom)
-                } else {
-                    FirmwareSession::boot_small_rom(rom)
-                }
-                .map_err(|error| error.to_string())
-            });
+        let loaded = self.load_boot_session(path, |rom| {
+            if hold_entry_chord {
+                FirmwareSession::boot_small_rom_with_entry_chord(rom)
+            } else {
+                FirmwareSession::boot_small_rom(rom)
+            }
+        });
         match loaded {
             Ok(session) => {
                 self.session = Some(session);
@@ -114,12 +120,9 @@ impl AlphaEmuApp {
 
     fn boot_path_with_left_shift_tab(&mut self, path: &Path) {
         self.firmware_path = path.to_path_buf();
-        let loaded = FirmwareRuntime::load_small_rom(path)
-            .map_err(|error| error.to_string())
-            .and_then(|rom| {
-                FirmwareSession::boot_with_keys(rom, &[0x0e, 0x0c], 512)
-                    .map_err(|error| error.to_string())
-            });
+        let loaded = self.load_boot_session(path, |rom| {
+            FirmwareSession::boot_with_keys(rom, &[0x0e, 0x0c], 512)
+        });
         match loaded {
             Ok(session) => {
                 self.session = Some(session);
@@ -130,6 +133,77 @@ impl AlphaEmuApp {
             Err(error) => {
                 self.session = None;
                 self.load_error = Some(format!("{}: {error}", path.display()));
+            }
+        }
+    }
+
+    fn load_boot_session(
+        &self,
+        path: &Path,
+        boot: impl FnOnce(
+            FirmwareRuntime,
+        )
+            -> Result<FirmwareSession, crate::firmware_session::FirmwareSessionError>,
+    ) -> Result<FirmwareSession, String> {
+        let firmware = FirmwareRuntime::load_small_rom(path).map_err(|error| error.to_string())?;
+        let is_full_system = firmware.is_neo_system_image();
+        let mut session = boot(firmware).map_err(|error| error.to_string())?;
+        if is_full_system {
+            recovery_seed::apply_seed_file_if_present(&mut session, &self.recovery_seed_path)
+                .map_err(|error| error.to_string())?;
+        }
+        Ok(session)
+    }
+
+    fn start_recovery_reinit(&mut self) {
+        if self.recovery_task.is_some() {
+            return;
+        }
+        let firmware_path = self.firmware_path.clone();
+        let seed_path = self.recovery_seed_path.clone();
+        let (sender, receiver) = mpsc::channel();
+        self.recovery_status = Some("Reinitializing memory with firmware recovery...".to_string());
+        self.recovery_task = Some(receiver);
+        thread::spawn(move || {
+            let result = recovery_seed::generate_and_save_seed_with_progress(
+                &firmware_path,
+                &seed_path,
+                |status| {
+                    let _ = sender.send(RecoveryTaskMessage::Progress(status.to_string()));
+                },
+            )
+            .map_err(|error| error.to_string());
+            let _ = sender.send(RecoveryTaskMessage::Done(result));
+        });
+    }
+
+    fn poll_recovery_task(&mut self) {
+        let Some(receiver) = self.recovery_task.as_ref() else {
+            return;
+        };
+        loop {
+            match receiver.try_recv() {
+                Ok(RecoveryTaskMessage::Progress(status)) => {
+                    self.recovery_status = Some(status);
+                }
+                Ok(RecoveryTaskMessage::Done(Ok(path))) => {
+                    self.recovery_task = None;
+                    self.recovery_status = Some(format!("Memory seed saved: {}", path.display()));
+                    let firmware_path = self.firmware_path.clone();
+                    self.boot_path(&firmware_path);
+                    break;
+                }
+                Ok(RecoveryTaskMessage::Done(Err(error))) => {
+                    self.recovery_task = None;
+                    self.recovery_status = Some(format!("Memory reinit failed: {error}"));
+                    break;
+                }
+                Err(mpsc::TryRecvError::Empty) => break,
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.recovery_task = None;
+                    self.recovery_status = Some("Memory reinit worker disconnected".to_string());
+                    break;
+                }
             }
         }
     }
@@ -169,8 +243,18 @@ impl AlphaEmuApp {
     }
 }
 
+#[derive(Debug)]
+enum RecoveryTaskMessage {
+    Progress(String),
+    Done(Result<PathBuf, String>),
+}
+
 impl eframe::App for AlphaEmuApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.poll_recovery_task();
+        if self.recovery_task.is_some() {
+            ctx.request_repaint_after(REALTIME_FRAME_INTERVAL);
+        }
         let now = Instant::now();
         let elapsed = now.saturating_duration_since(self.last_realtime_tick);
         self.last_realtime_tick = now;
@@ -355,10 +439,12 @@ impl MatrixTap {
 const PLUS_CHORD: &[u8] = &[SHIFT_CODE, 0x40];
 
 fn matrix_tap_for_key(key: egui::Key) -> Option<MatrixTap> {
-    matrix_code_for_key(key).map(MatrixTap::Key).or_else(|| match key {
-        egui::Key::Plus => Some(MatrixTap::Chord(PLUS_CHORD)),
-        _ => None,
-    })
+    matrix_code_for_key(key)
+        .map(MatrixTap::Key)
+        .or_else(|| match key {
+            egui::Key::Plus => Some(MatrixTap::Chord(PLUS_CHORD)),
+            _ => None,
+        })
 }
 
 fn matrix_code_for_key(key: egui::Key) -> Option<u8> {
@@ -511,25 +597,37 @@ fn render_session_controls(
     applet_memory_status: &str,
 ) {
     compact_panel(ui, |ui| {
-        ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 5.0);
+        ui.horizontal(|ui| {
             metadata_pill(ui, "File", compact_path(&app.firmware_path));
-            metadata_pill(ui, "State", status);
+            metadata_pill(ui, "", status);
             metadata_pill(ui, "CPU", format_speed(app.measured_hz));
             metadata_pill(ui, "Applets", applet_memory_status);
-            ui.separator();
+            ui.add_space(6.0);
             if secondary_button(ui, "Reboot normally").clicked() {
                 let path = app.firmware_path.clone();
                 app.boot_path(&path);
             }
-            if secondary_button(ui, "Small ROM chord").clicked() {
+            if secondary_button(ui, "Small ROM").clicked() {
                 let path = app.firmware_path.clone();
                 app.boot_path_with_entry_chord(&path, true);
             }
-            if primary_button(ui, "Boot into SmartApplets list").clicked() {
+            if primary_button(ui, "SmartApplets").clicked() {
                 let path = app.firmware_path.clone();
                 app.boot_path_with_left_shift_tab(&path);
             }
+            if secondary_button(ui, "Reinit").clicked() {
+                app.start_recovery_reinit();
+            }
         });
+        if let Some(status) = &app.recovery_status {
+            ui.add_space(2.0);
+            ui.label(
+                egui::RichText::new(status)
+                    .size(11.0)
+                    .color(text_secondary()),
+            );
+        }
     });
 }
 
@@ -716,7 +814,7 @@ fn compact_panel(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
         .fill(card_bg())
         .stroke(border())
         .corner_radius(egui::CornerRadius::same(10))
-        .inner_margin(egui::Margin::symmetric(12, 8))
+        .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, add_contents);
 }
 
@@ -750,7 +848,8 @@ fn secondary_button(ui: &mut egui::Ui, text: &str) -> egui::Response {
         egui::Button::new(egui::RichText::new(text).color(text_primary()))
             .fill(egui::Color32::from_rgb(238, 241, 245))
             .stroke(border())
-            .corner_radius(8.0),
+            .corner_radius(8.0)
+            .min_size(egui::vec2(0.0, 26.0)),
     )
 }
 
@@ -758,17 +857,19 @@ fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
     egui::Frame::new()
         .fill(egui::Color32::from_rgb(239, 243, 248))
         .corner_radius(egui::CornerRadius::same(12))
-        .inner_margin(egui::Margin::symmetric(10, 5))
+        .inner_margin(egui::Margin::symmetric(8, 4))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(label)
-                        .size(12.0)
-                        .color(text_secondary()),
-                );
+                if !label.is_empty() {
+                    ui.label(
+                        egui::RichText::new(label)
+                            .size(11.0)
+                            .color(text_secondary()),
+                    );
+                }
                 ui.label(
                     egui::RichText::new(value.to_string())
-                        .size(12.0)
+                        .size(11.0)
                         .strong()
                         .color(text_primary()),
                 );
@@ -779,8 +880,8 @@ fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
 #[cfg(test)]
 mod tests {
     use super::{
-        MatrixTap, NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, PLUS_CHORD,
-        matrix_code_for_key, matrix_tap_for_key,
+        MatrixTap, NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, PLUS_CHORD, matrix_code_for_key,
+        matrix_tap_for_key,
     };
     use eframe::egui;
 

@@ -198,7 +198,7 @@ the applet file table around `0x00000fd2` and synthetic file records at
 state and could trip the firmware memmove/file-size diagnostics before
 AlphaWord opened `File 1`.
 
-The validated path is:
+The original validated path was:
 
 1. Leave the emulated persistent store blank on full OS boot.
 2. Let the System firmware detect the data-change condition.
@@ -223,6 +223,95 @@ The emulator must not synthesize AlphaWord file records in `EmuMemory`. The full
 System firmware owns this format path, and the emulator only needs to provide
 enough RAM, applet storage, timers, keyboard, and LCD behavior for it to run.
 
+To avoid re-entering the battery/recovery prompt on every fresh emulator boot,
+the emulator can now persist a recovery seed produced by the real firmware
+recovery path. The seed is written by booting with blank low RAM, pressing
+`Y`, pressing Enter, letting the firmware repair/format path run, and then
+saving only these RAM ranges:
+
+| Range | Why it is persisted |
+| --- | --- |
+| `0x00000400..0x00000800` | Firmware recovery marker page. |
+| `0x00000e00..0x00001b00` | Applet runtime tables plus AlphaWord records observed after recovery. |
+
+The default local seed path is
+`alpha-emu/state/full-system-recovery.seed`; that directory is ignored by git.
+If the seed exists, the full-OS emulator overlays these ranges before the CPU
+starts. It does not hardcode only the marker or serialize the full 8 MiB RAM
+image.
+
+### Recovery-Gate Diff Findings
+
+With a completely blank low RAM marker, the full OS shows the recovery prompt:
+
+```text
+An unexpected data change occurred.
+Did you recently remove or replace the
+AlphaSmart's lithium backup battery?
+(Y for yes, N for no)
+```
+
+To isolate the cause, two 8 MiB emulator memory images were captured:
+
+1. Fresh initialized memory before executing any firmware.
+2. Memory after booting the full OS, pressing `Y`, pressing Enter, and letting
+   firmware complete its repair/format path.
+
+Then fresh memory was overlaid with specific post-recovery ranges and booted
+without pressing `Y`.
+
+Overlay result:
+
+| Overlay copied from post-recovery image | Recovery prompt skipped? | Notes |
+| --- | --- | --- |
+| `0x00000400..0x00000800` | yes | LCD hash matched the recovered-memory non-recovery path. |
+| `0x00000e00..0x00001200` | no | Applet/runtime tables alone still reached the recovery screen. |
+| `0x00000fda..0x00001b00` | no | AlphaWord records alone still reached the recovery screen. |
+| `0x00000e00..0x00001200` + `0x00000fda..0x00001b00` | no | Applet tables plus AlphaWord records still reached the recovery screen. |
+| `0x00000400..0x00001b00` | yes | Expected, because it includes the `0x400` marker page. |
+| `0x00018400..0x00019500` | no | Workspace block alone did not satisfy the recovery gate. |
+| `0x0006f800..0x00070900` | no | Workspace block alone did not satisfy the recovery gate. |
+| `0x00071000..0x00072400` | no | Workspace block alone did not satisfy the recovery gate. |
+| `0x0007c300..0x0007cc00` | no | Workspace block alone did not satisfy the recovery gate. |
+
+This strongly suggests that the boot recovery gate is primarily checking the
+low marker page around `0x00000400`, not the applet table or AlphaWord file
+records themselves. After recovery, that page starts with:
+
+```text
+0x00000400: "I am not corrupted!\0"
+```
+
+The minimized passing subset is just the non-NUL bytes
+`0x00000400..0x00000413`:
+
+```text
+0x00000400: "I am not corrupted!"
+```
+
+This works because the surrounding fresh RAM is zero-filled, so the C-string
+comparison still terminates at `0x00000413`.
+
+Marker-only seeding was rejected as the emulator fix because it suppresses the
+prompt without preserving the applet/AlphaWord state produced by the firmware
+repair path. It remains useful only as a minimized proof of the recovery gate.
+
+Static firmware analysis ties this directly to the full OS recovery routine:
+
+| Runtime address | Behavior |
+| --- | --- |
+| `0x004264c0` | Pushes ROM string pointer `0x00448d16`. |
+| `0x004264c6` | Pushes RAM marker pointer `0x00000400`. |
+| `0x004264cc` | Calls `0x00436706`, a bytewise `strcmp` helper. |
+| `0x004264d6` | Branches to the non-recovery path when the compare returns zero. |
+| `0x00426566` | In the `Y` recovery-confirmation path, pushes ROM string pointer `0x00448d2a`. |
+| `0x0042656c` | Pushes RAM marker pointer `0x00000400`. |
+| `0x00426572` | Calls `0x0043672a`, a bytewise `strcpy` helper, writing the accepted marker. |
+
+The recovery prompt resources are resolved through the firmware resource lookup
+at `0x00424212`; IDs `0xdb..0xde` map to the four prompt lines, and IDs
+`0xdf..0xe2` map to the restart confirmation shown after `Y`.
+
 Two hardware details were required for this to work:
 
 - `0xf608` is a 16-bit timer source, but firmware combines it with a high-word
@@ -232,7 +321,26 @@ Two hardware details were required for this to work:
   Treat it as a wakeable low-power wait, not as a reset. Resetting there caused
   repeated splash-screen cycles after the filesystem was already formatted.
 
-Validated headless flow:
+Validated recovery-seed generation:
+
+```sh
+cargo run -q --manifest-path alpha-emu/Cargo.toml -- \
+  --headless \
+  --reinit-memory \
+  --recovery-seed=/tmp/neo-recovery.seed \
+  --steps=120000000 \
+  --stop-at-resource=0xdb \
+  analysis/cab/os3kneorom.os3kos
+```
+
+The command writes a 4,384-byte seed, reloads it, and verifies that the full OS
+does not hit recovery prompt resource `0xdb`. The seed generator now stops when
+the firmware reaches the post-recovery boot point `0x00435a26`, rather than
+blindly running to the later AlphaWord editor state. This keeps GUI
+`Reinit memory` responsive and normally finishes in a few seconds on the
+development machine.
+
+Validated AlphaWord flow:
 
 ```sh
 cargo run -q --manifest-path alpha-emu/Cargo.toml -- \

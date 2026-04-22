@@ -193,6 +193,13 @@ Bypassing the full OS catalog validator at 0x0043c832 lets the emulator reach Al
 Full OS AlphaWord startup memmove failure is caused by stale 0x00ffxxxx fields in synthetic low file descriptors	needs further investigation
 Full OS AlphaWord startup memmove failure is caused by seeding the AlphaWord app-file table before firmware low-descriptor compaction finishes	proven
 Full System repair prompt formats the virtual filesystem after Y+Enter and writes AlphaWord file table state	proven
+Full System recovery prompt is caused by missing/invalid persistent RAM markers that can be seeded from the post-recovery memory diff	proven
+Full System recovery gate is satisfied by low RAM marker page 0x00000400..0x00000800, not by applet tables or AlphaWord records alone	proven
+Full System recovery gate compares RAM at 0x00000400 against the ROM string "I am not corrupted!"	proven
+Full System Y+Enter recovery path writes the 0x00000400 marker by copying the ROM string through a repair/format routine	proven
+Persisting the real firmware recovery output for 0x00000400..0x00000800 and 0x00000e00..0x00001b00 lets fresh full-OS emulator boots skip the recovery prompt without marker-only hardcoding	proven
+Alpha-emu GUI Reinit memory appears stuck because seed generation blindly runs to the late AlphaWord editor state with no progress reporting	proven
+Alpha-emu recovery seed generation can stop at post-recovery boot PC 0x00435a26 and still produce a valid seed	proven
 Firmware STOP at 0x00426752 is a restart request that must reboot with RAM preserved	disproven
 Mapping os3kneorom.os3kos as declared load segments fixes the AlphaWord full OS boot path	disproven
 Firmware STOP at 0x00426752 is a wait-for-interrupt primitive, not a reset request	proven

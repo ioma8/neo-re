@@ -337,19 +337,11 @@ impl FirmwareSession {
     #[must_use]
     pub fn applet_memory_status(&self) -> String {
         let validation = self.memory.applet_memory_validation();
-        let state = if validation.valid { "OK" } else { "check" };
-        let alpha_usb = validation
-            .alpha_usb_native
-            .map(|addr| format!("Alpha USB 0x{addr:08x}"))
-            .unwrap_or_else(|| "Alpha USB missing".to_string());
-        let forth = validation
-            .forth_mini
-            .map(|addr| format!("Forth 0x{addr:08x}"))
-            .unwrap_or_else(|| "Forth missing".to_string());
-        format!(
-            "{state}: {} applets 0x{:08x}-0x{:08x}; {alpha_usb}; {forth}",
-            validation.count, validation.start, validation.end
-        )
+        if validation.valid {
+            format!("OK - {} applets", validation.count)
+        } else {
+            format!("Check - {} applets", validation.count)
+        }
     }
 
     pub fn press_char(&mut self, value: char) {
@@ -479,6 +471,19 @@ impl FirmwareSession {
             .map(|byte| format!("{byte:02x}"))
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    #[must_use]
+    pub fn memory_bytes(&self) -> &[u8] {
+        self.memory.bytes()
+    }
+
+    pub fn overlay_memory_bytes(&mut self, overlay: &[u8]) {
+        self.memory.overlay_bytes(overlay);
+    }
+
+    pub fn overlay_memory_range(&mut self, start: u32, bytes: &[u8]) {
+        self.memory.overlay_range(start, bytes);
     }
 
     #[cfg(test)]

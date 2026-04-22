@@ -5,6 +5,7 @@ use alpha_emu::firmware::FirmwareRuntime;
 use alpha_emu::firmware_session::FirmwareSession;
 use alpha_emu::keyboard::{matrix_cells, matrix_key_label};
 use alpha_emu::lcd::LcdSnapshot;
+use alpha_emu::recovery_seed;
 use anyhow::Result;
 
 fn main() -> Result<()> {
@@ -28,6 +29,11 @@ fn main() -> Result<()> {
     let mut validate_key_map_at = None;
     let mut validate_alpha_usb_native = false;
     let mut validate_forth_mini = false;
+    let mut load_memory = None;
+    let mut dump_memory_start = None;
+    let mut dump_memory = None;
+    let mut reinit_memory = false;
+    let mut recovery_seed_path = None;
     let mut boot_left_shift_tab = false;
     let mut boot_keys = None;
     let mut boot_keys_exact = None;
@@ -59,6 +65,28 @@ fn main() -> Result<()> {
             validate_alpha_usb_native = true;
         } else if arg == "--validate-forth-mini" {
             validate_forth_mini = true;
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--load-memory="))
+        {
+            load_memory = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--dump-memory-start="))
+        {
+            dump_memory_start = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--dump-memory="))
+        {
+            dump_memory = Some(PathBuf::from(value));
+        } else if arg == "--reinit-memory" {
+            reinit_memory = true;
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--recovery-seed="))
+        {
+            recovery_seed_path = Some(PathBuf::from(value));
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--lcd-pbm=")) {
             lcd_pbm = Some(PathBuf::from(value));
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--key-at=")) {
@@ -109,9 +137,15 @@ fn main() -> Result<()> {
         }
     }
     let path = path.unwrap_or_else(|| PathBuf::from("../analysis/cab/smallos3kneorom.os3kos"));
+    let recovery_seed_path = recovery_seed_path.unwrap_or_else(recovery_seed::default_seed_path);
 
     if headless {
-        let firmware = FirmwareRuntime::load_small_rom(path)?;
+        if reinit_memory {
+            let saved = recovery_seed::generate_and_save_seed(&path, &recovery_seed_path)?;
+            println!("recovery_seed_saved={}", saved.display());
+        }
+        let firmware = FirmwareRuntime::load_small_rom(&path)?;
+        let is_full_system = firmware.is_neo_system_image();
         let mut session = if let Some(keys) = boot_keys_exact {
             FirmwareSession::boot_with_exact_keys(firmware, &keys, 50_000)?
         } else if let Some(keys) = boot_keys {
@@ -121,6 +155,20 @@ fn main() -> Result<()> {
         } else {
             FirmwareSession::boot_small_rom(firmware)?
         };
+        if is_full_system
+            && recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?
+        {
+            println!("recovery_seed_loaded={}", recovery_seed_path.display());
+        }
+        if let Some(path) = load_memory {
+            let overlay = std::fs::read(&path)?;
+            session.overlay_memory_bytes(&overlay);
+            println!("memory_loaded={}", path.display());
+        }
+        if let Some(path) = dump_memory_start {
+            std::fs::write(&path, session.memory_bytes())?;
+            println!("memory_start={}", path.display());
+        }
         let started_at = Instant::now();
         if validate_alpha_usb_native {
             session.run_realtime_cycles(220_000_000, 25_000_000);
@@ -223,7 +271,11 @@ fn main() -> Result<()> {
                 );
             }
             session
-                .start_applet_message_with_param_for_validation("Forth Mini", 0x20, u32::from(b'\r'))
+                .start_applet_message_with_param_for_validation(
+                    "Forth Mini",
+                    0x20,
+                    u32::from(b'\r'),
+                )
                 .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
             session.run_until_pc_or_steps(0x0042_6752, 500_000);
             let snapshot = session.snapshot();
@@ -352,6 +404,10 @@ fn main() -> Result<()> {
         if let Some(path) = lcd_pbm {
             write_lcd_pbm(&snapshot.lcd, &path)?;
             println!("lcd_pbm={}", path.display());
+        }
+        if let Some(path) = dump_memory {
+            std::fs::write(&path, session.memory_bytes())?;
+            println!("memory={}", path.display());
         }
         Ok(())
     } else {
