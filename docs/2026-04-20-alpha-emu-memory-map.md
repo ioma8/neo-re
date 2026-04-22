@@ -3,6 +3,139 @@
 Brief record of the memory and MMIO findings validated while booting
 `analysis/cab/smallos3kneorom.os3kos` in `alpha-emu`.
 
+## Whole-Device Address Diagram
+
+This is the current evidence-backed map used by the emulator and by the
+firmware/app analysis. Addresses are 68k physical addresses as observed by the
+firmware. Some flash/persistent-storage ownership is still inferred from the
+System firmware behavior, so those regions are labelled carefully.
+
+```text
+68k address space, not drawn to scale
+
+0x00000000  +--------------------------------------------------------------+
+            | Low RAM / reset mirror                                      |
+            |                                                              |
+            | 0x00000000..0x0000581a  Small ROM reset-vector mirror        |
+            |                         when booting smallos3kneorom.os3kos  |
+            |                                                              |
+            | Low System RAM records observed during full OS boot:          |
+            | 0x00000e0a  runtime System applet pointer table slot 0        |
+            | 0x00000e8a  persistent SmartApplet storage start = 0x00470000 |
+            | 0x00000e8e  persistent SmartApplet storage end               |
+            | 0x00000e92  runtime SmartApplet ID table                     |
+            | 0x00000fda  AlphaWord workspace/file table pointer/state      |
+            | 0x0000355e  per-applet A5/base adjustment table              |
+            | 0x000035e2  current applet slot state                        |
+            | 0x000035e6  current applet id, e.g. 0xa000 for AlphaWord      |
+            | 0x00003e8a  current SmartApplet callback entry pointer       |
+            | 0x00005d94  high word paired with timer register 0xf608       |
+            | 0x00007dd8  seeded TimeModule value used by full OS boot      |
+0x0000f000  | DragonBall internal register/MMIO window                     |
+0x00010000  +--------------------------------------------------------------+
+            | General RAM / System-owned persistent workspace in emulator   |
+            |                                                              |
+            | AlphaWord files are not fixed raw offsets here. The System    |
+            | firmware formats and owns the virtual filesystem. Direct USB  |
+            | exposes them as logical slots 1..8; observed file/workspace   |
+            | state is rooted through the low-RAM records above.            |
+0x00400000  +--------------------------------------------------------------+
+            | Small ROM executable mapping                                 |
+            |                                                              |
+            | 0x00400000..0x0040581a  smallos3kneorom.os3kos               |
+            | 0x0040042a              Small ROM reset PC                   |
+            | 0x00401378              Small ROM entry-chord gate           |
+            | 0x004013c0              Small ROM password path              |
+            | 0x004053ee              password key-code table              |
+0x0040581a  +--------------------------------------------------------------+
+            | Full OS secondary segment area                               |
+            |                                                              |
+            | 0x00406000..0x00406014  os3kneorom segment from updater      |
+0x00410000  +--------------------------------------------------------------+
+            | Full System 3 Neo firmware package / main OS segment         |
+            |                                                              |
+            | 0x00410000..0x00470000  main executable segment              |
+            | 0x00410070              updater entry stub                   |
+            | 0x00410082              normal System boot entry             |
+            | 0x00426768              Line-A trap vector handler target    |
+            | 0x00470000..0x00470800  tail of whole host package mapping;  |
+            |                         applet storage starts at 0x00470000   |
+0x00470000  +--------------------------------------------------------------+
+            | Persistent SmartApplet package chain                         |
+            |                                                              |
+            | 0x00470000..0x0048a0bc  AlphaWord Plus                       |
+            | 0x0048a0bc..0x00496360  AlphaQuiz                            |
+            | 0x00496360..0x0049c340  Calculator                           |
+            | 0x0049c340..0x004bb2e8  KeyWords                             |
+            | 0x004bb2e8..0x005126a8  SpellCheck Large USA                 |
+            | 0x005126a8..0x0051a5ec  Beamer                               |
+            | 0x0051a5ec..0x00521100  Control Panel                        |
+            | 0x00521100..0x0057a9cc  Thesaurus Large USA                  |
+            | 0x0057a9cc..0x0057d690  Text2Speech Updater                  |
+            | 0x0057d690..0x0057db2c  Alpha USB native                     |
+            | 0x0057db2c..0x0058087c  Forth Mini                           |
+0x0058087c  +--------------------------------------------------------------+
+            | High firmware/update segment area                            |
+            |                                                              |
+            | 0x005ffc00..0x00600000  os3kneorom segment from updater      |
+0x00600000  +--------------------------------------------------------------+
+            | Unmapped/unused in current evidence-backed emulator map       |
+0x007fffff  +--------------------------------------------------------------+
+
+0x01000000  +--------------------------------------------------------------+
+            | LCD controller MMIO                                          |
+            | 0x01000000  right LCD command port                           |
+            | 0x01000001  right LCD data port                              |
+            | 0x01008000  left LCD command port                            |
+            | 0x01008001  left LCD data port                               |
+0x01008002  +--------------------------------------------------------------+
+
+0x02000000  +--------------------------------------------------------------+
+            | ASIC/board register window used by full System firmware      |
+            | 0x02000000..0x02000007                                      |
+0x02000008  +--------------------------------------------------------------+
+
+0xffff0000  +--------------------------------------------------------------+
+            | Sign-extended alias of low internal registers                |
+            |                                                              |
+            | 0xfffff202  PLLFSR high byte / CLK32 status bit              |
+            | 0xfffff408  GPIO keyboard row-select helper                  |
+            | 0xfffff410  GPIO keyboard row-select register group          |
+            | 0xfffff411  Small ROM observed row-select byte               |
+            | 0xfffff419  active-low keyboard matrix input byte            |
+            | 0xfffff440  GPIO keyboard row-select register group          |
+            | 0xfffff449  timer-ready bit used by full OS boot             |
+            | 0xfffff608  16-bit timer source                              |
+            | 0xfffffb00..0xfffffb03  timebase high/low words              |
+            | 0xfffffb1a  timebase fractional/low counter word             |
+0xffffffff  +--------------------------------------------------------------+
+```
+
+### AlphaWord File Placement
+
+AlphaWord document contents are best described as a firmware-owned logical
+filesystem, not as a fixed address range we can safely edit directly.
+
+```text
+Direct USB protocol view:
+
+  slot 1..8
+     |
+     +-- read-only attribute command 0x13 gives name/length/reserved size
+     +-- read-only get command retrieves text bytes by slot
+
+Firmware memory view observed during boot:
+
+  0x00000fda / 0x00000fde  AlphaWord workspace table/state
+       |
+       +-- System firmware-created file/workspace records
+             |
+             +-- AlphaWord applet opens "File 1" and edits through OS file APIs
+
+Rule: do not synthesize or patch AlphaWord records by address. Let the System
+firmware format/repair them, then use direct USB read-only commands for backups.
+```
+
 ## ROM and RAM
 
 | Range | Meaning | Evidence |
