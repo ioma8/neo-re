@@ -322,6 +322,13 @@ impl EmuMemory {
         if addr == 0xf449 {
             return self.mmio_bytes.get(&addr).copied().unwrap_or(0) | 0x20;
         }
+        match addr {
+            0x0100_8000 => return self.lcd.read_status(0),
+            0x0100_8001 => return self.lcd.read_data(0),
+            0x0100_0000 => return self.lcd.read_status(1),
+            0x0100_0001 => return self.lcd.read_data(1),
+            _ => {}
+        }
         *self.mmio_bytes.get(&addr).unwrap_or(&0)
     }
 
@@ -657,10 +664,10 @@ mod tests {
         assert_eq!(memory.set_byte(0x0100_0000, 0xa3), Some(()));
         assert_eq!(memory.set_byte(0x0100_0001, 0x55), Some(()));
 
-        assert_eq!(memory.get_byte(0x0100_8000), Some(0xb0));
-        assert_eq!(memory.get_byte(0x0100_8001), Some(0xff));
-        assert_eq!(memory.get_byte(0x0100_0000), Some(0xa3));
-        assert_eq!(memory.get_byte(0x0100_0001), Some(0x55));
+        assert_eq!(memory.get_byte(0x0100_8000), Some(0x00));
+        assert_eq!(memory.get_byte(0x0100_8001), Some(0x00));
+        assert_eq!(memory.get_byte(0x0100_0000), Some(0x00));
+        assert_eq!(memory.get_byte(0x0100_0001), Some(0x00));
         Ok(())
     }
 

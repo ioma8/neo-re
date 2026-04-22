@@ -397,6 +397,16 @@ but are not part of the normal visible NEO screen.
 | `0x01000000` | Right LCD controller command port. | Small ROM writes the second controller through this port. |
 | `0x01000001` | Right LCD controller data port. | Data bytes render the right half of the display. |
 
+Command `0x40..0x7f` is display-start-line state, not a column reset. Treating
+it as a column reset made firmware cursor redraws write at x=0, leaving stale
+cursor pixels as a vertical black trail when moving between AlphaWord lines.
+
+LCD data-port reads must return the controller framebuffer byte, not the last
+generic MMIO byte. AlphaWord cursor movement uses controller read-modify-write:
+`0xe0` starts RMW mode, data reads do not advance the column, the following
+write updates the same byte and advances, and `0xee` restores the original RMW
+column. Without this, old cursor columns remain visible after arrow movement.
+
 ## Keyboard Matrix
 
 | Address | Meaning | Evidence |

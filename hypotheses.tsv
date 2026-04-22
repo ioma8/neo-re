@@ -200,6 +200,8 @@ Full System Y+Enter recovery path writes the 0x00000400 marker by copying the RO
 Persisting the real firmware recovery output for 0x00000400..0x00000800 and 0x00000e00..0x00001b00 lets fresh full-OS emulator boots skip the recovery prompt without marker-only hardcoding	proven
 Alpha-emu GUI Reinit memory appears stuck because seed generation blindly runs to the late AlphaWord editor state with no progress reporting	proven
 Alpha-emu recovery seed generation can stop at post-recovery boot PC 0x00435a26 and still produce a valid seed	proven
+Alpha-emu stale cursor column is caused by treating LCD command 0x40..0x7f as a column reset instead of display-start-line state	proven
+Alpha-emu stale cursor positions remain because LCD data-port reads return generic MMIO state instead of controller framebuffer bytes during firmware read-modify-write cursor erasure	proven
 Firmware STOP at 0x00426752 is a restart request that must reboot with RAM preserved	disproven
 Mapping os3kneorom.os3kos as declared load segments fixes the AlphaWord full OS boot path	disproven
 Firmware STOP at 0x00426752 is a wait-for-interrupt primitive, not a reset request	proven

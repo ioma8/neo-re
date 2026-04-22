@@ -22,6 +22,8 @@ pub(crate) struct Lcd {
 struct Controller {
     page: usize,
     column: usize,
+    display_start_line: usize,
+    read_modify_write: Option<usize>,
     display_on: bool,
     reverse_display: bool,
     pixels: [[u8; CONTROLLER_WIDTH]; PAGES],
@@ -44,6 +46,18 @@ impl Lcd {
         if let Some(controller) = self.controllers.get_mut(controller) {
             controller.write_data(value);
         }
+    }
+
+    pub(crate) fn read_status(&self, controller: usize) -> u8 {
+        self.controllers
+            .get(controller)
+            .map_or(0, Controller::read_status)
+    }
+
+    pub(crate) fn read_data(&mut self, controller: usize) -> u8 {
+        self.controllers
+            .get_mut(controller)
+            .map_or(0, Controller::read_data)
     }
 
     pub(crate) fn snapshot(&self) -> LcdSnapshot {
@@ -87,6 +101,8 @@ impl Controller {
         Self {
             page: 0,
             column: 0,
+            display_start_line: 0,
+            read_modify_write: None,
             display_on: true,
             reverse_display: false,
             pixels: [[0; CONTROLLER_WIDTH]; PAGES],
@@ -100,10 +116,16 @@ impl Controller {
             0xb0..=0xbf => self.page = usize::from(command & 0x0f).min(PAGES - 1),
             0x00..=0x0f => self.column = (self.column & 0xf0) | usize::from(command),
             0x10..=0x1f => self.column = (self.column & 0x0f) | (usize::from(command & 0x0f) << 4),
-            0x40..=0x7f => self.column = 0,
+            0x40..=0x7f => self.display_start_line = usize::from(command & 0x3f),
             0xa6 => self.reverse_display = false,
             0xa7 => self.reverse_display = true,
-            0xa0 | 0xa1 | 0xa3 | 0xc0..=0xc8 | 0xe0..=0xee | 0xf8 => {}
+            0xe0 => self.read_modify_write = Some(self.column),
+            0xee => {
+                if let Some(column) = self.read_modify_write.take() {
+                    self.column = column;
+                }
+            }
+            0xa0 | 0xa1 | 0xa3 | 0xc0..=0xc8 | 0xf8 => {}
             _ => {}
         }
         self.column = self.column.min(CONTROLLER_WIDTH - 1);
@@ -112,6 +134,18 @@ impl Controller {
     fn write_data(&mut self, value: u8) {
         self.pixels[self.page][self.column] = value;
         self.column = (self.column + 1).min(CONTROLLER_WIDTH - 1);
+    }
+
+    fn read_status(&self) -> u8 {
+        if self.display_on { 0x00 } else { 0x20 }
+    }
+
+    fn read_data(&mut self) -> u8 {
+        let value = self.pixels[self.page][self.column];
+        if self.read_modify_write.is_none() {
+            self.column = (self.column + 1).min(CONTROLLER_WIDTH - 1);
+        }
+        value
     }
 }
 
@@ -157,5 +191,54 @@ mod tests {
 
         let snapshot = lcd.snapshot();
         assert!(snapshot.pixels[0]);
+    }
+
+    #[test]
+    fn display_start_line_command_does_not_reset_column() {
+        let mut lcd = Lcd::new();
+
+        lcd.write_command(0, 0xb0);
+        lcd.write_command(0, 0x10);
+        lcd.write_command(0, 0x05);
+        lcd.write_command(0, 0x40);
+        lcd.write_data(0, 0x01);
+
+        let snapshot = lcd.snapshot();
+        assert!(!snapshot.pixels[0]);
+        assert!(snapshot.pixels[5]);
+    }
+
+    #[test]
+    fn data_read_returns_framebuffer_byte_and_advances_column() {
+        let mut lcd = Lcd::new();
+
+        lcd.write_command(0, 0xb0);
+        lcd.write_command(0, 0x03);
+        lcd.write_data(0, 0x5a);
+        lcd.write_command(0, 0x03);
+
+        assert_eq!(lcd.read_data(0), 0x5a);
+        lcd.write_data(0, 0x33);
+
+        let snapshot = lcd.snapshot();
+        assert!(snapshot.pixels[LCD_WIDTH + 3]);
+        assert!(snapshot.pixels[4]);
+    }
+
+    #[test]
+    fn read_modify_write_read_does_not_advance_column_until_write() {
+        let mut lcd = Lcd::new();
+
+        lcd.write_command(0, 0xb0);
+        lcd.write_command(0, 0x04);
+        lcd.write_data(0, 0x5a);
+        lcd.write_command(0, 0x04);
+        lcd.write_command(0, 0xe0);
+
+        assert_eq!(lcd.read_data(0), 0x5a);
+        lcd.write_data(0, 0x00);
+
+        let snapshot = lcd.snapshot();
+        assert!(!snapshot.pixels[4]);
     }
 }
