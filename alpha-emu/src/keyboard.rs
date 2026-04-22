@@ -313,8 +313,17 @@ impl Keyboard {
     }
 
     pub(crate) fn tap(&mut self, key: MatrixKey) {
-        self.push_phase([Some(key), None, None, None], 120, false);
-        self.push_phase([None, None, None, None], 120, false);
+        self.push_phase([Some(key), None, None, None], 8, false);
+        self.push_phase([None, None, None, None], 64, false);
+    }
+
+    pub(crate) fn tap_chord(&mut self, keys: &[MatrixKey]) {
+        let mut key_codes = [None, None, None, None];
+        for (slot, key) in key_codes.iter_mut().zip(keys.iter().copied()) {
+            *slot = Some(key);
+        }
+        self.push_phase(key_codes, 8, false);
+        self.push_phase([None, None, None, None], 64, false);
     }
 
     pub(crate) fn tap_long(&mut self, key: MatrixKey) {

@@ -6,30 +6,56 @@ mod forth;
 
 #[cfg(not(test))]
 use core::panic::PanicInfo;
+#[cfg(target_arch = "m68k")]
+use core::arch::global_asm;
 
 use alpha_neo_sdk::prelude::*;
 use forth::Repl;
 
 struct ForthMini;
 
+#[cfg(target_arch = "m68k")]
+global_asm!(
+    r#"
+    .global alpha_neo_applet_memory_base
+alpha_neo_applet_memory_base:
+    move.l %a5,%a0
+    adda.l #0x300,%a0
+    rts
+    "#
+);
+
+#[cfg(target_arch = "m68k")]
+unsafe extern "C" {
+    fn alpha_neo_applet_memory_base() -> *mut Repl;
+}
+
 impl Applet for ForthMini {
     const ID: u16 = 0xA131;
 
     fn on_focus(ctx: &mut Context) -> Status {
-        let mut repl = Repl::new();
-        draw(ctx, &repl);
-        loop {
-            ctx.keyboard().pump_events();
-            if ctx.keyboard().is_ready() {
-                let raw_key = ctx.keyboard().read_key();
-                if is_exit_key(raw_key) {
-                    return Status::APPLET_EXIT;
-                }
-                handle_key(raw_key, &mut repl);
-                draw(ctx, &repl);
-            }
-            ctx.system().yield_once();
+        with_repl(|repl| {
+            *repl = Repl::new();
+            ctx.screen().clear();
+            draw(ctx, repl);
+        });
+        Status::OK
+    }
+
+    fn on_char(ctx: &mut Context) -> Status {
+        handle_input_byte(ctx, (ctx.param() & 0xff) as u8);
+        Status::OK
+    }
+
+    fn on_key(ctx: &mut Context) -> Status {
+        let raw_key = ctx.param();
+        if is_exit_key(raw_key) {
+            return Status::APPLET_EXIT;
         }
+        if let Some(byte) = alpha_neo_sdk::keyboard::logical_key_to_byte(raw_key) {
+            handle_input_byte(ctx, byte);
+        }
+        Status::OK
     }
 }
 
@@ -37,8 +63,7 @@ fn is_exit_key(raw: u32) -> bool {
     matches!(raw, 0x044B | 0x084B)
 }
 
-fn handle_key(raw: u32, repl: &mut Repl) {
-    let byte = (raw & 0xff) as u8;
+fn handle_byte(byte: u8, repl: &mut Repl) {
     match byte {
         b'\r' | b'\n' => repl.eval_line(),
         0x08 | 0x7f => repl.backspace(),
@@ -47,20 +72,52 @@ fn handle_key(raw: u32, repl: &mut Repl) {
     }
 }
 
+fn handle_input_byte(ctx: &mut Context, byte: u8) {
+    with_repl(|repl| {
+        handle_byte(byte, repl);
+        draw(ctx, repl);
+    });
+}
+
+fn with_repl(callback: impl FnOnce(&mut Repl)) {
+    // SAFETY: A5 points at this applet's writable memory block for the active callback.
+    unsafe {
+        callback(&mut *repl_ptr());
+    };
+}
+
+#[cfg(target_arch = "m68k")]
+fn repl_ptr() -> *mut Repl {
+    // SAFETY: Reads the applet memory base provided in A5 by the NEO OS.
+    unsafe { alpha_neo_applet_memory_base() }
+}
+
+#[cfg(not(target_arch = "m68k"))]
+fn repl_ptr() -> *mut Repl {
+    core::ptr::null_mut()
+}
+
 fn draw(ctx: &mut Context, repl: &Repl) {
-    ctx.screen().clear_row(1);
-    screen_line!(ctx, 1, b"Forth Mini");
-    ctx.screen().clear_row(2);
+    ctx.screen().write_slice(1, &header_line());
     ctx.screen().write_slice(2, &repl.stack_line());
-    ctx.screen().clear_row(3);
-    ctx.screen().write_slice(3, &repl.output[0]);
-    ctx.screen().clear_row(4);
-    ctx.screen().write_slice(4, &repl.output[1]);
-    ctx.screen().clear_row(5);
-    ctx.screen().write_slice(5, &repl.output[2]);
-    ctx.screen().clear_row(6);
-    ctx.screen().write_slice(6, &repl.prompt_line());
+    ctx.screen().write_slice(3, &repl.output[2]);
+    ctx.screen().write_slice(4, &repl.prompt_line());
     ctx.screen().flush();
+}
+
+fn header_line() -> [u8; 28] {
+    let mut line = [b' '; 28];
+    line[0] = b'F';
+    line[1] = b'o';
+    line[2] = b'r';
+    line[3] = b't';
+    line[4] = b'h';
+    line[5] = b' ';
+    line[6] = b'M';
+    line[7] = b'i';
+    line[8] = b'n';
+    line[9] = b'i';
+    line
 }
 
 #[cfg(target_arch = "m68k")]

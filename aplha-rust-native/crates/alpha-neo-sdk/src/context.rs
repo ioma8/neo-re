@@ -116,6 +116,11 @@ impl Keyboard {
         keyboard::read_key()
     }
 
+    #[must_use]
+    pub fn read_byte(self) -> Option<u8> {
+        keyboard::logical_key_to_byte(keyboard::read_key())
+    }
+
     pub fn pump_events(self) {
         keyboard::pump_events();
     }

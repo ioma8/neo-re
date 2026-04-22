@@ -105,10 +105,12 @@ Implement only the callbacks your applet needs:
 
 - `const ID: u16`: the SmartApplet id returned to the NEO.
 - `on_focus`: called for message `0x19` when the applet is opened from the
-  applets menu. This is the safe place to draw instructions and enter the applet
-  UI loop. Calculator uses this pattern: it polls keys through `A0A4`,
-  `A09C`, and `A094`, yields through `A25C`, and returns status `7` when the
-  applet exits.
+  applets menu. This is the safe place to initialize applet state and draw the
+  first screen. For ordinary text-entry applets, return `Status::OK` and handle
+  input through `on_char`/`on_key`.
+- `on_char`: called for message `0x20`; `ctx.param() & 0xff` is the typed byte.
+- `on_key`: called for message `0x21`; use this for non-character keys or decode
+  logical key values with `alpha_neo_sdk::keyboard::logical_key_to_byte`.
 - `on_usb_plug`: called for message `0x30001` on USB attach. Keep this
   non-blocking. Do not draw, flush, wait for keys, or idle here.
 - `on_usb_mac_init`: called for message `0x10001`.
@@ -129,8 +131,14 @@ ctx.system().idle_forever();         // stay in the applet screen
 ctx.usb().is_keyboard_connection();  // current Alpha USB applet gate
 ctx.usb().switch_to_direct();        // run the validated direct-USB OS path
 ctx.keyboard().is_ready();           // non-blocking keyboard poll
-ctx.keyboard().read_key();           // read one pending key code
+ctx.keyboard().read_key();           // read one pending firmware logical key code
+ctx.keyboard().read_byte();          // read and decode one pending printable/control byte
 ```
+
+`A094` / `read_key()` returns the NEO firmware logical key code, not ASCII.
+For example, physical `1` returns logical `0x38`; treating that as ASCII draws
+`8`. Interactive applets that want text input should use `read_byte()` or
+`alpha_neo_sdk::keyboard::logical_key_to_byte()` before feeding a parser.
 
 Known statuses are named:
 
@@ -227,12 +235,19 @@ Build:
 ```
 
 It accepts signed decimal integers and keeps a 16-cell stack. This is an
-experimental applet intended to exercise keyboard polling, display updates, and
+experimental applet intended to exercise OS-dispatched text input, display updates, and
 small stateful Rust applet code.
 
-Its lifecycle intentionally follows Calculator: all live REPL state is owned by
-the `0x19` focus/menu-open handler while that handler runs its key polling loop.
-It does not use applet-private keypress messages for ordinary typing.
+Its lifecycle is event-driven: `on_focus` initializes and draws the REPL, then
+`on_char`/`on_key` process later input messages from the OS. A Calculator-style
+modal key loop was tested and rejected for this applet because it can fight the
+full OS debounce path and make later typed input stop reaching the REPL.
+
+The REPL stores state at `A5 + 0x300` inside its declared base-memory block.
+Keeping the low A5 area free avoids clobbering firmware/app-runtime scratch
+state; early versions that wrote the REPL at `A5 + 0` produced display/input
+corruption. The focus screen is drawn after a full screen clear because leftover
+menu highlight state can otherwise remain visible.
 
 Current status: the Rust source compiles, packages, and its host tests pass.
 It has not yet been validated on the physical device. Treat it as experimental

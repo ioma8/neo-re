@@ -12,6 +12,7 @@ enum EvalError {
     UnknownWord,
 }
 
+#[repr(C)]
 #[derive(Clone, Eq, PartialEq)]
 pub struct Repl {
     stack: [i32; STACK_CAPACITY],
@@ -336,11 +337,17 @@ fn parse_i32(token: &Token) -> Option<i32> {
         if !byte.is_ascii_digit() {
             return None;
         }
-        value = value.checked_mul(10)?;
+        value = checked_mul10(value)?;
         value = value.checked_add(i32::from(byte - b'0'))?;
         index += 1;
     }
     Some(if negative { -value } else { value })
+}
+
+fn checked_mul10(value: i32) -> Option<i32> {
+    let by_eight = value.checked_shl(3)?;
+    let by_two = value.checked_shl(1)?;
+    by_eight.checked_add(by_two)
 }
 
 fn write_usize(target: &mut [u8; LINE_WIDTH], offset: usize, value: usize) -> usize {

@@ -19,6 +19,9 @@ const LCD_LEFT_END: u32 = 0x0100_8002;
 const ASIC_REGISTER_START: u32 = 0x0200_0000;
 const ASIC_REGISTER_END: u32 = 0x0200_0008;
 const STOCK_APPLET_BASE: usize = 0x0047_0000;
+const CPU_HZ: u64 = 33_000_000;
+const PLL_CLK32_EDGE_HZ: u64 = 32_768;
+const PLL_CLK32_CYCLES_PER_EDGE: u64 = CPU_HZ / PLL_CLK32_EDGE_HZ;
 const EXTRA_APPLET_PATHS: &[&str] = &[
     "../exports/applets/alpha-usb-native.os3kapp",
     "../exports/applets/forth-mini.os3kapp",
@@ -50,6 +53,7 @@ pub(crate) struct EmuMemory {
     mmio_logging: bool,
     timebase_counter: u32,
     timer_counter: u32,
+    pll_clk32_cycles: u64,
     applet_storage_end: Option<u32>,
     f411_row_select_enabled: bool,
     gpio_keyboard_rows: u16,
@@ -93,6 +97,7 @@ impl EmuMemory {
             mmio_logging: true,
             timebase_counter: 0,
             timer_counter: 0,
+            pll_clk32_cycles: 0,
             applet_storage_end,
             f411_row_select_enabled: !is_neo_system_image,
             gpio_keyboard_rows: 0,
@@ -109,6 +114,10 @@ impl EmuMemory {
 
     pub(crate) fn tap_key(&mut self, key: MatrixKey) {
         self.keyboard.tap(key);
+    }
+
+    pub(crate) fn tap_key_chord(&mut self, keys: &[MatrixKey]) {
+        self.keyboard.tap_chord(keys);
     }
 
     pub(crate) fn tap_key_long(&mut self, key: MatrixKey) {
@@ -245,12 +254,30 @@ impl EmuMemory {
         }
     }
 
+    pub(crate) fn advance_cpu_cycles(&mut self, cycles: usize) {
+        self.pll_clk32_cycles = self.pll_clk32_cycles.saturating_add(cycles as u64);
+        while self.pll_clk32_cycles >= PLL_CLK32_CYCLES_PER_EDGE {
+            self.pll_clk32_cycles -= PLL_CLK32_CYCLES_PER_EDGE;
+            let next = self
+                .mmio_bytes
+                .get(&0xf202)
+                .copied()
+                .unwrap_or(0)
+                ^ 0x80;
+            self.mmio_bytes.insert(0xf202, next);
+        }
+    }
+
     pub(crate) fn peek_word(&self, addr: u32) -> Option<u16> {
         let addr = addr as usize;
         Some(u16::from_be_bytes([
             *self.bytes.get(addr)?,
             *self.bytes.get(addr + 1)?,
         ]))
+    }
+
+    pub(crate) fn peek_byte(&self, addr: u32) -> Option<u8> {
+        self.bytes.get(addr as usize).copied()
     }
 
     pub(crate) fn peek_long(&self, addr: u32) -> Option<u32> {
@@ -279,14 +306,7 @@ impl EmuMemory {
             return self.keyboard.read_matrix_input();
         }
         if addr == 0xf202 {
-            let value = self
-                .mmio_bytes
-                .get(&addr)
-                .copied()
-                .unwrap_or(0)
-                .wrapping_add(1);
-            self.mmio_bytes.insert(addr, value);
-            return value;
+            return self.mmio_bytes.get(&addr).copied().unwrap_or(0);
         }
         if addr == 0xf449 {
             return self.mmio_bytes.get(&addr).copied().unwrap_or(0) | 0x20;

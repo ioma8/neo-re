@@ -217,3 +217,27 @@ Alpha-emu full system omitted custom Alpha USB and Forth applets because the loa
 Alpha USB native crashes in alpha-emu because Rust SDK helper wrappers emitted 68020 long branches that the 68000 emulator cannot execute	proven
 Forth Mini is omitted from SmartApplets menu because native packer omitted the empty cafefeed-terminated info table for applets without metadata	proven
 Forth Mini freezes on start because SDK trap wrappers and compiler-builtins memcpy emitted 68020 long branches that enter at odd addresses on 68000 execution	proven
+Forth Mini keypress failure is a packaging or 68000 crash issue	disproven
+Forth Mini keypress failure is caused by polling a key-ready/read-key path that does not receive full-OS applet input during SetFocus	proven
+Forth Mini event-driven state crashed because the A5 applet-memory helper returned a pointer in D0 while the m68k Rust ABI expects pointer returns in A0	proven
+Forth Mini prompt/random ss display issue is caused by drawing prompt/output rows outside the NEO's normal four-line text viewport	proven
+Alpha-emu plus key inserts equals because GUI maps egui Plus to an unshifted equals matrix tap	proven
+Forth Mini prompt corruption and unknown-word input are caused by storing REPL state at A5+0, overlapping applet runtime/OS-reserved state	proven
+Forth Mini unknown-word after typing a digit is caused by treating raw Key messages as printable text instead of waiting for Char messages	proven
+Forth Mini stale top-right text is caused by only clearing 28 text columns instead of clearing the full LCD before redraw	proven
+Forth Mini still shows a black prompt band and duplicate random input because event-driven callbacks leave the firmware menu/event layer involved instead of running the Calculator-style modal 0x19 key loop	proven
+Forth Mini modal loop key mappings are wrong because trap A094 returns firmware logical key codes, not ASCII bytes	proven
+Forth Mini freezes after first real key because the modal loop accepts repeated ready reads from one held physical key without debouncing	disproven
+Forth Mini drops later queued keys because an applet-side blocking release wait consumes subsequent matrix-tap phases	proven
+Forth Mini headless validator can appear frozen because normal scripted taps hold keys for 120 matrix reads and firmware debounce waits for release	proven
+Forth Mini freezes after typed input because its Calculator-style modal key loop fights the full OS key debounce/event dispatcher; using OS Char/Key callbacks fixes input flow	proven
+Alpha-emu GUI drops most physical keyboard presses because GUI key-down events enqueue ultra-short scripted taps that the firmware scanner often misses	proven
+Alpha-emu GUI can miss very quick key taps because key-down and key-up may be processed before the emulated CPU observes the pressed matrix state	proven
+Alpha-emu GUI repeats characters too quickly because physical keyboard key-down now holds the matrix key until OS key-up and the full firmware repeats held keys	proven
+Alpha-emu held-key repeat is unrealistically fast because MMIO delay byte 0xf202 increments on every read instead of on emulated hardware timer ticks	proven
+Alpha-emu GUI requires multi-second key holds because the per-frame interpreter cap can under-run the 33 MHz firmware budget and stretch debounce delays	needs further investigation
+Alpha-emu GUI quick taps are missed because key-down/key-up can arrive in one UI batch and the emulator only runs 2000 cycles while the key is held	disproven
+Alpha-emu GUI still needs multi-second key holds because the emulated 0xf202 hardware tick rate of 128 Hz is too slow for firmware debounce loops	proven
+The real 0xf202 timer rate can be inferred from firmware timer register setup near startup	proven
+Forth Mini freezes after input because every key redraw calls full-screen A000 clear and can leave firmware executing the 0x004266ea string-copy path	disproven
+Forth Mini freezes after input because prompt redraw calls the A098 display flush trap while the modal key loop is active	disproven

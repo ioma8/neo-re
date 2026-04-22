@@ -189,6 +189,7 @@ impl FirmwareSession {
             .disassembler_interpreter_exception(&mut self.memory);
         self.steps = self.steps.saturating_add(1);
         self.cycles = self.cycles.saturating_add(cycles as u64);
+        self.memory.advance_cpu_cycles(cycles);
         if !disassembly.is_empty() {
             self.push_trace(format!("0x{pc:08x}: {disassembly}"));
         }
@@ -222,6 +223,7 @@ impl FirmwareSession {
             let (cycles, exception) = self.cpu.interpreter_exception(&mut self.memory);
             self.steps = self.steps.saturating_add(1);
             self.cycles = self.cycles.saturating_add(cycles as u64);
+            self.memory.advance_cpu_cycles(cycles);
             if let Some(vector) = exception {
                 if self.enter_exception_handler(vector, pc) {
                     continue;
@@ -278,6 +280,7 @@ impl FirmwareSession {
             let (cycles, exception) = self.cpu.interpreter_exception(&mut self.memory);
             self.steps = self.steps.saturating_add(1);
             self.cycles = self.cycles.saturating_add(cycles as u64);
+            self.memory.advance_cpu_cycles(cycles);
             if let Some(vector) = exception {
                 if self.enter_exception_handler(vector, pc) {
                     continue;
@@ -391,6 +394,14 @@ impl FirmwareSession {
         }
     }
 
+    pub fn tap_matrix_chord(&mut self, codes: &[u8]) {
+        let keys: Vec<_> = codes
+            .iter()
+            .filter_map(|code| matrix_key_for_code(*code))
+            .collect();
+        self.memory.tap_key_chord(&keys);
+    }
+
     pub fn tap_matrix_code_long(&mut self, code: u8) {
         if let Some(key) = matrix_key_for_code(code) {
             self.memory.tap_key_long(key);
@@ -409,14 +420,38 @@ impl FirmwareSession {
         message: u32,
         max_steps: usize,
     ) -> Result<(), String> {
+        self.start_applet_message_with_param_for_validation(applet_name, message, 0)?;
+        self.run_steps(max_steps);
+        if let Some(exception) = &self.last_exception {
+            return Err(exception.clone());
+        }
+        Ok(())
+    }
+
+    pub fn start_applet_message_for_validation(
+        &mut self,
+        applet_name: &str,
+        message: u32,
+    ) -> Result<(), String> {
+        self.start_applet_message_with_param_for_validation(applet_name, message, 0)
+    }
+
+    pub fn start_applet_message_with_param_for_validation(
+        &mut self,
+        applet_name: &str,
+        message: u32,
+        param: u32,
+    ) -> Result<(), String> {
         let entry = self
             .memory
             .find_applet_entry(applet_name)
             .ok_or_else(|| format!("applet not found: {applet_name}"))?;
         const VALIDATION_STACK: u32 = 0x0007_fb00;
         const VALIDATION_STATUS: u32 = 0x0000_1200;
+        const VALIDATION_APPLET_MEMORY: u32 = 0x0007_f000;
         self.cpu.regs.pc = Wrapping(entry);
         self.cpu.regs.ssp = Wrapping(VALIDATION_STACK);
+        self.cpu.regs.a[5] = Wrapping(VALIDATION_APPLET_MEMORY);
         self.last_exception = None;
         self.memory
             .set_long(VALIDATION_STACK, 0x0042_6752)
@@ -425,17 +460,25 @@ impl FirmwareSession {
             .set_long(VALIDATION_STACK + 4, message)
             .ok_or_else(|| "failed to write validation message".to_string())?;
         self.memory
-            .set_long(VALIDATION_STACK + 8, 0)
+            .set_long(VALIDATION_STACK + 8, param)
             .ok_or_else(|| "failed to write validation param".to_string())?;
         self.memory
             .set_long(VALIDATION_STACK + 12, VALIDATION_STATUS)
             .ok_or_else(|| "failed to write validation status pointer".to_string())?;
-
-        self.run_steps(max_steps);
-        if let Some(exception) = &self.last_exception {
-            return Err(exception.clone());
-        }
         Ok(())
+    }
+
+    #[must_use]
+    pub fn validation_applet_memory_hex(&self, offset: u32, len: usize) -> String {
+        const VALIDATION_APPLET_MEMORY: u32 = 0x0007_f000;
+        (0..len)
+            .filter_map(|index| {
+                self.memory
+                    .peek_byte(VALIDATION_APPLET_MEMORY + offset + index as u32)
+            })
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     #[cfg(test)]
@@ -662,7 +705,7 @@ mod tests {
         let firmware =
             crate::firmware::FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
         let mut session = FirmwareSession::boot_small_rom(firmware)?;
-        session.run_steps(3_000_000);
+        session.run_realtime_cycles(220_000_000, 25_000_000);
         let snapshot = session.snapshot();
 
         assert!(snapshot.last_exception.is_none());

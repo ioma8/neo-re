@@ -59,6 +59,8 @@ pub unsafe fn dispatch<A: Applet>(message: u32, param: u32, status_out: *mut u32
     let mut ctx = Context::new(param);
     let status = match Message::from_raw(message) {
         Message::SetFocus => A::on_focus(&mut ctx),
+        Message::Char => A::on_char(&mut ctx),
+        Message::Key => A::on_key(&mut ctx),
         Message::UsbPlug => A::on_usb_plug(&mut ctx),
         Message::UsbMacInit => A::on_usb_mac_init(&mut ctx),
         Message::UsbPcInit => A::on_usb_pc_init(&mut ctx),

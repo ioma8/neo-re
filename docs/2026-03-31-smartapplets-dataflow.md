@@ -443,7 +443,7 @@ Confirmed or strongly inferred shared trap meanings from the currently renamed c
 - `0xa004`: set text row / column / width
 - `0xa010`: draw a predefined glyph or marker id
 - `0xa014`: draw a C-string at the current text position
-- `0xa094` `TrapA094`: read key code
+- `0xa094` `TrapA094`: read firmware logical key code
 - `0xa09c`: test whether a key / event is ready
 - `0xa0a4`: pump pending UI events
 - `0xa25c`: yield while waiting for the next event
@@ -475,7 +475,7 @@ High-confidence trap-stub mappings from that block:
   - conservative behavioral name; exact trap id is certain, detailed ABI still is not
 - `0x00012d8c` `TrapA010_DrawPredefinedGlyph`
 - `0x00012d8e` `TrapA014_DrawCStringAtCurrentPosition`
-- `0x00012dbc` `TrapA094_ReadKeyCode`
+- `0x00012dbc` `TrapA094_ReadLogicalKeyCode`
 - `0x00012dbe` `TrapA098_FlushTextFrame`
 - `0x00012dc0` `TrapA09C_IsKeyReady`
 - `0x00012dc8` `TrapA0A4_PumpUiEvents`
@@ -1598,6 +1598,27 @@ Live/Ghidra correction: valid SmartApplet images must also end with the 4-byte t
 Live lifecycle correction: selecting a generated custom applet from the physical NEO Applets menu first invoked the applet entry point with command `0x19`, not `0x18`. A deliberate fault probe encoded that command as the visible bus-error address `0x580019`. This matches Calculator better than the original minimal stub did: Calculator uses command `0x19` to run its interactive menu loop, then performs cleanup and returns status `7`. A generated probe that handled `0x19` as menu entry stayed active and the NEO could return to the Applets menu, proving the lifecycle path is reachable.
 
 Live custom UI correction: the blank `0x19` probe failed because the drawing path did not match the Calculator-style trap-call ABI closely enough. The working visible probes use local `bsr.w` calls into A-line trap stubs, set `(row=2, column=1, width=28)` with `A004`, draw ASCII bytes through `A010`, flush with `A098`, and idle through `A25C`. The physical NEO accepted and listed `USB Menu Probe` `0xa129` version `1.8` at `364` bytes, and then accepted version `1.9` at `328` bytes after the direct-callback arming sequence replaced the older USB-event experiment.
+
+Native Rust Forth Mini correction: ordinary text-entry applets should let the
+full OS dispatch `0x20` Char and `0x21` Key messages. A Calculator-style modal
+`0x19` loop can work for Calculator, but it fought the full OS key debounce path
+in `Forth Mini`: after one or two synthetic keys the firmware sat in the
+`0x00441494`/`0x004266e4` key-delay path and later input did not reach the REPL.
+The working `Forth Mini` now initializes and draws on `0x19`, stores its REPL at
+`A5 + 0x300`, handles printable input in `on_char`, and handles non-character
+keys in `on_key`.
+
+`A094` returns the firmware logical key code, not ASCII. The observed failure
+was exact: typing `1 2 3 4 5 6 q w e r` produced `8 7 6 9 / 0 " ! <space> #`
+because those are the ASCII interpretations of logical codes
+`0x38 0x37 0x36 0x39 0x2f 0x30 0x22 0x21 0x20 0x23`. Native applets must decode
+logical codes through the firmware keyboard/HID table before feeding text input.
+The SDK exposes this as `logical_key_to_byte()` and `ctx.keyboard().read_byte()`
+for applets that intentionally use direct key polling; event-driven Char
+callbacks receive ordinary byte parameters.
+`Forth Mini` also keeps REPL state at `A5 + 0x300` inside its base-memory block;
+writing the REPL at `A5 + 0` overlapped firmware/app-runtime scratch state and
+caused visible display/input corruption.
 
 ### Host Runtime Boundary
 

@@ -123,7 +123,7 @@ fn main() -> Result<()> {
         };
         let started_at = Instant::now();
         if validate_alpha_usb_native {
-            session.run_realtime_steps(1_000_000);
+            session.run_realtime_cycles(220_000_000, 25_000_000);
             session
                 .run_applet_message_for_validation("Alpha USB", 0x19, 200_000)
                 .map_err(|error| anyhow::anyhow!("Alpha USB native validation failed: {error}"))?;
@@ -137,11 +137,110 @@ fn main() -> Result<()> {
             return Ok(());
         }
         if validate_forth_mini {
-            session.run_realtime_steps(1_000_000);
+            session.run_realtime_cycles(220_000_000, 25_000_000);
             session
-                .run_applet_message_for_validation("Forth Mini", 0x19, 500_000)
+                .start_applet_message_for_validation("Forth Mini", 0x19)
                 .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
+            session.run_until_pc_or_steps(0x0042_6752, 500_000);
             let snapshot = session.snapshot();
+            if let Some(exception) = &snapshot.last_exception {
+                let trace = snapshot
+                    .trace
+                    .iter()
+                    .rev()
+                    .take(12)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n  ");
+                anyhow::bail!("Forth Mini validation failed: {exception}\n  {trace}");
+            }
+            for value in [b'1', b'2'] {
+                session
+                    .start_applet_message_with_param_for_validation(
+                        "Forth Mini",
+                        0x20,
+                        u32::from(value),
+                    )
+                    .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
+                session.run_until_pc_or_steps(0x0042_6752, 500_000);
+                let snapshot = session.snapshot();
+                if let Some(exception) = &snapshot.last_exception {
+                    let trace = snapshot
+                        .trace
+                        .iter()
+                        .rev()
+                        .take(12)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                        .join("\n  ");
+                    anyhow::bail!(
+                        "Forth Mini validation failed after {:?}: {exception}\n  {trace}",
+                        char::from(value)
+                    );
+                }
+            }
+            let typed_lcd = session.lcd_snapshot();
+            session
+                .start_applet_message_with_param_for_validation("Forth Mini", 0x20, u32::from(b'5'))
+                .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
+            session.run_until_pc_or_steps(0x0042_6752, 500_000);
+            let continued_lcd = session.lcd_snapshot();
+            let input_hex = session.validation_applet_memory_hex(0x300 + 64 + 4, 3);
+            if input_hex != "31 32 35" {
+                let snapshot = session.snapshot();
+                let trace = snapshot
+                    .trace
+                    .iter()
+                    .rev()
+                    .take(12)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n  ");
+                anyhow::bail!(
+                    "Forth Mini validation failed: input bytes did not reach REPL; pc=0x{:08x} exception={} input={}\n  {}",
+                    snapshot.pc,
+                    snapshot.last_exception.as_deref().unwrap_or("none"),
+                    input_hex,
+                    trace
+                );
+            }
+            if typed_lcd.pixels == continued_lcd.pixels {
+                let snapshot = session.snapshot();
+                anyhow::bail!(
+                    "Forth Mini validation failed: later 5 input did not change LCD; pc=0x{:08x} exception={} repl={}",
+                    snapshot.pc,
+                    snapshot.last_exception.as_deref().unwrap_or("none"),
+                    session.validation_applet_memory_hex(0x300 + 64, 16)
+                );
+            }
+            session
+                .start_applet_message_with_param_for_validation("Forth Mini", 0x20, u32::from(b'\r'))
+                .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
+            session.run_until_pc_or_steps(0x0042_6752, 500_000);
+            let snapshot = session.snapshot();
+            if let Some(exception) = &snapshot.last_exception {
+                let trace = snapshot
+                    .trace
+                    .iter()
+                    .rev()
+                    .take(12)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n  ");
+                anyhow::bail!("Forth Mini validation failed: {exception}\n  {trace}");
+            }
             println!(
                 "forth_mini_validation=ok pc=0x{:08x} steps={} exception={}",
                 snapshot.pc,

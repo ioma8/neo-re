@@ -15,9 +15,9 @@ const OPTION_CODE: u8 = 0x41;
 const CTRL_CODE: u8 = 0x7c;
 const NEO_CPU_HZ: u64 = 33_000_000;
 const REALTIME_FRAME_INTERVAL: Duration = Duration::from_millis(16);
-const MAX_REALTIME_STEPS_PER_FRAME: usize = 250_000;
+const MAX_REALTIME_STEPS_PER_FRAME: usize = 1_000_000;
 const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(16);
-const MAX_REALTIME_WORK_PER_FRAME: Duration = Duration::from_millis(12);
+const MAX_REALTIME_WORK_PER_FRAME: Duration = Duration::from_millis(15);
 const SPEED_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const NEO_VISIBLE_LCD_HEIGHT: usize = 64;
 const NEO_VISIBLE_LCD_WIDTH: usize = 264;
@@ -262,11 +262,14 @@ impl AlphaEmuApp {
                         ..
                     } => {
                         handled |= self.modifier_state.sync(session, *modifiers);
-                        if let Some(code) = matrix_code_for_key(*key) {
+                        if let Some(tap) = matrix_tap_for_key(*key) {
                             if *pressed {
-                                session.tap_matrix_code(code);
-                                handled = true;
+                                tap.press(session);
+                            } else {
+                                tap.release(session);
                             }
+                            session.run_realtime_steps(2_000);
+                            handled = true;
                         }
                     }
                     _ => {}
@@ -317,6 +320,45 @@ fn sync_matrix_key(session: &mut FirmwareSession, old: bool, new: bool, code: u8
         }
         _ => false,
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MatrixTap {
+    Key(u8),
+    Chord(&'static [u8]),
+}
+
+impl MatrixTap {
+    fn press(self, session: &mut FirmwareSession) {
+        match self {
+            Self::Key(code) => session.press_matrix_code(code),
+            Self::Chord(codes) => {
+                for code in codes {
+                    session.press_matrix_code(*code);
+                }
+            }
+        }
+    }
+
+    fn release(self, session: &mut FirmwareSession) {
+        match self {
+            Self::Key(code) => session.release_matrix_code(code),
+            Self::Chord(codes) => {
+                for code in codes {
+                    session.release_matrix_code(*code);
+                }
+            }
+        }
+    }
+}
+
+const PLUS_CHORD: &[u8] = &[SHIFT_CODE, 0x40];
+
+fn matrix_tap_for_key(key: egui::Key) -> Option<MatrixTap> {
+    matrix_code_for_key(key).map(MatrixTap::Key).or_else(|| match key {
+        egui::Key::Plus => Some(MatrixTap::Chord(PLUS_CHORD)),
+        _ => None,
+    })
 }
 
 fn matrix_code_for_key(key: egui::Key) -> Option<u8> {
@@ -374,7 +416,8 @@ fn matrix_code_for_key(key: egui::Key) -> Option<u8> {
             matrix_key_for_char('/').map(|key| key.code())
         }
         egui::Key::Minus => matrix_key_for_char('-').map(|key| key.code()),
-        egui::Key::Equals | egui::Key::Plus => matrix_key_for_char('=').map(|key| key.code()),
+        egui::Key::Equals => matrix_key_for_char('=').map(|key| key.code()),
+        egui::Key::Plus => None,
         egui::Key::Backspace => Some(0x09),
         egui::Key::Delete => Some(0x61),
         egui::Key::Enter => Some(0x69),
@@ -735,7 +778,10 @@ fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
 
 #[cfg(test)]
 mod tests {
-    use super::{NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, matrix_code_for_key};
+    use super::{
+        MatrixTap, NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, PLUS_CHORD,
+        matrix_code_for_key, matrix_tap_for_key,
+    };
     use eframe::egui;
 
     use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
@@ -805,7 +851,6 @@ mod tests {
         let expected = [
             (egui::Key::Minus, 0x43),
             (egui::Key::Equals, 0x40),
-            (egui::Key::Plus, 0x40),
             (egui::Key::Slash, 0x73),
             (egui::Key::Questionmark, 0x73),
             (egui::Key::Period, 0x62),
@@ -818,6 +863,10 @@ mod tests {
         for (key, code) in expected {
             assert_eq!(matrix_code_for_key(key), Some(code));
         }
+        assert_eq!(
+            matrix_tap_for_key(egui::Key::Plus),
+            Some(MatrixTap::Chord(PLUS_CHORD))
+        );
     }
 
     #[test]

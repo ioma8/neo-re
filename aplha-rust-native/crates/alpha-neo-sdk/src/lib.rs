@@ -22,6 +22,14 @@ pub trait Applet {
         Status::OK
     }
 
+    fn on_char(_ctx: &mut Context) -> Status {
+        Status::UNHANDLED
+    }
+
+    fn on_key(_ctx: &mut Context) -> Status {
+        Status::UNHANDLED
+    }
+
     fn on_usb_plug(_ctx: &mut Context) -> Status {
         Status::UNHANDLED
     }

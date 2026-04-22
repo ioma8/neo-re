@@ -136,7 +136,7 @@ trap instead of reintroducing Rust-side A-line service shims.
 | --- | --- | --- |
 | `0x0000f000..0x0000ffff` | DragonBall-style internal register/MMIO window. | Small ROM accesses byte and word registers in this range during early hardware setup. |
 | `0xfffff000..0xffffffff` | Sign-extended alias of the same register window. | 68k absolute-short addressing reaches registers such as `0xfffff419`; preserving state between low and sign-extended aliases lets boot continue. |
-| `0xfffff202` / `0x0000f202` | Byte timer/delay register. | Full OS normal entry waits at `0x004266f6` until this byte changes. Returning a changing byte lets boot progress past the early hardware delay. |
+| `0xfffff202` / `0x0000f202` | PLL frequency select/status high byte (`PLLFSR`). | The MC68VZ328 map names `0xfffff202` as `PLLFSR`; firmware polls high-byte bit 7 at `0x0042673c`/`0x00426744`, matching the `CLK32` indicator. It must not increment on every read. The emulator now toggles bit 7 from simulated 33 MHz CPU time at a 32.768 kHz edge rate and preserves the other byte bits. |
 | `0xfffffb00..0xfffffb03` / `0x0000fb00..0x0000fb03` | Timebase high/low words. | Full OS routine `0x004247ca` combines these words with `0xfb1a` into an elapsed-time value used by initialization delays. |
 | `0xfffffb1a` / `0x0000fb1a` | Timebase fractional/low counter word. | The same routine masks this value with `0x01ff`; keeping it at zero traps the firmware on the initialization screen. |
 | `0x02000000..0x02000007` | ASIC/board register window used by System firmware. | Normal full-OS boot writes `0x0200000/2/6` through routines near `0x0043ff54`; treating it as byte-preserving MMIO avoids a bus error and matches command/data-style access. |
