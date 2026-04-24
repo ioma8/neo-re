@@ -1,4 +1,4 @@
-pub const INPUT_CAPACITY: usize = 64;
+pub const INPUT_CAPACITY: usize = 32;
 pub const LINE_WIDTH: usize = 28;
 pub const OUTPUT_LINES: usize = 3;
 
@@ -7,6 +7,7 @@ const STACK_CAPACITY: usize = 16;
 #[derive(Clone, Copy, Eq, PartialEq)]
 enum EvalError {
     DivideByZero,
+    InputFull,
     StackOverflow,
     StackUnderflow,
     UnknownWord,
@@ -17,8 +18,9 @@ enum EvalError {
 pub struct Repl {
     stack: [i32; STACK_CAPACITY],
     depth: usize,
-    pub input: [u8; INPUT_CAPACITY],
-    pub input_len: usize,
+    input: [u8; INPUT_CAPACITY],
+    input_len: usize,
+    output_line: [u8; LINE_WIDTH],
     pub output: [[u8; LINE_WIDTH]; OUTPUT_LINES],
 }
 
@@ -29,28 +31,38 @@ impl Repl {
             depth: 0,
             input: [0; INPUT_CAPACITY],
             input_len: 0,
-            output: [[b' '; LINE_WIDTH]; OUTPUT_LINES],
+            output_line: blank_line(),
+            output: [blank_line(), blank_line(), blank_line()],
         }
     }
 
-    pub fn push_byte(&mut self, byte: u8) {
-        if self.input_len < INPUT_CAPACITY {
-            input_set(&mut self.input, self.input_len, byte);
-            self.input_len += 1;
-        } else {
-            self.push_input_full();
+    pub fn accept_printable(&mut self, byte: u8) {
+        if !(b' '..=b'~').contains(&byte) {
+            return;
         }
+        if self.input_len >= INPUT_CAPACITY {
+            self.set_error(EvalError::InputFull);
+            return;
+        }
+        self.input[self.input_len] = byte;
+        self.input_len += 1;
     }
 
     pub fn backspace(&mut self) {
-        self.input_len = self.input_len.saturating_sub(1);
+        if self.input_len > 0 {
+            self.input_len -= 1;
+        }
     }
 
-    pub fn eval_line(&mut self) {
-        let mut index = 0;
-        while let Some(token) = next_token_copy(&self.input, self.input_len, &mut index) {
-            if let Err(error) = self.eval_token(&token) {
-                self.push_error(error);
+    pub fn enter(&mut self) {
+        if self.input_len == 0 {
+            return;
+        }
+
+        let mut cursor = 0usize;
+        while let Some(token) = next_token_copy(&self.input, self.input_len, &mut cursor) {
+            if let Err(error) = self.eval_token(&token.bytes[..token.len]) {
+                self.set_error(error);
                 self.input_len = 0;
                 return;
             }
@@ -58,12 +70,17 @@ impl Repl {
         self.input_len = 0;
     }
 
-    pub fn stack_line(&self) -> [u8; LINE_WIDTH] {
-        let mut line = [b' '; LINE_WIDTH];
-        line[0] = b'S';
-        line[1] = b':';
-        line[2] = b'<';
-        let mut offset = write_usize(&mut line, 3, self.depth);
+    pub fn line_title(&self) -> [u8; LINE_WIDTH] {
+        let mut line = blank_line();
+        write_bytes(&mut line, 0, b"Forth Mini");
+        line
+    }
+
+    pub fn line_stack(&self) -> [u8; LINE_WIDTH] {
+        let mut line = blank_line();
+        write_bytes(&mut line, 0, b"S:<");
+        let mut offset = 3usize;
+        offset = write_usize(&mut line, offset, self.depth);
         if offset < LINE_WIDTH {
             line[offset] = b'>';
             offset += 1;
@@ -72,12 +89,13 @@ impl Repl {
             line[offset] = b' ';
             offset += 1;
         }
+
         let start = self.depth.saturating_sub(3);
         let mut index = start;
         while index < self.depth && offset < LINE_WIDTH {
-            offset = write_i32(&mut line, offset, stack_get(&self.stack, index));
-            if offset < LINE_WIDTH {
-                line_set(&mut line, offset, b' ');
+            offset = write_i32(&mut line, offset, self.stack[index]);
+            if offset < LINE_WIDTH && index + 1 < self.depth {
+                line[offset] = b' ';
                 offset += 1;
             }
             index += 1;
@@ -85,61 +103,74 @@ impl Repl {
         line
     }
 
-    pub fn prompt_line(&self) -> [u8; LINE_WIDTH] {
-        let mut line = [b' '; LINE_WIDTH];
+    pub fn line_output(&self) -> [u8; LINE_WIDTH] {
+        self.output_line
+    }
+
+    pub fn line_prompt(&self) -> [u8; LINE_WIDTH] {
+        let mut line = blank_line();
         line[0] = b'>';
         line[1] = b' ';
         let visible = self.input_len.min(LINE_WIDTH - 2);
-        let start = self.input_len - visible;
-        let mut index = 0;
+        let start = self.input_len.saturating_sub(visible);
+        let mut index = 0usize;
         while index < visible {
-            line_set(&mut line, index + 2, input_get(&self.input, start + index));
+            line[index + 2] = self.input[start + index];
             index += 1;
         }
         line
     }
 
-    fn eval_token(&mut self, token: &Token) -> Result<(), EvalError> {
-        if let Some(number) = parse_i32(token) {
-            return self.push(number);
+    pub fn push_byte(&mut self, byte: u8) {
+        self.accept_printable(byte);
+    }
+
+    pub fn eval_line(&mut self) {
+        self.enter();
+    }
+
+    pub fn stack_line(&self) -> [u8; LINE_WIDTH] {
+        self.line_stack()
+    }
+
+    pub fn prompt_line(&self) -> [u8; LINE_WIDTH] {
+        self.line_prompt()
+    }
+
+    fn eval_token(&mut self, token: &[u8]) -> Result<(), EvalError> {
+        if let Some(value) = parse_i32(token) {
+            return self.push(value);
         }
-        if token_eq(token, *b"+") {
-            self.binary_op(i32::wrapping_add)
-        } else if token_eq(token, *b"-") {
-            self.binary_op(i32::wrapping_sub)
-        } else if token_eq(token, *b"*") {
-            self.binary_op(i32::wrapping_mul)
-        } else if token_eq(token, *b"/") {
-            self.checked_div()
-        } else if token_eq(token, *b"mod") {
-            self.checked_mod()
-        } else if token_eq(token, *b"dup") {
-            self.dup()
-        } else if token_eq(token, *b"drop") {
-            self.drop()
-        } else if token_eq(token, *b"swap") {
-            self.swap()
-        } else if token_eq(token, *b"over") {
-            self.over()
-        } else if token_eq(token, *b".") {
-            self.print_top()
-        } else if token_eq(token, *b".s") {
-            self.print_stack();
-            Ok(())
-        } else if token_eq(token, *b"clear") {
-            self.depth = 0;
-            self.push_ok();
-            Ok(())
-        } else {
-            Err(EvalError::UnknownWord)
+
+        match token {
+            b"+" => self.binary_op(i32::wrapping_add),
+            b"-" => self.binary_op(i32::wrapping_sub),
+            b"*" => self.binary_op(i32::wrapping_mul),
+            b"/" => self.checked_div(),
+            b"mod" => self.checked_mod(),
+            b"dup" => self.dup(),
+            b"drop" => self.drop_top(),
+            b"swap" => self.swap(),
+            b"over" => self.over(),
+            b"." => self.print_top(),
+            b".s" => {
+                self.set_output(self.line_stack());
+                Ok(())
+            }
+            b"clear" => {
+                self.depth = 0;
+                self.set_output(line_from_bytes(b"ok"));
+                Ok(())
+            }
+            _ => Err(EvalError::UnknownWord),
         }
     }
 
     fn push(&mut self, value: i32) -> Result<(), EvalError> {
-        if self.depth == STACK_CAPACITY {
+        if self.depth >= STACK_CAPACITY {
             return Err(EvalError::StackOverflow);
         }
-        stack_set(&mut self.stack, self.depth, value);
+        self.stack[self.depth] = value;
         self.depth += 1;
         Ok(())
     }
@@ -149,7 +180,7 @@ impl Repl {
             return Err(EvalError::StackUnderflow);
         }
         self.depth -= 1;
-        Ok(stack_get(&self.stack, self.depth))
+        Ok(self.stack[self.depth])
     }
 
     fn binary_op(&mut self, op: fn(i32, i32) -> i32) -> Result<(), EvalError> {
@@ -164,7 +195,7 @@ impl Repl {
         if rhs == 0 {
             return Err(EvalError::DivideByZero);
         }
-        self.push(lhs.wrapping_div(rhs))
+        self.push(lhs / rhs)
     }
 
     fn checked_mod(&mut self) -> Result<(), EvalError> {
@@ -173,18 +204,17 @@ impl Repl {
         if rhs == 0 {
             return Err(EvalError::DivideByZero);
         }
-        self.push(lhs.wrapping_rem(rhs))
+        self.push(lhs % rhs)
     }
 
     fn dup(&mut self) -> Result<(), EvalError> {
         if self.depth == 0 {
             return Err(EvalError::StackUnderflow);
         }
-        let value = stack_get(&self.stack, self.depth - 1);
-        self.push(value)
+        self.push(self.stack[self.depth - 1])
     }
 
-    fn drop(&mut self) -> Result<(), EvalError> {
+    fn drop_top(&mut self) -> Result<(), EvalError> {
         self.pop().map(|_| ())
     }
 
@@ -192,10 +222,7 @@ impl Repl {
         if self.depth < 2 {
             return Err(EvalError::StackUnderflow);
         }
-        let top = stack_get(&self.stack, self.depth - 1);
-        let next = stack_get(&self.stack, self.depth - 2);
-        stack_set(&mut self.stack, self.depth - 1, next);
-        stack_set(&mut self.stack, self.depth - 2, top);
+        self.stack.swap(self.depth - 1, self.depth - 2);
         Ok(())
     }
 
@@ -203,73 +230,51 @@ impl Repl {
         if self.depth < 2 {
             return Err(EvalError::StackUnderflow);
         }
-        self.push(stack_get(&self.stack, self.depth - 2))
+        self.push(self.stack[self.depth - 2])
     }
 
     fn print_top(&mut self) -> Result<(), EvalError> {
         let value = self.pop()?;
-        self.push_number_message(value);
+        let mut line = blank_line();
+        write_i32(&mut line, 0, value);
+        self.set_output(line);
         Ok(())
     }
 
-    fn print_stack(&mut self) {
-        let mut line = [b' '; LINE_WIDTH];
-        line[0] = b'<';
-        let mut offset = write_usize(&mut line, 1, self.depth);
-        if offset < LINE_WIDTH {
-            line[offset] = b'>';
-            offset += 1;
-        }
-        if offset < LINE_WIDTH {
-            line[offset] = b' ';
-            offset += 1;
-        }
-        let mut index = 0;
-        while index < self.depth && offset < LINE_WIDTH {
-            offset = write_i32(&mut line, offset, stack_get(&self.stack, index));
-            if offset < LINE_WIDTH {
-                line_set(&mut line, offset, b' ');
-                offset += 1;
-            }
-            index += 1;
-        }
-        self.push_line(line);
+    fn set_error(&mut self, error: EvalError) {
+        let line = match error {
+            EvalError::DivideByZero => line_from_bytes(b"divide by zero"),
+            EvalError::InputFull => line_from_bytes(b"input full"),
+            EvalError::StackOverflow => line_from_bytes(b"stack overflow"),
+            EvalError::StackUnderflow => line_from_bytes(b"stack underflow"),
+            EvalError::UnknownWord => line_from_bytes(b"unknown word"),
+        };
+        self.set_output(line);
     }
 
-    fn push_number_message(&mut self, value: i32) {
-        let mut line = [b' '; LINE_WIDTH];
-        write_i32(&mut line, 0, value);
-        self.push_line(line);
-    }
-
-    fn push_error(&mut self, error: EvalError) {
-        let mut line = [b' '; LINE_WIDTH];
-        match error {
-            EvalError::DivideByZero => write_divide_by_zero(&mut line),
-            EvalError::StackOverflow => write_stack_overflow(&mut line),
-            EvalError::StackUnderflow => write_stack_underflow(&mut line),
-            EvalError::UnknownWord => write_unknown_word(&mut line),
-        }
-        self.push_line(line);
-    }
-
-    fn push_input_full(&mut self) {
-        let mut line = [b' '; LINE_WIDTH];
-        write_input_full(&mut line);
-        self.push_line(line);
-    }
-
-    fn push_ok(&mut self) {
-        let mut line = [b' '; LINE_WIDTH];
-        line_set(&mut line, 0, b'o');
-        line_set(&mut line, 1, b'k');
-        self.push_line(line);
-    }
-
-    fn push_line(&mut self, line: [u8; LINE_WIDTH]) {
-        self.output[0] = self.output[1];
-        self.output[1] = self.output[2];
+    fn set_output(&mut self, line: [u8; LINE_WIDTH]) {
+        self.output_line = line;
+        self.output[0] = blank_line();
+        self.output[1] = blank_line();
         self.output[2] = line;
+    }
+}
+
+const fn blank_line() -> [u8; LINE_WIDTH] {
+    [b' '; LINE_WIDTH]
+}
+
+fn line_from_bytes(bytes: &[u8]) -> [u8; LINE_WIDTH] {
+    let mut line = blank_line();
+    write_bytes(&mut line, 0, bytes);
+    line
+}
+
+fn write_bytes(line: &mut [u8; LINE_WIDTH], offset: usize, bytes: &[u8]) {
+    let mut index = 0usize;
+    while offset + index < LINE_WIDTH && index < bytes.len() {
+        line[offset + index] = bytes[index];
+        index += 1;
     }
 }
 
@@ -278,66 +283,49 @@ struct Token {
     len: usize,
 }
 
-fn token_eq<const N: usize>(token: &Token, expected: [u8; N]) -> bool {
-    if token.len != N {
-        return false;
+fn next_token_copy(input: &[u8; INPUT_CAPACITY], input_len: usize, cursor: &mut usize) -> Option<Token> {
+    while *cursor < input_len && input[*cursor] == b' ' {
+        *cursor += 1;
     }
-    let mut index = 0;
-    while index < N {
-        if input_get(&token.bytes, index) != array_get(&expected, index) {
-            return false;
-        }
-        index += 1;
+    let start = *cursor;
+    while *cursor < input_len && input[*cursor] != b' ' {
+        *cursor += 1;
     }
-    true
-}
-
-fn next_token_copy(
-    input: &[u8; INPUT_CAPACITY],
-    input_len: usize,
-    index: &mut usize,
-) -> Option<Token> {
-    while *index < input_len && input_get(input, *index) == b' ' {
-        *index += 1;
-    }
-    let start = *index;
-    while *index < input_len && input_get(input, *index) != b' ' {
-        *index += 1;
-    }
-    if start == *index {
+    if start == *cursor {
         return None;
     }
     let mut token = Token {
-        bytes: [0; INPUT_CAPACITY],
+        bytes: [0u8; INPUT_CAPACITY],
         len: 0,
     };
-    while start + token.len < *index && token.len < INPUT_CAPACITY {
-        input_set(
-            &mut token.bytes,
-            token.len,
-            input_get(input, start + token.len),
-        );
-        token.len += 1;
+    let mut index = 0usize;
+    while start + index < *cursor && index < INPUT_CAPACITY {
+        token.bytes[index] = input[start + index];
+        index += 1;
     }
+    token.len = index;
     Some(token)
 }
 
-fn parse_i32(token: &Token) -> Option<i32> {
-    if token.len == 0 {
+fn parse_i32(token: &[u8]) -> Option<i32> {
+    if token.is_empty() {
         return None;
     }
-    let negative = input_get(&token.bytes, 0) == b'-';
-    let mut index = usize::from(negative);
-    if index == token.len {
+
+    let negative = token[0] == b'-';
+    let start = usize::from(negative);
+    if start == token.len() {
         return None;
     }
-    let mut value = 0_i32;
-    while index < token.len {
-        let byte = input_get(&token.bytes, index);
+
+    let mut value = 0i32;
+    let mut index = start;
+    while index < token.len() {
+        let byte = token[index];
         if !byte.is_ascii_digit() {
             return None;
         }
-        value = checked_mul10(value)?;
+        value = value.checked_mul(10)?;
         let digit = i32::from(byte - b'0');
         value = if negative {
             value.checked_sub(digit)?
@@ -349,182 +337,43 @@ fn parse_i32(token: &Token) -> Option<i32> {
     Some(value)
 }
 
-fn checked_mul10(value: i32) -> Option<i32> {
-    let by_eight = value.checked_shl(3)?;
-    let by_two = value.checked_shl(1)?;
-    by_eight.checked_add(by_two)
-}
-
-fn write_usize(target: &mut [u8; LINE_WIDTH], offset: usize, value: usize) -> usize {
+fn write_usize(line: &mut [u8; LINE_WIDTH], offset: usize, value: usize) -> usize {
     let Ok(value) = i32::try_from(value) else {
         return offset;
     };
-    write_i32(target, offset, value)
+    write_i32(line, offset, value)
 }
 
-fn write_i32(target: &mut [u8; LINE_WIDTH], mut offset: usize, value: i32) -> usize {
+fn write_i32(line: &mut [u8; LINE_WIDTH], mut offset: usize, value: i32) -> usize {
     if offset >= LINE_WIDTH {
         return offset;
     }
+
     if value == 0 {
-        line_set(target, offset, b'0');
+        line[offset] = b'0';
         return offset + 1;
     }
+
+    let mut digits = [0u8; 11];
+    let mut count = 0usize;
     let mut work = value.unsigned_abs();
-    if value < 0 {
-        line_set(target, offset, b'-');
-        offset += 1;
-    }
-    let mut digits = [0_u8; 10];
-    let mut count = 0;
-    while work > 0 && count < 10 {
-        let digit = u8::try_from(work.wrapping_rem(10)).unwrap_or_default();
-        digit_set(&mut digits, count, b'0' + digit);
+    while work > 0 && count < digits.len() {
+        digits[count] = b'0' + (work % 10) as u8;
         work /= 10;
         count += 1;
     }
+
+    if value < 0 {
+        line[offset] = b'-';
+        offset += 1;
+    }
+
     while count > 0 && offset < LINE_WIDTH {
         count -= 1;
-        line_set(target, offset, digit_get(&digits, count));
+        line[offset] = digits[count];
         offset += 1;
     }
     offset
-}
-
-fn write_divide_by_zero(line: &mut [u8; LINE_WIDTH]) {
-    line_set(line, 0, b'd');
-    line_set(line, 1, b'i');
-    line_set(line, 2, b'v');
-    line_set(line, 3, b'i');
-    line_set(line, 4, b'd');
-    line_set(line, 5, b'e');
-    line_set(line, 6, b' ');
-    line_set(line, 7, b'b');
-    line_set(line, 8, b'y');
-    line_set(line, 9, b' ');
-    line_set(line, 10, b'z');
-    line_set(line, 11, b'e');
-    line_set(line, 12, b'r');
-    line_set(line, 13, b'o');
-}
-
-fn write_stack_overflow(line: &mut [u8; LINE_WIDTH]) {
-    line_set(line, 0, b's');
-    line_set(line, 1, b't');
-    line_set(line, 2, b'a');
-    line_set(line, 3, b'c');
-    line_set(line, 4, b'k');
-    line_set(line, 5, b' ');
-    line_set(line, 6, b'o');
-    line_set(line, 7, b'v');
-    line_set(line, 8, b'e');
-    line_set(line, 9, b'r');
-    line_set(line, 10, b'f');
-    line_set(line, 11, b'l');
-    line_set(line, 12, b'o');
-    line_set(line, 13, b'w');
-}
-
-fn write_stack_underflow(line: &mut [u8; LINE_WIDTH]) {
-    line_set(line, 0, b's');
-    line_set(line, 1, b't');
-    line_set(line, 2, b'a');
-    line_set(line, 3, b'c');
-    line_set(line, 4, b'k');
-    line_set(line, 5, b' ');
-    line_set(line, 6, b'u');
-    line_set(line, 7, b'n');
-    line_set(line, 8, b'd');
-    line_set(line, 9, b'e');
-    line_set(line, 10, b'r');
-    line_set(line, 11, b'f');
-    line_set(line, 12, b'l');
-    line_set(line, 13, b'o');
-    line_set(line, 14, b'w');
-}
-
-fn write_unknown_word(line: &mut [u8; LINE_WIDTH]) {
-    line_set(line, 0, b'u');
-    line_set(line, 1, b'n');
-    line_set(line, 2, b'k');
-    line_set(line, 3, b'n');
-    line_set(line, 4, b'o');
-    line_set(line, 5, b'w');
-    line_set(line, 6, b'n');
-    line_set(line, 7, b' ');
-    line_set(line, 8, b'w');
-    line_set(line, 9, b'o');
-    line_set(line, 10, b'r');
-    line_set(line, 11, b'd');
-}
-
-fn write_input_full(line: &mut [u8; LINE_WIDTH]) {
-    line_set(line, 0, b'i');
-    line_set(line, 1, b'n');
-    line_set(line, 2, b'p');
-    line_set(line, 3, b'u');
-    line_set(line, 4, b't');
-    line_set(line, 5, b' ');
-    line_set(line, 6, b'f');
-    line_set(line, 7, b'u');
-    line_set(line, 8, b'l');
-    line_set(line, 9, b'l');
-}
-
-fn input_get(input: &[u8; INPUT_CAPACITY], index: usize) -> u8 {
-    debug_assert!(index < INPUT_CAPACITY);
-    // SAFETY: Every call site guards index against INPUT_CAPACITY or a smaller live length.
-    unsafe { *input.get_unchecked(index) }
-}
-
-fn input_set(input: &mut [u8; INPUT_CAPACITY], index: usize, value: u8) {
-    debug_assert!(index < INPUT_CAPACITY);
-    // SAFETY: Every call site guards index against INPUT_CAPACITY or a smaller live length.
-    unsafe {
-        *input.get_unchecked_mut(index) = value;
-    }
-}
-
-fn stack_get(stack: &[i32; STACK_CAPACITY], index: usize) -> i32 {
-    debug_assert!(index < STACK_CAPACITY);
-    // SAFETY: Stack depth is capped at STACK_CAPACITY, and callers guard underflow.
-    unsafe { *stack.get_unchecked(index) }
-}
-
-fn stack_set(stack: &mut [i32; STACK_CAPACITY], index: usize, value: i32) {
-    debug_assert!(index < STACK_CAPACITY);
-    // SAFETY: Stack depth is capped at STACK_CAPACITY before writes.
-    unsafe {
-        *stack.get_unchecked_mut(index) = value;
-    }
-}
-
-fn line_set(line: &mut [u8; LINE_WIDTH], index: usize, value: u8) {
-    debug_assert!(index < LINE_WIDTH);
-    // SAFETY: Callers only write when index is below LINE_WIDTH.
-    unsafe {
-        *line.get_unchecked_mut(index) = value;
-    }
-}
-
-fn digit_get(digits: &[u8; 10], index: usize) -> u8 {
-    debug_assert!(index < 10);
-    // SAFETY: Decimal i32 formatting never uses more than 10 stored digits.
-    unsafe { *digits.get_unchecked(index) }
-}
-
-fn digit_set(digits: &mut [u8; 10], index: usize, value: u8) {
-    debug_assert!(index < 10);
-    // SAFETY: Decimal i32 formatting never stores more than 10 digits.
-    unsafe {
-        *digits.get_unchecked_mut(index) = value;
-    }
-}
-
-fn array_get<const N: usize>(array: &[u8; N], index: usize) -> u8 {
-    debug_assert!(index < N);
-    // SAFETY: Generic callers compare index with N before reading.
-    unsafe { *array.get_unchecked(index) }
 }
 
 #[cfg(test)]
@@ -532,120 +381,149 @@ mod tests {
     use super::*;
 
     #[test]
+    fn accepts_printable_without_evaluating_until_enter() {
+        let mut repl = Repl::new();
+
+        repl.accept_printable(b'1');
+
+        assert_eq!(repl.line_output(), blank_line());
+        assert_eq!(repl.line_prompt()[..3], [b'>', b' ', b'1']);
+    }
+
+    #[test]
+    fn enter_evaluates_current_input_line() {
+        let mut repl = Repl::new();
+
+        repl.accept_printable(b'1');
+        repl.enter();
+
+        assert_eq!(repl.line_stack()[..5], [b'S', b':', b'<', b'1', b'>']);
+    }
+
+    #[test]
+    fn backspace_removes_one_input_byte() {
+        let mut repl = Repl::new();
+
+        repl.accept_printable(b'1');
+        repl.accept_printable(b'2');
+        repl.backspace();
+
+        assert_eq!(repl.line_prompt()[..3], [b'>', b' ', b'1']);
+    }
+
+    #[test]
     fn evaluates_arithmetic_and_prints() {
         let mut repl = Repl::new();
-        repl.input[..7].copy_from_slice(b"2 3 + .");
-        repl.input_len = 7;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..1], b"5");
-        assert_eq!(repl.depth, 0);
+        repl.accept_printable(b'2');
+        repl.enter();
+        repl.accept_printable(b'3');
+        repl.enter();
+        repl.accept_printable(b'+');
+        repl.enter();
+        repl.accept_printable(b'.');
+        repl.enter();
+
+        assert_eq!(&repl.line_output()[..1], b"5");
     }
 
     #[test]
     fn handles_stack_words() {
         let mut repl = Repl::new();
-        repl.input[..17].copy_from_slice(b"2 3 over * swap .");
-        repl.input_len = 17;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..1], b"2");
-        assert_eq!(repl.stack[..repl.depth], [6]);
+        for bytes in [b"2".as_slice(), b"3", b"over", b"*", b"swap"] {
+            for byte in bytes {
+                repl.accept_printable(*byte);
+            }
+            repl.enter();
+        }
+        repl.accept_printable(b'.');
+        repl.enter();
+
+        assert_eq!(&repl.line_output()[..1], b"2");
+        assert_eq!(repl.line_stack()[..5], [b'S', b':', b'<', b'1', b'>']);
     }
 
     #[test]
     fn prints_stack_summary() {
         let mut repl = Repl::new();
-        repl.input[..6].copy_from_slice(b"1 2 .s");
-        repl.input_len = 6;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..7], b"<2> 1 2");
+        for byte in b"1" {
+            repl.accept_printable(*byte);
+        }
+        repl.enter();
+        for byte in b"2" {
+            repl.accept_printable(*byte);
+        }
+        repl.enter();
+        for byte in b".s" {
+            repl.accept_printable(*byte);
+        }
+        repl.enter();
+
+        assert_eq!(&repl.line_output()[..7], b"S:<2> 1");
     }
 
     #[test]
     fn reports_underflow() {
         let mut repl = Repl::new();
-        repl.input[0] = b'+';
-        repl.input_len = 1;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..15], b"stack underflow");
+        repl.accept_printable(b'+');
+        repl.enter();
+
+        assert_eq!(&repl.line_output()[..15], b"stack underflow");
     }
 
     #[test]
     fn reports_divide_by_zero() {
         let mut repl = Repl::new();
-        repl.input[..5].copy_from_slice(b"4 0 /");
-        repl.input_len = 5;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..14], b"divide by zero");
+        for bytes in [b"4".as_slice(), b"0", b"/"] {
+            for byte in bytes {
+                repl.accept_printable(*byte);
+            }
+            repl.enter();
+        }
+
+        assert_eq!(&repl.line_output()[..14], b"divide by zero");
     }
 
     #[test]
     fn reports_unknown_word() {
         let mut repl = Repl::new();
-        repl.input[..3].copy_from_slice(b"wat");
-        repl.input_len = 3;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..12], b"unknown word");
-    }
-
-    #[test]
-    fn handles_backspace_before_evaluating() {
-        let mut repl = Repl::new();
-        for byte in b"12" {
-            repl.push_byte(*byte);
+        for byte in b"wat" {
+            repl.accept_printable(*byte);
         }
-        repl.backspace();
-        for byte in b"3 ." {
-            repl.push_byte(*byte);
-        }
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..2], b"13");
-        assert_eq!(repl.depth, 0);
-    }
+        repl.enter();
 
-    #[test]
-    fn evaluates_modulo_and_clear() {
-        let mut repl = Repl::new();
-        repl.input[..9].copy_from_slice(b"7 3 mod .");
-        repl.input_len = 9;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..1], b"1");
-
-        repl.input[..5].copy_from_slice(b"clear");
-        repl.input_len = 5;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..2], b"ok");
-        assert_eq!(repl.depth, 0);
+        assert_eq!(&repl.line_output()[..12], b"unknown word");
     }
 
     #[test]
     fn keeps_prompt_scrolled_to_latest_input() {
         let mut repl = Repl::new();
         for _ in 0..30 {
-            repl.push_byte(b'x');
+            repl.accept_printable(b'x');
         }
-        let line = repl.prompt_line();
-        assert_eq!(line[0], b'>');
-        assert_eq!(line[1], b' ');
-        assert!(line[2..].iter().all(|byte| *byte == b'x'));
+
+        assert!(repl.line_prompt()[2..].iter().all(|byte| *byte == b'x'));
     }
 
     #[test]
     fn reports_input_full_without_growing_buffer() {
         let mut repl = Repl::new();
         for _ in 0..=INPUT_CAPACITY {
-            repl.push_byte(b'x');
+            repl.accept_printable(b'x');
         }
-        assert_eq!(repl.input_len, INPUT_CAPACITY);
-        assert_eq!(&repl.output[2][..10], b"input full");
+
+        assert_eq!(&repl.line_output()[..10], b"input full");
     }
 
     #[test]
     fn parses_and_prints_i32_min() {
         let mut repl = Repl::new();
-        repl.input[..13].copy_from_slice(b"-2147483648 .");
-        repl.input_len = 13;
-        repl.eval_line();
-        assert_eq!(&repl.output[2][..11], b"-2147483648");
-        assert_eq!(repl.depth, 0);
+        for bytes in [b"-2147483648".as_slice(), b"."] {
+            for byte in bytes {
+                repl.accept_printable(*byte);
+            }
+            repl.enter();
+        }
+
+        assert_eq!(&repl.line_output()[..11], b"-2147483648");
     }
 }
