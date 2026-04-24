@@ -326,6 +326,36 @@ Two hardware details were required for this to work:
   Treat it as a wakeable low-power wait, not as a reset. Resetting there caused
   repeated splash-screen cycles after the filesystem was already formatted.
 
+Cursor rendering note: after AlphaWord reaches a blank file, headless sampling
+shows the framebuffer cursor pixels are static and the firmware does not
+continuously rewrite the LCD for blink. The GUI therefore overlays the visible
+NEO-style blink by hiding isolated tall cursor runs during the off phase. The
+mask is limited to the detected run, not the full display column, so text pixels
+above or below the cursor on the same x coordinate remain visible. This is a
+display-layer behavior and does not mutate emulated LCD RAM.
+
+The validated AlphaWord blank-editor cursor dump is a narrow block at columns
+`0..1`, rows `0..15`. The headless validation command writes paired PBM dumps:
+
+```sh
+cargo run -q --manifest-path alpha-emu/Cargo.toml -- \
+  --headless \
+  --steps=1700000000 \
+  --lcd-ranges \
+  --lcd-blink-pbm-prefix=/tmp/neo-cursor \
+  analysis/cab/os3kneorom.os3kos
+```
+
+Expected key lines:
+
+```text
+y=000..015: 000..001
+lcd_blink_pbm_on=/tmp/neo-cursor-on.pbm off=/tmp/neo-cursor-off.pbm diff_pixels=32
+```
+
+`32` changed pixels equals `2` cursor columns times `16` cursor rows. The
+off-frame PBM has no lit pixels in those rows for the blank-editor state.
+
 Validated recovery-seed generation:
 
 ```sh

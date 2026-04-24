@@ -9,7 +9,7 @@ use eframe::egui;
 use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::FirmwareSession;
 use crate::keyboard::{matrix_key_for_char, matrix_key_label};
-use crate::lcd::LcdSnapshot;
+use crate::lcd::{LcdSnapshot, cursor_blink_snapshot};
 use crate::recovery_seed;
 
 const SHIFT_CODE: u8 = 0x6e;
@@ -785,6 +785,8 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
         let pixel_rect = rect.shrink(LCD_INNER_PADDING);
         let scale_x = pixel_rect.width() / visible_width as f32;
         let scale_y = pixel_rect.height() / visible_height as f32;
+        let cursor_visible = ((ui.input(|input| input.time) * 2.0) as u64).is_multiple_of(2);
+        let lcd = cursor_blink_snapshot(lcd, cursor_visible);
         for y in 0..visible_height {
             for x in 0..visible_width {
                 if lcd.pixels[y * lcd.width + x] {
@@ -886,6 +888,9 @@ mod tests {
     use eframe::egui;
 
     use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
+    use crate::lcd::{
+        LcdSnapshot, cursor_blink_snapshot, probable_cursor_columns, probable_cursor_pixels,
+    };
 
     #[test]
     fn whitespace_and_editing_keys_are_covered_as_physical_keys() {
@@ -1007,5 +1012,70 @@ mod tests {
     fn gui_uses_square_pixel_viewport_matching_neo_screen_ratio() {
         assert_eq!(NEO_VISIBLE_LCD_WIDTH, 264);
         assert_eq!(NEO_VISIBLE_LCD_HEIGHT, 64);
+    }
+
+    #[test]
+    fn cursor_detector_masks_two_column_alphaword_cursor_dump_shape() {
+        let mut lcd = LcdSnapshot {
+            width: 320,
+            height: 128,
+            pixels: vec![false; 320 * 128],
+        };
+        for y in 0..16 {
+            lcd.pixels[y * lcd.width] = true;
+            lcd.pixels[y * lcd.width + 1] = true;
+        }
+
+        let mask = probable_cursor_columns(&lcd, NEO_VISIBLE_LCD_WIDTH, NEO_VISIBLE_LCD_HEIGHT);
+
+        assert!(mask[0]);
+        assert!(mask[1]);
+        assert!(!mask[2]);
+
+        let off = cursor_blink_snapshot(&lcd, false);
+        assert!(!off.pixels[0]);
+        assert!(!off.pixels[1]);
+    }
+
+    #[test]
+    fn cursor_detector_masks_only_the_cursor_run_not_the_whole_column() {
+        let mut lcd = LcdSnapshot {
+            width: 320,
+            height: 128,
+            pixels: vec![false; 320 * 128],
+        };
+        for y in 0..16 {
+            lcd.pixels[y * lcd.width] = true;
+            lcd.pixels[y * lcd.width + 1] = true;
+        }
+        for y in 32..40 {
+            lcd.pixels[y * lcd.width] = true;
+        }
+
+        let mask = probable_cursor_pixels(&lcd, NEO_VISIBLE_LCD_WIDTH, NEO_VISIBLE_LCD_HEIGHT);
+        let off = cursor_blink_snapshot(&lcd, false);
+
+        assert!(mask[15 * NEO_VISIBLE_LCD_WIDTH]);
+        assert!(!mask[32 * NEO_VISIBLE_LCD_WIDTH]);
+        assert!(!off.pixels[15 * lcd.width]);
+        assert!(off.pixels[32 * lcd.width]);
+    }
+
+    #[test]
+    fn cursor_detector_does_not_mask_wide_text_stems() {
+        let mut lcd = LcdSnapshot {
+            width: 320,
+            height: 128,
+            pixels: vec![false; 320 * 128],
+        };
+        for y in 0..16 {
+            for x in 10..18 {
+                lcd.pixels[y * lcd.width + x] = true;
+            }
+        }
+
+        let mask = probable_cursor_columns(&lcd, NEO_VISIBLE_LCD_WIDTH, NEO_VISIBLE_LCD_HEIGHT);
+
+        assert!(!mask.iter().any(|masked| *masked));
     }
 }

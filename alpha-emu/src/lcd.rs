@@ -1,5 +1,7 @@
 pub const LCD_WIDTH: usize = 320;
 pub const LCD_HEIGHT: usize = 128;
+pub const NEO_VISIBLE_LCD_WIDTH: usize = 264;
+pub const NEO_VISIBLE_LCD_HEIGHT: usize = 64;
 
 const CONTROLLER_WIDTH: usize = LCD_WIDTH / 2;
 const RIGHT_CONTROLLER_X_BASE: usize = 132;
@@ -86,6 +88,119 @@ impl Lcd {
             pixels,
         }
     }
+}
+
+pub fn cursor_blink_snapshot(snapshot: &LcdSnapshot, cursor_visible: bool) -> LcdSnapshot {
+    if cursor_visible {
+        return snapshot.clone();
+    }
+
+    let visible_width = NEO_VISIBLE_LCD_WIDTH.min(snapshot.width);
+    let visible_height = NEO_VISIBLE_LCD_HEIGHT.min(snapshot.height);
+    let cursor_mask = probable_cursor_pixels(snapshot, visible_width, visible_height);
+    let mut blink = snapshot.clone();
+    for y in 0..visible_height {
+        for x in 0..visible_width {
+            if cursor_mask[y * visible_width + x] {
+                blink.pixels[y * blink.width + x] = false;
+            }
+        }
+    }
+    blink
+}
+
+pub fn probable_cursor_pixels(
+    snapshot: &LcdSnapshot,
+    visible_width: usize,
+    visible_height: usize,
+) -> Vec<bool> {
+    const MAX_CURSOR_WIDTH: usize = 3;
+
+    let runs = probable_cursor_runs(snapshot, visible_width, visible_height);
+    let mut mask = vec![false; visible_width * visible_height];
+    let mut x = 0;
+    while x < visible_width {
+        if runs[x].is_none() {
+            x += 1;
+            continue;
+        }
+        let start = x;
+        while x < visible_width && runs[x].is_some() {
+            x += 1;
+        }
+        let end = x;
+        if end - start <= MAX_CURSOR_WIDTH {
+            for column in start..end {
+                if let Some(run) = runs[column] {
+                    for y in run.start..run.end {
+                        mask[y * visible_width + column] = true;
+                    }
+                }
+            }
+        }
+    }
+    mask
+}
+
+pub fn probable_cursor_columns(
+    snapshot: &LcdSnapshot,
+    visible_width: usize,
+    visible_height: usize,
+) -> Vec<bool> {
+    let pixel_mask = probable_cursor_pixels(snapshot, visible_width, visible_height);
+    (0..visible_width)
+        .map(|x| (0..visible_height).any(|y| pixel_mask[y * visible_width + x]))
+        .collect()
+}
+
+fn probable_cursor_runs(
+    snapshot: &LcdSnapshot,
+    visible_width: usize,
+    visible_height: usize,
+) -> Vec<Option<VerticalRun>> {
+    const MIN_CURSOR_HEIGHT: usize = 12;
+
+    (0..visible_width)
+        .map(|x| {
+            let run = longest_vertical_run(snapshot, x, visible_height);
+            (run.len() >= MIN_CURSOR_HEIGHT).then_some(run)
+        })
+        .collect()
+}
+
+#[derive(Clone, Copy, Debug)]
+struct VerticalRun {
+    start: usize,
+    end: usize,
+}
+
+impl VerticalRun {
+    const fn len(self) -> usize {
+        self.end - self.start
+    }
+}
+
+fn longest_vertical_run(snapshot: &LcdSnapshot, x: usize, visible_height: usize) -> VerticalRun {
+    let mut longest = VerticalRun { start: 0, end: 0 };
+    let mut current_start = 0;
+    let mut current = 0;
+    for y in 0..visible_height {
+        if snapshot.pixels[y * snapshot.width + x] {
+            if current == 0 {
+                current_start = y;
+            }
+            current += 1;
+            if current > longest.len() {
+                longest = VerticalRun {
+                    start: current_start,
+                    end: y + 1,
+                };
+            }
+        } else {
+            current = 0;
+        }
+    }
+    longest
 }
 
 fn controller_x_base(controller_index: usize) -> usize {

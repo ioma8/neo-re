@@ -4,7 +4,7 @@ use std::time::Instant;
 use alpha_emu::firmware::FirmwareRuntime;
 use alpha_emu::firmware_session::FirmwareSession;
 use alpha_emu::keyboard::{matrix_cells, matrix_key_label};
-use alpha_emu::lcd::LcdSnapshot;
+use alpha_emu::lcd::{LcdSnapshot, cursor_blink_snapshot};
 use alpha_emu::recovery_seed;
 use anyhow::Result;
 
@@ -17,6 +17,7 @@ fn main() -> Result<()> {
     let mut lcd_ascii = false;
     let mut lcd_ranges = false;
     let mut lcd_pbm = None;
+    let mut lcd_blink_pbm_prefix = None;
     let mut key_events = Vec::new();
     let mut hold_events = Vec::new();
     let mut all_row_key_events = Vec::new();
@@ -90,6 +91,11 @@ fn main() -> Result<()> {
             recovery_seed_path = Some(PathBuf::from(value));
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--lcd-pbm=")) {
             lcd_pbm = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--lcd-blink-pbm-prefix="))
+        {
+            lcd_blink_pbm_prefix = Some(PathBuf::from(value));
         } else if let Some(value) = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix("--sample-lcd-after="))
@@ -413,6 +419,25 @@ fn main() -> Result<()> {
         if let Some(path) = lcd_pbm {
             write_lcd_pbm(&snapshot.lcd, &path)?;
             println!("lcd_pbm={}", path.display());
+        }
+        if let Some(prefix) = lcd_blink_pbm_prefix {
+            let on_path = prefixed_path(&prefix, "on.pbm");
+            let off_path = prefixed_path(&prefix, "off.pbm");
+            let on = cursor_blink_snapshot(&snapshot.lcd, true);
+            let off = cursor_blink_snapshot(&snapshot.lcd, false);
+            write_lcd_pbm(&on, &on_path)?;
+            write_lcd_pbm(&off, &off_path)?;
+            let diff = on
+                .pixels
+                .iter()
+                .zip(&off.pixels)
+                .filter(|(left, right)| left != right)
+                .count();
+            println!(
+                "lcd_blink_pbm_on={} off={} diff_pixels={diff}",
+                on_path.display(),
+                off_path.display()
+            );
         }
         if let Some(path) = dump_memory {
             std::fs::write(&path, session.memory_bytes())?;
@@ -823,4 +848,15 @@ fn write_lcd_pbm(snapshot: &LcdSnapshot, path: &std::path::Path) -> Result<()> {
     }
     std::fs::write(path, output)?;
     Ok(())
+}
+
+fn prefixed_path(prefix: &std::path::Path, suffix: &str) -> PathBuf {
+    let mut path = prefix.to_path_buf();
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| format!("{name}-{suffix}"))
+        .unwrap_or_else(|| suffix.to_string());
+    path.set_file_name(file_name);
+    path
 }
