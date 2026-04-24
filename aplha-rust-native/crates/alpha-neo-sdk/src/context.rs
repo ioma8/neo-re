@@ -67,6 +67,24 @@ impl Screen {
         reason = "required to keep applet UI rendering as direct trap calls"
     )]
     #[inline(always)]
+    pub fn write_prefix<const N: usize>(self, row: u8, bytes: &[u8; N], len: usize) {
+        display::write_prefix(row, bytes, len);
+    }
+
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep applet UI rendering as direct trap calls"
+    )]
+    #[inline(always)]
+    pub fn write_chars<const N: usize>(self, row: u8, start_col: u8, bytes: &[u8; N], len: usize) {
+        display::write_chars(row, start_col, bytes, len);
+    }
+
+    #[allow(
+        clippy::inline_always,
+        reason = "required to keep applet UI rendering as direct trap calls"
+    )]
+    #[inline(always)]
     pub fn clear_row(self, row: u8) {
         display::clear_row(row);
     }

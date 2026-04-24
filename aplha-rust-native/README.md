@@ -238,10 +238,13 @@ It accepts signed decimal integers and keeps a 16-cell stack. This is an
 experimental applet intended to exercise OS-dispatched text input, display updates, and
 small stateful Rust applet code.
 
-Its lifecycle is event-driven: `on_focus` initializes and draws the REPL, then
-`on_char`/`on_key` process later input messages from the OS. A Calculator-style
-modal key loop was tested and rejected for this applet because it can fight the
-full OS debounce path and make later typed input stop reaching the REPL.
+Its lifecycle is event-driven: `on_focus` initializes and draws the REPL,
+`on_char` processes printable input, and `on_key` handles only control keys.
+Printable `Key` messages must not feed the REPL because the full OS also sends
+`Char` messages for text; accepting both causes duplicate or nonsensical prompt
+characters. A Calculator-style modal key loop was tested and rejected for this
+applet because it can fight the full OS debounce path and make later typed input
+stop reaching the REPL.
 
 The REPL stores state at `A5 + 0x300` inside its declared base-memory block.
 Keeping the low A5 area free avoids clobbering firmware/app-runtime scratch
@@ -249,9 +252,11 @@ state; early versions that wrote the REPL at `A5 + 0` produced display/input
 corruption. The focus screen is drawn after a full screen clear because leftover
 menu highlight state can otherwise remain visible.
 
-Current status: the Rust source compiles, packages, and its host tests pass.
-It has not yet been validated on the physical device. Treat it as experimental
-until the REPL has been installed and exercised with a recovery path available.
+Current status: the Rust source compiles, packages, passes host tests, and
+passes the full-System headless emulator validation for `1 Enter`, `2 Enter`,
+`+ Enter` producing stack value `3`. It has not yet been validated on the
+physical device. Treat it as experimental until the REPL has been installed and
+exercised with a recovery path available.
 
 Build:
 

@@ -30,6 +30,34 @@ alpha_neo_flush_text:
 alpha_neo_yield:
     .short 0xA25C
     rts
+
+    .global alpha_neo_write_chars
+alpha_neo_write_chars:
+    movem.l %d2-%d6/%a2,-(%a7)
+    move.l 28(%a7),%d4
+    move.l 32(%a7),%d5
+    move.l 36(%a7),%a2
+    move.l 40(%a7),%d6
+    move.l %d6,%d0
+    beq 2f
+1:
+    suba.l #12,%a7
+    move.l %d4,(%a7)
+    move.l %d5,4(%a7)
+    move.l #1,8(%a7)
+    .short 0xA004
+    adda.l #12,%a7
+    move.b (%a2)+,%d0
+    and.l #0xff,%d0
+    move.l %d0,-(%a7)
+    .short 0xA010
+    adda.l #4,%a7
+    add.l #1,%d5
+    sub.l #1,%d6
+    bne 1b
+2:
+    movem.l (%a7)+,%d2-%d6/%a2
+    rts
     "#
 );
 
@@ -40,6 +68,7 @@ unsafe extern "C" {
     fn alpha_neo_draw_char(byte: u32);
     fn alpha_neo_flush_text();
     fn alpha_neo_yield();
+    fn alpha_neo_write_chars(row: u32, start_col: u32, bytes: *const u8, len: u32);
 }
 
 #[allow(
@@ -81,6 +110,46 @@ pub fn write_slice(row: u8, bytes: &[u8]) {
     for byte in bytes {
         draw_char(*byte);
     }
+}
+
+#[allow(
+    clippy::inline_always,
+    reason = "required to render stack-local applet buffers through direct trap calls"
+)]
+#[inline(always)]
+pub fn write_prefix<const N: usize>(row: u8, bytes: &[u8; N], len: usize) {
+    if len == 0 {
+        return;
+    }
+    let width = len.min(N);
+    set_row_width(row, width);
+    let mut index = 0;
+    while index < width {
+        draw_char(bytes[index]);
+        index += 1;
+    }
+}
+
+#[allow(
+    clippy::inline_always,
+    reason = "required to render prompt characters through direct trap calls"
+)]
+#[inline(always)]
+pub fn write_chars<const N: usize>(row: u8, start_col: u8, bytes: &[u8; N], len: usize) {
+    #[cfg(not(target_arch = "m68k"))]
+    let _ = (row, start_col, bytes, len);
+    #[cfg(target_arch = "m68k")]
+    // SAFETY: The assembly helper reads exactly `len.min(N)` bytes from the supplied buffer.
+    unsafe {
+        alpha_neo_write_chars(
+            u32::from(row),
+            u32::from(start_col),
+            bytes.as_ptr(),
+            len.min(N) as u32,
+        );
+    };
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
 }
 
 #[allow(
@@ -145,6 +214,23 @@ fn set_row(row: u8) {
 
 #[allow(
     clippy::inline_always,
+    reason = "required so row setup uses the caller's stack frame directly"
+)]
+#[inline(always)]
+fn set_row_width(row: u8, width: usize) {
+    #[cfg(not(target_arch = "m68k"))]
+    let _ = (row, width);
+    #[cfg(target_arch = "m68k")]
+    // SAFETY: Calls the NEO OS row-selection trap with scalar row and width arguments.
+    unsafe {
+        alpha_neo_set_text_row(u32::from(row), 1, width as u32);
+    };
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
+}
+
+#[allow(
+    clippy::inline_always,
     reason = "required so byte drawing uses immediate values instead of a data table"
 )]
 #[inline(always)]
@@ -159,6 +245,7 @@ fn draw_char(byte: u8) {
     #[cfg(target_arch = "m68k")]
     compiler_fence(Ordering::SeqCst);
 }
+
 
 #[allow(
     clippy::inline_always,

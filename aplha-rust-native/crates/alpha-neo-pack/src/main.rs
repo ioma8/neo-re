@@ -58,7 +58,7 @@ fn manifest_for(applet: AppletName) -> AppletManifest {
             name: "Forth Mini",
             version: Version::decimal(0, 1),
             flags: 0xFF00_00CE,
-            base_memory_size: 0x400,
+            base_memory_size: 0x800,
             extra_memory_size: 0x2000,
             copyright: "neo-re native Rust SmartApplet",
             alphaword_write_metadata: false,

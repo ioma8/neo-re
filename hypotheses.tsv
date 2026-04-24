@@ -10,4 +10,60 @@ Custom OCR atlas applet would be the best path for precise LCD OCR	not relevant
 The emulator can reconstruct applet LCD text more precisely by capturing A-line text traps than by bitmap OCR	proven
 Stock Calculator REPL printable input should use the firmware display-table character mapping rather than the HID/logical matrix mapping	disproven
 Headless type-at/type-now drops some printable Calculator input because it uses the short tap_char pulse instead of the debug tap profile	proven
-Exact Czech top-row shifted-digit behavior is impossible with the current single logical remap table	proven
+Exact Czech top-row shifted-digit behavior is impossible with the current single logical remap table	disproven
+Forth Mini exported package stale relative to source before rebuild	needs further investigation
+AlphaWord has a later key-to-character stage beyond the documented logical remap table	proven
+Firmware contains separate character lookup tables after the layout/key stage	proven
+Forth Mini modal on_focus keyboard loop is fighting the full OS applet input path; restoring event-driven Char/Key callbacks should fix live REPL behavior	proven
+Physical raw key 0x5c is the AlphaWord text-entry path for the stock '1' key	proven
+Table 0x44c288 indexed by logical 0x38 is not the direct AlphaWord unshifted typing table for stock '1'	disproven
+AlphaWord printable char delivery uses low RAM bytes 0x433/0x434/0x435 rather than reading 0x44c288 directly at send time	proven
+Ordinary printable chars reach AlphaWord through 0x434eb4/0x434eb8..0x434ee8 -> 0x417d00 -> 0x417acc	proven
+Shifted key-event dispatch uses 0x4183a6..0x4183ae -> 0x418754..0x41878a -> 0x417ae6, separate from the printable-char send path	proven
+Shifted printable chars rejoin the ordinary printable pipeline via 0x435a20..0x435a5a before 0x434eb8..0x434ee8	proven
+Forth Mini full-system runs may still be loading stale applet state via recovery seed	needs further investigation
+Forth Mini full-system runs may still be loading stale applet state via recovery seed	disproven
+Forth Mini modal loop receives raw-key prompt input correctly in full-system headless mode	proven
+Forth Mini rows 1-3 can render fixed text in full-system headless mode	proven
+Forth Mini composed transcript rows lose bytes after the first command byte during line-buffer composition	proven
+Dynamic transcript-line composition in applet memory should be replaced by segmented row drawing	needs further investigation
+Fresh full-system build->reinit still leaves Forth Mini blank after Enter	proven
+Switching Forth Mini back to event-driven on_char/on_key with plain transcript rows fixes the live blank screen	disproven
+Current live failure is not caused by stale exported applet package or stale recovery seed	proven
+Forth Mini full-system callback sequence on real menu launch includes SetFocus followed by repeated message-0 callbacks	proven
+Full-system Enter for Forth Mini is delivered as a Key (0x21) callback	disproven
+Full-system Enter for Forth Mini is delivered as a Char (0x20) callback with param 0x0d	proven
+Current Forth Mini drops full-system Enter because on_char ignores 0x0d and on_key never receives it	proven
+Forth Mini live line truncation is caused by by-value line copies in draw()	disproven
+Forth Mini live line truncation is specific to the success-transcript path after evaluation	proven
+Patching the generic 0x434f14 printable-byte writer will affect non-keyboard firmware text paths too	proven
+Guarding the 0x434f14 hook only on RAM byte 0x423 is sufficient to limit translation to typed keyboard input	disproven
+The current Czech patcher regression is caused by the late printable-char hook path replacing the device-proven layout-table remap	proven
+Building the transcript row in a local buffer before copying it into transcript_3 fixes the live truncation	disproven
+Forth Mini enter() is not executing in the live full-system path	disproven
+Forth Mini live stack state updates correctly after Enter, but runtime line initialization leaves transcript buffers zero-filled	proven
+Forth Mini input_len is already corrupted before Enter in the live full-system path	disproven
+Restoring the documented A5 + 0x300 REPL placement fixes the live Forth Mini transcript truncation	disproven
+Volatile byte access for line buffers fixes the live Forth Mini transcript truncation	disproven
+Forth Mini local command_len remains stable across eval in the live full-system path	disproven
+Forth Mini local command_len is corrupted across eval before transcript rendering in the live full-system path	proven
+Remaining live Forth Mini bug is caused by '.' not reaching the applet input path	disproven
+Typed '.' words reach Forth Mini through the live full-system path, but success-transcript assembly after output words is still corrupted	proven
+Forth Mini live output-word corruption starts at integer rendering in write_i32	proven
+Forth Mini live '.s' rendering is now correct; the remaining live output bug is specific to '.' pending-output state	proven
+The live AlphaWord key-to-char translator for the seeded typing path is 0x423c7c and not the older 0x434eea/0x4252f6 path	proven
+A Czech full-layout patch should hook inside 0x423c7c after 0x423d7a remap so it can stay layout-slot-specific	needs further investigation
+The modifier word in d7 at 0x423c7c contains enough shift-state information to generate full Czech ASCII pairs	needs further investigation
+The . command bug is caused by pending_output_kind not preserving the popped value across later tokens on the same input line	proven
+Persisting the popped value in REPL state fixes the dot command transcript bug without regressing existing Forth Mini unit behavior	proven
+The new Czech 0x423c7c hook survives a normal boot with the existing recovery seed	disproven
+The new Czech 0x423c7c hook itself is invalid and crashes even on a clean boot	proven
+The observed address error is caused by interaction with the stale recovery seed rather than the patched OS code path itself	disproven
+The Czech hook crashes because the trampoline overwrote only 8 bytes and split the original move.w 0x20(a7),d7 instruction	proven
+The second Czech hook crash is caused by using jsr at the function entry, which leaves an extra internal return address on the stack for the override rts path	proven
+The live prompt-line bug is caused by ordinary typing arriving through on_key while current Forth Mini only redraws on on_char	proven
+The current Czech hook build survives a seeded emulator boot for at least 15,000,000 steps without exception	proven
+Restoring printable and backspace handling on on_key without reclaiming Enter fixes the live prompt-line path without regressing existing tests	proven
+In the menu-launched emulator path, prompt text disappears because a later callback after keypress repaints without the current input line	needs further investigation
+Patching the startup fallback at 0x423ba2 from layout 3 to the replaced slot should keep Czech active across restart instead of falling back to QWERTY	proven
+Forth Mini prompt rendering uses the SDK text-trap display path, so an empty emulator text_screen means the draw callback did not run rather than an OCR blind spot	needs further investigation

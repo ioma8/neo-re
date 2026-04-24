@@ -36,7 +36,12 @@ uv run --project layout-patcher layout-patcher \
 
 - replacement names are ASCII only
 - names are cropped when a fixed firmware slot is shorter than the replacement
-- the current `czech` replacement is an ASCII QWERTZ-style fallback
+- the current `czech` replacement is an ASCII approximation of the standard
+  Czech QWERTZ layout, derived from the Microsoft Czech layout tables
+- because the firmware layout hook remaps each physical key to only one stock
+  logical key, the `czech` profile cannot encode true Czech
+  `accented-on-base / number-on-shift` pairs exactly; it uses the closest
+  stock ASCII positions instead
 - the current `polish` replacement is an ASCII fallback of the common Polish
   programmer base layer, so it keeps the stock QWERTY letter layer
 
