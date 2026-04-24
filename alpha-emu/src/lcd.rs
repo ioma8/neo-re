@@ -90,6 +90,80 @@ impl Lcd {
     }
 }
 
+#[must_use]
+pub fn crop_snapshot(
+    snapshot: &LcdSnapshot,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> LcdSnapshot {
+    let crop_width = width.min(snapshot.width.saturating_sub(x));
+    let crop_height = height.min(snapshot.height.saturating_sub(y));
+    let mut pixels = vec![false; crop_width * crop_height];
+    for row in 0..crop_height {
+        for col in 0..crop_width {
+            pixels[row * crop_width + col] =
+                snapshot.pixels[(y + row) * snapshot.width + (x + col)];
+        }
+    }
+    LcdSnapshot {
+        width: crop_width,
+        height: crop_height,
+        pixels,
+    }
+}
+
+#[must_use]
+pub fn visible_snapshot(snapshot: &LcdSnapshot) -> LcdSnapshot {
+    crop_snapshot(snapshot, 0, 0, NEO_VISIBLE_LCD_WIDTH, NEO_VISIBLE_LCD_HEIGHT)
+}
+
+#[must_use]
+pub fn scale_snapshot(snapshot: &LcdSnapshot, scale: usize) -> LcdSnapshot {
+    if scale <= 1 {
+        return snapshot.clone();
+    }
+
+    let scaled_width = snapshot.width.saturating_mul(scale);
+    let scaled_height = snapshot.height.saturating_mul(scale);
+    let mut pixels = vec![false; scaled_width * scaled_height];
+    for y in 0..snapshot.height {
+        for x in 0..snapshot.width {
+            let lit = snapshot.pixels[y * snapshot.width + x];
+            for dy in 0..scale {
+                for dx in 0..scale {
+                    let out_x = x * scale + dx;
+                    let out_y = y * scale + dy;
+                    pixels[out_y * scaled_width + out_x] = lit;
+                }
+            }
+        }
+    }
+
+    LcdSnapshot {
+        width: scaled_width,
+        height: scaled_height,
+        pixels,
+    }
+}
+
+#[must_use]
+pub fn render_snapshot_bits(snapshot: &LcdSnapshot) -> String {
+    let mut output = String::with_capacity(snapshot.height * (snapshot.width + 1));
+    for y in 0..snapshot.height {
+        for x in 0..snapshot.width {
+            output.push(if snapshot.pixels[y * snapshot.width + x] {
+                '1'
+            } else {
+                '0'
+            });
+        }
+        output.push('\n');
+    }
+    output
+}
+
 pub fn cursor_blink_snapshot(snapshot: &LcdSnapshot, cursor_visible: bool) -> LcdSnapshot {
     if cursor_visible {
         return snapshot.clone();
@@ -118,6 +192,7 @@ pub fn probable_cursor_pixels(
 
     let runs = probable_cursor_runs(snapshot, visible_width, visible_height);
     let mut mask = vec![false; visible_width * visible_height];
+    let mut group_count = 0usize;
     let mut x = 0;
     while x < visible_width {
         if runs[x].is_none() {
@@ -130,6 +205,7 @@ pub fn probable_cursor_pixels(
         }
         let end = x;
         if end - start <= MAX_CURSOR_WIDTH {
+            group_count += 1;
             for column in start..end {
                 if let Some(run) = runs[column] {
                     for y in run.start..run.end {
@@ -139,7 +215,11 @@ pub fn probable_cursor_pixels(
             }
         }
     }
-    mask
+    if group_count == 1 {
+        mask
+    } else {
+        vec![false; visible_width * visible_height]
+    }
 }
 
 pub fn probable_cursor_columns(
@@ -266,7 +346,22 @@ impl Controller {
 
 #[cfg(test)]
 mod tests {
-    use super::{LCD_WIDTH, Lcd};
+    use super::{
+        LCD_WIDTH, Lcd, LcdSnapshot, crop_snapshot, render_snapshot_bits, scale_snapshot,
+        visible_snapshot,
+    };
+
+    fn sample_snapshot(width: usize, height: usize, lit: &[(usize, usize)]) -> LcdSnapshot {
+        let mut pixels = vec![false; width * height];
+        for (x, y) in lit {
+            pixels[y * width + x] = true;
+        }
+        LcdSnapshot {
+            width,
+            height,
+            pixels,
+        }
+    }
 
     #[test]
     fn data_write_sets_vertical_pixels_and_advances_column() {
@@ -355,5 +450,35 @@ mod tests {
 
         let snapshot = lcd.snapshot();
         assert!(!snapshot.pixels[4]);
+    }
+
+    #[test]
+    fn crop_snapshot_extracts_requested_region() {
+        let snapshot = sample_snapshot(4, 3, &[(1, 1), (2, 1), (2, 2)]);
+        let crop = crop_snapshot(&snapshot, 1, 1, 2, 2);
+
+        assert_eq!(crop.width, 2);
+        assert_eq!(crop.height, 2);
+        assert_eq!(render_snapshot_bits(&crop), "11\n01\n");
+    }
+
+    #[test]
+    fn scale_snapshot_repeats_each_pixel() {
+        let snapshot = sample_snapshot(2, 2, &[(0, 0), (1, 1)]);
+        let scaled = scale_snapshot(&snapshot, 2);
+
+        assert_eq!(scaled.width, 4);
+        assert_eq!(scaled.height, 4);
+        assert_eq!(render_snapshot_bits(&scaled), "1100\n1100\n0011\n0011\n");
+    }
+
+    #[test]
+    fn visible_snapshot_clamps_to_visible_dimensions() {
+        let snapshot = sample_snapshot(300, 80, &[(263, 63), (264, 64)]);
+        let visible = visible_snapshot(&snapshot);
+
+        assert_eq!(visible.width, 264);
+        assert_eq!(visible.height, 64);
+        assert!(visible.pixels[63 * visible.width + 263]);
     }
 }

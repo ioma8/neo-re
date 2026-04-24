@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
@@ -32,6 +32,7 @@ impl FirmwareRuntime {
     }
 
     pub fn load_small_rom(path: impl AsRef<Path>) -> Result<Self, FirmwareError> {
+        let path = resolve_firmware_path(path.as_ref());
         Ok(Self {
             image: std::fs::read(path)?,
         })
@@ -91,6 +92,27 @@ impl FirmwareRuntime {
     pub fn is_neo_system_image(&self) -> bool {
         self.image.len() >= 0x70 && self.image.get(6..24) == Some(b"System 3 Neo      ")
     }
+}
+
+fn resolve_firmware_path(path: &Path) -> PathBuf {
+    if path.is_absolute() || path.exists() {
+        return path.to_path_buf();
+    }
+
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let manifest_relative = manifest_dir.join(path);
+    if manifest_relative.exists() {
+        return manifest_relative;
+    }
+
+    if let Some(repo_root) = manifest_dir.parent() {
+        let repo_relative = repo_root.join(path);
+        if repo_relative.exists() {
+            return repo_relative;
+        }
+    }
+
+    path.to_path_buf()
 }
 
 fn read_be32(bytes: &[u8], offset: usize) -> Option<u32> {

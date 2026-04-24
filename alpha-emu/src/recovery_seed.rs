@@ -143,6 +143,7 @@ impl RecoverySeed {
         for (range, bytes) in &self.ranges {
             session.overlay_memory_range(range.start, bytes);
         }
+        session.refresh_applet_storage_bounds();
     }
 
     fn read(path: &Path) -> Result<Self, RecoverySeedError> {

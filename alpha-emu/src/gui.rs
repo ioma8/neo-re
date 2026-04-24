@@ -1078,4 +1078,23 @@ mod tests {
 
         assert!(!mask.iter().any(|masked| *masked));
     }
+
+    #[test]
+    fn cursor_detector_disables_mask_when_multiple_narrow_groups_exist() {
+        let mut lcd = LcdSnapshot {
+            width: 320,
+            height: 128,
+            pixels: vec![false; 320 * 128],
+        };
+        for y in 0..16 {
+            lcd.pixels[y * lcd.width] = true;
+            lcd.pixels[y * lcd.width + 1] = true;
+            lcd.pixels[y * lcd.width + 40] = true;
+            lcd.pixels[y * lcd.width + 41] = true;
+        }
+
+        let off = cursor_blink_snapshot(&lcd, false);
+
+        assert_eq!(off.pixels, lcd.pixels);
+    }
 }

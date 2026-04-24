@@ -1,9 +1,8 @@
 # Alpha Emulator Headless Usage
 
-This is a command map for `alpha-emu` headless runs. It focuses on repeatable
-firmware and SmartApplet checks from the repo root.
+All commands below are run from the repo root.
 
-Use this base form:
+Base form:
 
 ```sh
 cargo run --manifest-path alpha-emu/Cargo.toml -- \
@@ -12,49 +11,41 @@ cargo run --manifest-path alpha-emu/Cargo.toml -- \
   analysis/cab/os3kneorom.os3kos
 ```
 
-If no firmware path is provided, the emulator defaults to
-`../analysis/cab/smallos3kneorom.os3kos` relative to `alpha-emu`.
+If no firmware path is given, the default is `../analysis/cab/smallos3kneorom.os3kos`
+relative to `alpha-emu`.
 
-## Output
+## Summary Output
 
-Every normal headless run ends with one summary line:
+Normal headless runs end with:
 
 ```text
-pc=0x00435a26 ssp=0x0007ffba steps=119976278 cycles=1247089312 elapsed_ms=42090 achieved_hz=29628757 target_hz=33000000 stopped=false stop_at=false exception=none
+pc=0x... ssp=0x... steps=... cycles=... elapsed_ms=... achieved_hz=... target_hz=33000000 stopped=... stop_at=... exception=...
 ```
 
-Important fields:
+Fields:
 
 | Field | Meaning |
 | --- | --- |
-| `pc` | Current firmware program counter. |
-| `ssp` | Supervisor stack pointer. |
-| `steps` | Interpreted instruction count. |
-| `cycles` | Emulated 68000 cycle count reported by the interpreter. |
-| `achieved_hz` | Host execution speed, not the emulated device clock. |
-| `target_hz` | Real-time target clock, fixed at 33 MHz for NEO full-speed runs. |
-| `stopped` | Whether the emulated CPU is currently in STOP state. |
-| `stop_at` | Whether a requested stop condition was reached. |
-| `exception` | Last unhandled CPU exception, or `none`. |
+| `pc` | current program counter |
+| `ssp` | supervisor stack pointer |
+| `steps` | interpreted instruction count |
+| `cycles` | emulated 68000 cycle count |
+| `elapsed_ms` | host wall-clock runtime |
+| `achieved_hz` | host-side throughput, not device clock |
+| `target_hz` | pacing target, fixed at 33 MHz |
+| `stopped` | CPU STOP state |
+| `stop_at` | result of `--stop-at-pc` or `--stop-at-resource`; otherwise `n/a` |
+| `exception` | last unhandled exception or `none` |
 
-## Basic Boot Runs
+## Boot Control
 
-Small ROM default boot:
+Basic boot:
 
 ```sh
 cargo run --manifest-path alpha-emu/Cargo.toml -- --headless --steps=200000
 ```
 
-Small ROM explicit path:
-
-```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=200000 \
-  analysis/cab/smallos3kneorom.os3kos
-```
-
-Full System 3 boot:
+Full OS boot:
 
 ```sh
 cargo run --manifest-path alpha-emu/Cargo.toml -- \
@@ -63,428 +54,367 @@ cargo run --manifest-path alpha-emu/Cargo.toml -- \
   analysis/cab/os3kneorom.os3kos
 ```
 
-Run until a known PC is reached:
+Boot with an all-rows key chord:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=250000000 \
-  --stop-at-pc=0x00435a26 \
-  analysis/cab/os3kneorom.os3kos
+--boot-keys=0x0e,0x0c
 ```
 
-Stop at the second time a PC is reached:
+Boot with exact row visibility instead of all-rows visibility:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=5000000 \
-  --stop-at-pc=0x00426752 \
-  --stop-at-pc-hit=2 \
-  analysis/cab/os3kneorom.os3kos
+--boot-keys-exact=0x0e,0x0c
 ```
 
-## LCD Inspection
-
-Print a coarse ASCII rendering:
+Boot directly into SmartApplets:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=120000000 \
-  --lcd-ascii \
-  analysis/cab/os3kneorom.os3kos
+--boot-left-shift-tab
 ```
 
-Write a PBM image:
+This is equivalent to holding raw keys `0x0e,0x0c` during reset.
+
+## Stop Conditions
+
+Stop before a PC:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=120000000 \
-  --lcd-pbm=/tmp/neo-lcd.pbm \
-  analysis/cab/os3kneorom.os3kos
+--stop-at-pc=0x00426752
 ```
 
-List occupied x ranges by LCD row. This is useful for crop, cursor, and layout
-debugging:
+Stop on the Nth hit of a PC:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=120000000 \
-  --lcd-ranges \
-  analysis/cab/os3kneorom.os3kos
+--stop-at-pc=0x00426752 --stop-at-pc-hit=2
 ```
 
-## Traces and MMIO
-
-Verbose mode uses the slower traced interpreter path and prints recent
-registers, debug words, MMIO accesses, and instruction trace lines:
+Stop before a firmware resource lookup:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --verbose \
-  --steps=200000 \
-  analysis/cab/smallos3kneorom.os3kos
+--stop-at-resource=0x006b
 ```
 
-Keep verbose runs short. The trace buffers are intentionally bounded so command
-output stays usable.
+## Scripted Input
 
-## Keyboard Input
+The scheduler is instruction-step based.
 
-Type text at an instruction step:
+Text at a step:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=1700000000 \
-  --type-at=1400000000:hello \
-  --lcd-ascii \
-  analysis/cab/os3kneorom.os3kos
+--type-at=31000000:7+2
 ```
 
-Press a named key at a step:
+Key at a step:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=20000000 \
-  --key-at=9000000:enter \
-  analysis/cab/smallos3kneorom.os3kos
+--key-at=33000000:enter
 ```
 
 Hold a key over a step range:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=30000000 \
-  --hold-key=5000000-9000000:down \
-  analysis/cab/os3kneorom.os3kos
+--hold-key=28100000-30000000:esc
 ```
 
-Use exact matrix code by hex:
+Force a key visible on any selected row:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=20000000 \
-  --key-at=9000000:0x69 \
-  analysis/cab/os3kneorom.os3kos
+--key-all-rows-at=STEP:KEY
 ```
 
-Supported named keys:
+Immediate text after scripted boot/launch:
+
+```sh
+--type-now=hello
+```
+
+Immediate keys after scripted boot/launch:
+
+```sh
+--key-now=enter,backspace
+```
+
+Key names:
 
 ```text
 enter return up down left right esc escape tab backspace
 applets send find print spell-check spellcheck clear-file clearfile
 file1 file-1 file2 file-2 file3 file-3 file4 file-4
 file5 file-5 file6 file-6 file7 file-7 file8 file-8
+0xNN
 ```
 
-`--key-all-rows-at=STEP:KEY` forces the key visible on any scanned row. Use it
-only for early boot or discovery probes; normal full-System text entry should
-prefer `--type-at` or `--key-at`.
+Semantics:
 
-## Boot Chords
-
-Boot full System 3 directly into the SmartApplets list:
-
-```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --boot-left-shift-tab \
-  --steps=18000000 \
-  --stop-at-resource=0x6b \
-  analysis/cab/os3kneorom.os3kos
-```
-
-Boot with custom all-row matrix keys held briefly:
-
-```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --boot-keys=0x0e,0x0c \
-  --steps=18000000 \
-  analysis/cab/os3kneorom.os3kos
-```
-
-Boot with exact-row matrix keys held longer:
-
-```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --boot-keys-exact=0x0e,0x0c \
-  --steps=18000000 \
-  analysis/cab/os3kneorom.os3kos
-```
-
-## Resource Stops
-
-Stop when firmware resolves a resource string ID:
-
-```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=120000000 \
-  --stop-at-resource=0xdb \
-  analysis/cab/os3kneorom.os3kos
-```
-
-Useful resource IDs:
-
-| ID | Use |
+| Flag | Injection mode |
 | --- | --- |
-| `0x6b` | SmartApplets menu/help resource path. |
-| `0xdb` | Full System recovery prompt: `An unexpected data change occurred.` |
+| `--type-at` | per-character debug tap profile |
+| `--key-at` | debug tap profile |
+| `--key-all-rows-at` | debug tap profile, forced visible on all rows |
+| `--hold-key` | exact press/release at scheduled steps |
+| `--type-now` | same as `--type-at`, applied after scheduled headless stepping |
+| `--key-now` | same as `--key-at`, applied after scheduled headless stepping |
 
-## Recovery Seed
+`--type-at` is for normal printable input. `--key-at` is for control/navigation
+keys and raw matrix tests.
 
-The full System image can need a low-memory recovery seed. Generate it from the
-firmware recovery path:
+## LCD Output
 
-```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --reinit-memory \
-  analysis/cab/os3kneorom.os3kos
-```
-
-Use an explicit seed path:
+Full LCD coarse ASCII:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --reinit-memory \
-  --recovery-seed=/tmp/neo-recovery.seed \
-  analysis/cab/os3kneorom.os3kos
+--lcd-ascii
 ```
 
-Load an existing seed:
+Visible 264x64 area ASCII:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --recovery-seed=/tmp/neo-recovery.seed \
-  --steps=120000000 \
-  --stop-at-resource=0xdb \
-  analysis/cab/os3kneorom.os3kos
+--lcd-visible-ascii
 ```
 
-Expected result with a good seed:
-
-```text
-recovery_seed_loaded=/tmp/neo-recovery.seed
-... stop_at=false exception=none
-```
-
-Expected result with no seed:
-
-```text
-... pc=0x00424212 ... stop_at=true exception=none
-```
-
-The default seed path is:
-
-```text
-alpha-emu/state/full-system-recovery.seed
-```
-
-That directory is ignored by git.
-
-## Memory Snapshots
-
-Dump memory immediately after session creation and optional seed load:
+Full LCD bits to stdout:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --dump-memory-start=/tmp/neo-start.bin \
-  --steps=0 \
-  analysis/cab/os3kneorom.os3kos
+--lcd-bits
 ```
 
-Dump memory after a run:
+Full LCD bits to file:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=120000000 \
-  --dump-memory=/tmp/neo-after.bin \
-  analysis/cab/os3kneorom.os3kos
+--lcd-bits-path=/tmp/lcd-bits.txt
 ```
 
-Load an 8 MiB memory image before running:
+Full LCD PBM:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --load-memory=/tmp/neo-after.bin \
-  --steps=120000000 \
-  analysis/cab/os3kneorom.os3kos
+--lcd-pbm=/tmp/lcd-full.pbm
 ```
 
-Snapshot diffing workflow:
+Visible LCD PBM:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --dump-memory-start=/tmp/pre.bin \
-  --steps=120000000 \
-  --dump-memory=/tmp/post.bin \
-  analysis/cab/os3kneorom.os3kos
-cmp -l /tmp/pre.bin /tmp/post.bin | sed -n '1,40p'
+--lcd-visible-pbm=/tmp/lcd-visible.pbm
 ```
 
-## Applet Validation Shortcuts
-
-Validate Alpha USB native applet callback shape:
+Blink pair PBMs with cursor-on and cursor-off renderings:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --validate-alpha-usb-native \
-  analysis/cab/os3kneorom.os3kos
+--lcd-blink-pbm-prefix=/tmp/lcd-blink
 ```
 
-Validate Forth Mini applet callback shape:
+Occupied x-ranges per row:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --validate-forth-mini \
-  analysis/cab/os3kneorom.os3kos
+--lcd-ranges
 ```
 
-These shortcuts call applet message handlers directly through the validation
-harness. They are fast ABI and crash checks; they are not full end-user UI
-scripts through the SmartApplets menu.
-
-## Matrix Discovery
-
-Scan special keys for menu/help resource behavior:
+Sample LCD hash/diff over time:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --scan-special-keys-at=120000000 \
-  analysis/cab/os3kneorom.os3kos
+--sample-lcd-after=INTERVAL_STEPS:COUNT
 ```
 
-Check whether every known matrix cell becomes visible to firmware scanning:
+Complete dump directory:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --scan-matrix-visibility-at=120000000 \
-  analysis/cab/os3kneorom.os3kos
+--lcd-dump-dir=/tmp/alpha-emu-lcd
 ```
 
-Validate current key mapping assumptions:
+This writes:
+
+- `lcd-full-bits.txt`
+- `lcd-full.pbm`
+- `lcd-visible.pbm`
+- `lcd-visible-ocr.pbm`
+- `lcd-ocr.txt` when OCR succeeds
+
+OCR:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --validate-key-map-at=120000000 \
-  analysis/cab/os3kneorom.os3kos
+--lcd-ocr
+--lcd-ocr-scale=8
 ```
 
-## Scenario Recipes
+Recommended order:
 
-Detect whether a fresh full-System boot needs recovery:
+1. Use the emulator text-capture path first.
+2. Use bitmap OCR only when no emulator text layer is available.
+
+For text-heavy applet and firmware screens, prefer:
+
+- `--lcd-ocr`
+- `--lcd-dump-dir=...` and inspect `lcd-ocr.txt`
+
+These use the emulator-captured text layer when present and are the primary
+debugging path. Bitmap OCR is fallback only.
+
+Text extraction behavior:
+
+| Screen type | OCR source |
+| --- | --- |
+| trap-rendered text screens | emulator-captured text layer |
+| raw pixel screens | visible LCD bitmap passed to `tesseract` |
+
+## Debug Modes
+
+Verbose traced execution:
 
 ```sh
-rm -f /tmp/missing.seed
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --recovery-seed=/tmp/missing.seed \
-  --steps=120000000 \
-  --stop-at-resource=0xdb \
-  analysis/cab/os3kneorom.os3kos
+--verbose
 ```
 
-Generate a recovery seed and verify the prompt is skipped:
+This switches from the fast interpreter path to traced execution and prints:
+
+- registers
+- debug words
+- MMIO log
+- recent instruction trace
+
+Keep verbose runs short.
+
+Matrix visibility scan from a given state:
 
 ```sh
-rm -f /tmp/neo-recovery.seed
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --reinit-memory \
-  --recovery-seed=/tmp/neo-recovery.seed \
-  --steps=120000000 \
-  --stop-at-resource=0xdb \
-  analysis/cab/os3kneorom.os3kos
+--scan-matrix-visibility-at=STEP
 ```
 
-Boot to SmartApplets menu and save an LCD image:
+Special key scan:
+
+```sh
+--scan-special-keys-at=STEP
+```
+
+Key-map validation:
+
+```sh
+--validate-key-map-at=STEP
+```
+
+## Memory Overlay / Capture
+
+Rebuild and save recovery seed:
+
+```sh
+--reinit-memory
+```
+
+Use an explicit recovery seed path:
+
+```sh
+--recovery-seed=/tmp/full-system-recovery.seed
+```
+
+Overlay raw memory bytes into the current session:
+
+```sh
+--load-memory=/tmp/memory.bin
+```
+
+Dump memory before execution:
+
+```sh
+--dump-memory-start=/tmp/memory-start.bin
+```
+
+Dump memory after execution:
+
+```sh
+--dump-memory=/tmp/memory-end.bin
+```
+
+## Built-In Validation / Launch Helpers
+
+Launch Forth Mini through direct validation context:
+
+```sh
+--launch-forth-mini
+```
+
+Launch stock Calculator through direct validation context:
+
+```sh
+--launch-calculator
+```
+
+These require the full OS image.
+
+Built-in validators:
+
+```sh
+--validate-alpha-usb-native
+--validate-forth-mini
+```
+
+`--validate-forth-mini` boots the full system, enters SmartApplets, launches
+Forth Mini through the menu, sends a fixed evaluation sequence, and fails if the
+LCD does not change or an exception occurs.
+
+## Verified Calculator Workflow
+
+This is the currently verified full-System headless workflow for stock
+Calculator interaction:
+
+1. Boot full System with `--boot-left-shift-tab`.
+2. Navigate SmartApplets with two `down` presses and `enter`.
+3. Dismiss Calculator help by holding `esc`.
+4. Send expression with `--type-at`.
+5. Evaluate with `enter`.
+6. Read result via `--lcd-ocr`.
+
+Example:
 
 ```sh
 cargo run --manifest-path alpha-emu/Cargo.toml -- \
   --headless \
   --boot-left-shift-tab \
-  --steps=18000000 \
-  --lcd-pbm=/tmp/smartapplets.pbm \
+  --steps=37000000 \
+  --key-at=25100000:down \
+  --key-at=26100000:down \
+  --key-at=27100000:enter \
+  --hold-key=28100000-30000000:esc \
+  --type-at=31000000:7+2 \
+  --key-at=33000000:enter \
+  --lcd-ocr \
   analysis/cab/os3kneorom.os3kos
 ```
 
-Run enough full-System firmware for AlphaWord and type text:
+Verified expressions:
+
+- `8-5 -> 3`
+- `9/3 -> 3`
+- `7+2 -> 9`
+- `2x3 -> 6`
+
+Calculator renders multiplication as `*` in OCR output even when the scripted
+input used `x`.
+
+## Verified Forth Mini Workflow
+
+Direct applet launch:
 
 ```sh
 cargo run --manifest-path alpha-emu/Cargo.toml -- \
   --headless \
-  --steps=1700000000 \
-  --type-at=1400000000:hello \
-  --lcd-pbm=/tmp/alphaword-hello.pbm \
-  --lcd-ascii \
+  --launch-forth-mini \
+  --type-now=1 \
+  --key-now=enter \
+  --lcd-ocr \
   analysis/cab/os3kneorom.os3kos
 ```
 
-Exercise arrow cursor movement after typing:
+Menu-path validation:
 
 ```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --steps=1700200000 \
-  --type-at=1400000000:hello \
-  --key-at=1500000000:enter \
-  --type-at=1500100000:world \
-  --key-at=1600000000:up \
-  --key-at=1600100000:down \
-  --lcd-pbm=/tmp/cursor-move.pbm \
-  analysis/cab/os3kneorom.os3kos
-```
-
-Capture a short MMIO trace around an early boot path:
-
-```sh
-cargo run --manifest-path alpha-emu/Cargo.toml -- \
-  --headless \
-  --verbose \
-  --steps=100000 \
-  analysis/cab/smallos3kneorom.os3kos
-```
-
-Validate Forth Mini ABI after rebuilding applets:
-
-```sh
-cd aplha-rust-native
-./build.sh forth_mini
-cd ..
 cargo run --manifest-path alpha-emu/Cargo.toml -- \
   --headless \
   --validate-forth-mini \
   analysis/cab/os3kneorom.os3kos
 ```
 
-## Notes
+When `--launch-forth-mini` is active:
 
-- Large `--steps` values are normal for full-System user-flow tests.
-- `--verbose`, `--stop-at-pc`, and `--stop-at-resource` can use slower traced
-  execution paths.
-- Prefer `cargo run --manifest-path alpha-emu/Cargo.toml -- ...` from the repo
-  root when writing docs or scripts.
-- Prefer `--lcd-pbm` for visual regression artifacts and `--lcd-ascii` for
-  quick terminal checks.
+- `--type-now` and `--type-at` dispatch Forth Mini `0x20` Char messages directly
+- `--key-now` dispatches Forth Mini `0x21` Key messages directly
+
+This is specific to Forth Mini debug launch. It does not apply to normal stock
+firmware text entry.

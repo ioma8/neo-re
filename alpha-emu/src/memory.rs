@@ -45,6 +45,15 @@ pub(crate) struct AppletMemoryValidation {
     pub(crate) valid: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct AppletLaunchInfo {
+    pub(crate) slot: u32,
+    pub(crate) base: u32,
+    pub(crate) entry: u32,
+    pub(crate) entry_offset: u32,
+    pub(crate) id: u16,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct EmuMemory {
     bytes: Vec<u8>,
@@ -122,13 +131,26 @@ impl EmuMemory {
         self.keyboard.tap_chord(keys);
     }
 
+    pub(crate) fn tap_key_chord_debug(&mut self, keys: &[MatrixKey]) {
+        self.keyboard.tap_chord_debug(keys);
+    }
+
     pub(crate) fn tap_key_long(&mut self, key: MatrixKey) {
         self.keyboard.tap_long(key);
+    }
+
+    pub(crate) fn tap_key_debug(&mut self, key: MatrixKey) {
+        self.keyboard.tap_debug(key);
     }
 
     pub(crate) fn tap_key_all_rows(&mut self, key: MatrixKey) {
         self.keyboard.tap_all_rows(key);
     }
+
+    pub(crate) fn tap_key_all_rows_debug(&mut self, key: MatrixKey) {
+        self.keyboard.tap_all_rows_debug(key);
+    }
+
 
     pub(crate) fn hold_small_rom_entry_chord(&mut self) {
         self.keyboard.hold_small_rom_entry_chord();
@@ -198,7 +220,12 @@ impl EmuMemory {
     }
 
     pub(crate) fn find_applet_entry(&self, wanted_name: &str) -> Option<u32> {
+        self.find_applet_launch_info(wanted_name).map(|info| info.entry)
+    }
+
+    pub(crate) fn find_applet_launch_info(&self, wanted_name: &str) -> Option<AppletLaunchInfo> {
         let mut cursor = STOCK_APPLET_BASE;
+        let mut slot = 1u32;
         while cursor + 0x94 <= self.bytes.len()
             && self.bytes.get(cursor..cursor + 4) == Some([0xc0, 0xff, 0xee, 0xad].as_slice())
         {
@@ -209,9 +236,17 @@ impl EmuMemory {
             let name = applet_name(&self.bytes[cursor + 0x18..cursor + 0x40])?;
             if name == wanted_name {
                 let entry_offset = read_be32(&self.bytes, cursor + 0x84)?;
-                return Some(cursor as u32 + entry_offset);
+                let id = u16::from_be_bytes([self.bytes[cursor + 0x14], self.bytes[cursor + 0x15]]);
+                return Some(AppletLaunchInfo {
+                    slot,
+                    base: cursor as u32,
+                    entry: cursor as u32 + entry_offset,
+                    entry_offset,
+                    id,
+                });
             }
             cursor += length;
+            slot = slot.saturating_add(1);
         }
         None
     }
@@ -310,6 +345,14 @@ impl EmuMemory {
             return;
         }
         self.bytes[start..end].copy_from_slice(&overlay[..end - start]);
+    }
+
+    pub(crate) fn refresh_applet_storage_bounds(&mut self) {
+        if let Some(end) = find_applet_storage_end(&self.bytes) {
+            self.applet_storage_end = Some(end);
+            write_be32(&mut self.bytes, 0x0000_0e8a, STOCK_APPLET_BASE as u32);
+            write_be32(&mut self.bytes, 0x0000_0e8e, end);
+        }
     }
 
     fn record_mmio(&mut self, access: impl Into<String>) {
@@ -756,6 +799,32 @@ mod tests {
         assert_eq!(validation.end as usize, applet_end);
         assert!(validation.alpha_usb_native.is_some());
         assert!(validation.forth_mini.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn full_system_keeps_exported_custom_applets_after_recovery_seed()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
+        let mut session = crate::firmware_session::FirmwareSession::boot_small_rom(firmware)?;
+
+        crate::recovery_seed::apply_seed_file_if_present(
+            &mut session,
+            crate::recovery_seed::default_seed_path(),
+        )?;
+
+        let validation = session.snapshot().debug_words;
+        assert!(
+            validation
+                .iter()
+                .any(|(addr, value)| *addr == 0x0000_0e8a
+                    && *value == super::STOCK_APPLET_BASE as u32)
+        );
+        assert!(
+            session
+                .start_applet_message_for_validation("Forth Mini", 0x19)
+                .is_ok()
+        );
         Ok(())
     }
 

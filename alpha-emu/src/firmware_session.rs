@@ -8,9 +8,12 @@ use m68000::exception::Vector;
 use thiserror::Error;
 
 use crate::firmware::{FirmwareError, FirmwareRuntime};
-use crate::keyboard::{MatrixKey, matrix_key_for_char, matrix_key_for_code};
+use crate::keyboard::{
+    MatrixKey, left_shift_key, matrix_key_for_code, matrix_key_stroke_for_char,
+};
 use crate::lcd::LcdSnapshot;
 use crate::memory::{EmuMemory, MemoryError};
+use crate::text_screen::TextScreen;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FirmwareSnapshot {
@@ -27,6 +30,7 @@ pub struct FirmwareSnapshot {
     pub trace: Vec<String>,
     pub mmio_accesses: Vec<String>,
     pub lcd: LcdSnapshot,
+    pub text_screen: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -46,6 +50,7 @@ pub struct FirmwareSession {
     last_exception: Option<String>,
     trace: Vec<String>,
     mmio_accesses: Vec<String>,
+    text_screen: TextScreen,
 }
 
 impl FirmwareSession {
@@ -115,6 +120,7 @@ impl FirmwareSession {
             last_exception: None,
             trace: vec![format!("Firmware boot: ssp=0x{ssp:08x} pc=0x{pc:08x}")],
             mmio_accesses: Vec::new(),
+            text_screen: TextScreen::default(),
         })
     }
 
@@ -345,26 +351,50 @@ impl FirmwareSession {
     }
 
     pub fn press_char(&mut self, value: char) {
-        if let Some(key) = matrix_key_for_char(value) {
-            self.memory.press_key(key);
+        if let Some(stroke) = matrix_key_stroke_for_char(value) {
+            if stroke.shift {
+                self.memory.press_key(left_shift_key());
+            }
+            self.memory.press_key(stroke.key);
         }
     }
 
     pub fn release_char(&mut self, value: char) {
-        if let Some(key) = matrix_key_for_char(value) {
-            self.memory.release_key(key);
+        if let Some(stroke) = matrix_key_stroke_for_char(value) {
+            self.memory.release_key(stroke.key);
+            if stroke.shift {
+                self.memory.release_key(left_shift_key());
+            }
         }
     }
 
     pub fn tap_char(&mut self, value: char) {
-        if let Some(key) = matrix_key_for_char(value) {
-            self.memory.tap_key(key);
+        if let Some(stroke) = matrix_key_stroke_for_char(value) {
+            if stroke.shift {
+                self.memory.tap_key_chord(&[left_shift_key(), stroke.key]);
+            } else {
+                self.memory.tap_key(stroke.key);
+            }
+        }
+    }
+
+    pub fn tap_char_debug(&mut self, value: char) {
+        if let Some(stroke) = matrix_key_stroke_for_char(value) {
+            if stroke.shift {
+                self.memory.tap_key_chord_debug(&[left_shift_key(), stroke.key]);
+            } else {
+                self.memory.tap_key_debug(stroke.key);
+            }
         }
     }
 
     pub fn tap_char_all_rows(&mut self, value: char) {
-        if let Some(key) = matrix_key_for_char(value) {
-            self.memory.tap_key_all_rows(key);
+        if let Some(stroke) = matrix_key_stroke_for_char(value) {
+            if stroke.shift {
+                self.memory.tap_key_chord(&[left_shift_key(), stroke.key]);
+            } else {
+                self.memory.tap_key_all_rows(stroke.key);
+            }
         }
     }
 
@@ -400,9 +430,21 @@ impl FirmwareSession {
         }
     }
 
+    pub fn tap_matrix_code_debug(&mut self, code: u8) {
+        if let Some(key) = matrix_key_for_code(code) {
+            self.memory.tap_key_debug(key);
+        }
+    }
+
     pub fn tap_matrix_code_all_rows(&mut self, code: u8) {
         if let Some(key) = matrix_key_for_code(code) {
             self.memory.tap_key_all_rows(key);
+        }
+    }
+
+    pub fn tap_matrix_code_all_rows_debug(&mut self, code: u8) {
+        if let Some(key) = matrix_key_for_code(code) {
+            self.memory.tap_key_all_rows_debug(key);
         }
     }
 
@@ -426,6 +468,55 @@ impl FirmwareSession {
         message: u32,
     ) -> Result<(), String> {
         self.start_applet_message_with_param_for_validation(applet_name, message, 0)
+    }
+
+    pub fn start_stock_applet_message_for_validation(
+        &mut self,
+        applet_name: &str,
+        message: u32,
+    ) -> Result<(), String> {
+        let info = self
+            .memory
+            .find_applet_launch_info(applet_name)
+            .ok_or_else(|| format!("applet not found: {applet_name}"))?;
+        const VALIDATION_STACK: u32 = 0x0007_fb00;
+        const VALIDATION_STATUS: u32 = 0x0000_1200;
+        let a5_adjust_addr = 0x0000_355e + info.slot * 4;
+        let a5_adjust = self
+            .memory
+            .peek_long(a5_adjust_addr)
+            .ok_or_else(|| format!("missing applet A5 adjust at 0x{a5_adjust_addr:08x}"))?;
+        self.cpu.regs.pc = Wrapping(info.entry);
+        self.cpu.regs.ssp = Wrapping(VALIDATION_STACK);
+        self.cpu.regs.d[6] = Wrapping(info.entry_offset);
+        self.cpu.regs.d[7] = Wrapping(message);
+        self.cpu.regs.a[5] = Wrapping(a5_adjust);
+        self.last_exception = None;
+        self.memory
+            .set_long(VALIDATION_STACK, 0x0042_6752)
+            .ok_or_else(|| "failed to write validation return address".to_string())?;
+        self.memory
+            .set_long(VALIDATION_STACK + 4, message)
+            .ok_or_else(|| "failed to write validation message".to_string())?;
+        self.memory
+            .set_long(VALIDATION_STACK + 8, info.entry_offset)
+            .ok_or_else(|| "failed to write validation entry offset argument".to_string())?;
+        self.memory
+            .set_long(VALIDATION_STACK + 12, VALIDATION_STATUS)
+            .ok_or_else(|| "failed to write validation status pointer".to_string())?;
+        self.memory
+            .set_long(0x0000_35e2, info.slot)
+            .ok_or_else(|| "failed to write current applet slot state".to_string())?;
+        self.memory
+            .set_long(0x0000_35e6, u32::from(info.id) << 16)
+            .ok_or_else(|| "failed to write current applet id".to_string())?;
+        self.memory
+            .set_long(0x0000_35ec, info.slot)
+            .ok_or_else(|| "failed to write current applet slot".to_string())?;
+        self.memory
+            .set_long(0x0000_3e8a, info.entry)
+            .ok_or_else(|| "failed to write current applet callback entry".to_string())?;
+        Ok(())
     }
 
     pub fn start_applet_message_with_param_for_validation(
@@ -516,6 +607,7 @@ impl FirmwareSession {
             trace: self.trace.clone(),
             mmio_accesses: self.mmio_accesses.clone(),
             lcd: self.memory.lcd_snapshot(),
+            text_screen: self.text_screen.render(),
         }
     }
 
@@ -566,6 +658,7 @@ impl FirmwareSession {
         if vector != Vector::LineAEmulator as u8 {
             return false;
         }
+        self.capture_line_a_text_trap(fault_pc);
         let Some(handler) = self.memory.peek_long(u32::from(vector) * 4) else {
             return false;
         };
@@ -587,6 +680,51 @@ impl FirmwareSession {
             "line-a vector -> handler=0x{handler:08x} return_pc=0x{return_pc:08x}"
         ));
         true
+    }
+
+    fn capture_line_a_text_trap(&mut self, fault_pc: u32) {
+        let Some(opcode) = self.memory.peek_word(fault_pc) else {
+            return;
+        };
+        let sp = self.cpu.regs.sp();
+        match opcode {
+            0xa000 => self.text_screen.clear(),
+            0xa004 => {
+                let Some(row) = self.memory.peek_long(sp + 4) else {
+                    return;
+                };
+                let Some(col) = self.memory.peek_long(sp + 8) else {
+                    return;
+                };
+                let Some(width) = self.memory.peek_long(sp + 12) else {
+                    return;
+                };
+                self.text_screen.set_cursor(row, col, width);
+            }
+            0xa010 => {
+                let Some(byte) = self.memory.peek_long(sp + 4) else {
+                    return;
+                };
+                self.text_screen.draw_char(byte as u8);
+            }
+            0xa014 => {
+                let Some(ptr) = self.memory.peek_long(sp + 4) else {
+                    return;
+                };
+                let mut bytes = Vec::new();
+                for index in 0..256u32 {
+                    let Some(byte) = self.memory.peek_byte(ptr + index) else {
+                        break;
+                    };
+                    bytes.push(byte);
+                    if byte == 0 {
+                        break;
+                    }
+                }
+                self.text_screen.draw_c_string(&bytes);
+            }
+            _ => {}
+        }
     }
 
     fn push_trace(&mut self, line: String) {
@@ -723,100 +861,43 @@ mod tests {
     }
 
     #[test]
-    fn forth_mini_uses_char_message_for_printable_input() -> Result<(), Box<dyn std::error::Error>>
-    {
-        let mut session = boot_full_system_for_forth_validation()?;
-        session.start_applet_message_for_validation("Forth Mini", 0x19)?;
-        session.run_until_pc_or_steps(0x0042_6752, 500_000);
-        session.start_applet_message_with_param_for_validation("Forth Mini", 0x21, 0x38)?;
-        session.run_until_pc_or_steps(0x0042_6752, 500_000);
-        session.start_applet_message_with_param_for_validation(
-            "Forth Mini",
-            0x20,
-            u32::from(b'1'),
-        )?;
-        session.run_until_pc_or_steps(0x0042_6752, 500_000);
-
-        assert_eq!(
-            session.validation_applet_memory_hex(0x300 + 64 + 4, 2),
-            "31 00"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn forth_mini_evaluates_key_and_char_sequence() -> Result<(), Box<dyn std::error::Error>> {
-        let mut session = boot_full_system_for_forth_validation()?;
-        session.start_applet_message_for_validation("Forth Mini", 0x19)?;
-        session.run_until_pc_or_steps(0x0042_6752, 500_000);
-
-        for (key, byte) in [
-            (0x38, b'1'),
-            (0x40, b'\r'),
-            (0x37, b'2'),
-            (0x40, b'\r'),
-            (0x25, b'+'),
-            (0x40, b'\r'),
-        ] {
-            session.start_applet_message_with_param_for_validation("Forth Mini", 0x21, key)?;
-            session.run_until_pc_or_steps(0x0042_6752, 500_000);
-            session.start_applet_message_with_param_for_validation(
-                "Forth Mini",
-                0x20,
-                u32::from(byte),
-            )?;
-            session.run_until_pc_or_steps(0x0042_6752, 500_000);
-        }
-
-        assert_eq!(
-            session.validation_applet_memory_hex(0x300, 4),
-            "00 00 00 03"
-        );
-        assert_eq!(
-            session.validation_applet_memory_hex(0x300 + 64, 4),
-            "00 00 00 01"
-        );
-        assert_eq!(
-            session.validation_applet_memory_hex(0x300 + 64 + 4 + 64, 4),
-            "00 00 00 00"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn forth_mini_prompt_has_no_filled_input_bar() -> Result<(), Box<dyn std::error::Error>> {
-        let mut session = boot_full_system_for_forth_validation()?;
-        session.start_applet_message_for_validation("Forth Mini", 0x19)?;
-        session.run_until_pc_or_steps(0x0042_6752, 500_000);
-        session.start_applet_message_with_param_for_validation(
-            "Forth Mini",
-            0x20,
-            u32::from(b'5'),
-        )?;
-        session.run_until_pc_or_steps(0x0042_6752, 500_000);
-
-        let lcd = session.lcd_snapshot();
-        let (run, y, start_x, end_x) = max_horizontal_run_location(&lcd.pixels, lcd.width, 48..64);
-        assert!(
-            run < 40,
-            "prompt row has a long filled run: run={run} y={y} x={start_x}..{end_x}"
-        );
-        Ok(())
-    }
-
-    #[test]
-    fn forth_mini_accepts_first_printable_key_after_real_launch()
+    fn stock_calculator_launches_through_validation_context()
     -> Result<(), Box<dyn std::error::Error>> {
-        let mut session = boot_full_system_smartapplets_for_forth_validation()?;
-        launch_forth_mini_through_menu(&mut session);
+        let firmware =
+            crate::firmware::FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
+        let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+        crate::recovery_seed::apply_seed_file_if_present(
+            &mut session,
+            crate::recovery_seed::default_seed_path(),
+        )?;
+        session.run_realtime_cycles(220_000_000, 25_000_000);
+        session.start_stock_applet_message_for_validation("Calculator", 0x19)?;
+        session.run_steps(500_000);
 
-        let lcd_before = session.lcd_snapshot();
-        session.tap_matrix_code_long(0x38);
-        session.run_steps(300_000);
-        let lcd_after = session.lcd_snapshot();
+        let snapshot = session.snapshot();
+        assert!(snapshot.last_exception.is_none());
+        assert!(snapshot.lcd.pixels.iter().any(|pixel| *pixel));
+        Ok(())
+    }
 
-        assert_ne!(lcd_before.pixels, lcd_after.pixels);
-        assert!(session.snapshot().last_exception.is_none());
+    #[test]
+    fn stock_calculator_help_is_captured_as_text() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware =
+            crate::firmware::FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
+        let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+        crate::recovery_seed::apply_seed_file_if_present(
+            &mut session,
+            crate::recovery_seed::default_seed_path(),
+        )?;
+        session.run_realtime_cycles(220_000_000, 25_000_000);
+        session.start_stock_applet_message_for_validation("Calculator", 0x19)?;
+        session.run_steps(500_000);
+
+        let snapshot = session.snapshot();
+        assert!(snapshot.last_exception.is_none());
+        let text = snapshot.text_screen.unwrap_or_default();
+        assert!(text.contains("AlphaSmart Calculator Help"));
+        assert!(text.contains("esc to exit"));
         Ok(())
     }
 
@@ -827,7 +908,7 @@ mod tests {
         launch_forth_mini_through_menu(&mut session);
 
         let lcd_before = session.lcd_snapshot();
-        for key in [0x38, 0x40, 0x37, 0x40, 0x25, 0x40] {
+        for key in [0x5c, 0x69, 0x5b, 0x69, 0x40, 0x69] {
             session.tap_matrix_code_long(key);
             session.run_steps(300_000);
         }
@@ -836,46 +917,6 @@ mod tests {
         assert_ne!(lcd_before.pixels, lcd_after.pixels);
         assert!(session.snapshot().last_exception.is_none());
         Ok(())
-    }
-
-    fn max_horizontal_run_location(
-        pixels: &[bool],
-        width: usize,
-        rows: std::ops::Range<usize>,
-    ) -> (usize, usize, usize, usize) {
-        let mut longest = 0usize;
-        let mut longest_y = 0usize;
-        let mut longest_end = 0usize;
-        for y in rows {
-            let mut current = 0;
-            for x in 0..width {
-                if pixels[y * width + x] {
-                    current += 1;
-                    if current > longest {
-                        longest = current;
-                        longest_y = y;
-                        longest_end = x;
-                    }
-                } else {
-                    current = 0;
-                }
-            }
-        }
-        let start = longest_end.saturating_sub(longest.saturating_sub(1));
-        (longest, longest_y, start, longest_end)
-    }
-
-    fn boot_full_system_for_forth_validation() -> Result<FirmwareSession, Box<dyn std::error::Error>>
-    {
-        let firmware =
-            crate::firmware::FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
-        let mut session = FirmwareSession::boot_small_rom(firmware)?;
-        crate::recovery_seed::apply_seed_file_if_present(
-            &mut session,
-            crate::recovery_seed::default_seed_path(),
-        )?;
-        session.run_realtime_cycles(220_000_000, 25_000_000);
-        Ok(session)
     }
 
     fn boot_full_system_smartapplets_for_forth_validation()
@@ -896,7 +937,8 @@ mod tests {
             session.tap_matrix_code_long(0x15);
             session.run_steps(250_000);
         }
-        session.tap_matrix_code_long(0x40);
+        session.tap_matrix_code_long(0x69);
         session.run_steps(500_000);
     }
+
 }

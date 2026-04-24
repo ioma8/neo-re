@@ -33,17 +33,34 @@ Headless full System 3 firmware boot:
 cargo run -- --headless --steps=200000 ../analysis/cab/os3kneorom.os3kos
 ```
 
-Normal headless execution uses the fast interpreter path. Add `--verbose` to
-include recent MMIO and instruction trace lines; verbose and `--stop-at-*`
-diagnostic modes intentionally use the slower disassembler/trace path.
-Use `--lcd-pbm=/tmp/neo.pbm` or `--lcd-ascii` to inspect the headless LCD.
-Scripted keyboard input is available with `--type-at=STEP:TEXT` and
-`--key-at=STEP:enter|up|down|left|right|esc|tab|backspace`.
-Use `--boot-left-shift-tab` with the full System 3 image to emulate holding
-left shift + tab while powering on; this reaches the SmartApplets menu.
+Normal headless execution uses the fast interpreter path. `--verbose` switches
+to traced execution and prints MMIO plus instruction trace data.
 
-Detailed headless command scenarios are documented in
+Headless supports:
+
+- scheduled input: `--type-at`, `--key-at`, `--hold-key`, `--key-all-rows-at`
+- immediate input: `--type-now`, `--key-now`
+- boot chords: `--boot-left-shift-tab`, `--boot-keys`, `--boot-keys-exact`
+- LCD outputs: `--lcd-ascii`, `--lcd-visible-ascii`, `--lcd-bits`,
+  `--lcd-bits-path`, `--lcd-pbm`, `--lcd-visible-pbm`, `--lcd-blink-pbm-prefix`,
+  `--lcd-ranges`, `--lcd-dump-dir`, `--lcd-ocr`
+- validation helpers: `--launch-forth-mini`, `--launch-calculator`,
+  `--validate-alpha-usb-native`, `--validate-forth-mini`
+
+The full flag reference and verified command patterns are in
 [`docs/2026-04-22-alpha-emu-headless-usage.md`](../docs/2026-04-22-alpha-emu-headless-usage.md).
+
+Example Forth Mini debug run:
+
+```sh
+cargo run -- --headless \
+  --launch-forth-mini \
+  --type-now=1 \
+  --key-now=enter \
+  --lcd-ocr \
+  --lcd-dump-dir=/tmp/alpha-emu-forth \
+  ../analysis/cab/os3kneorom.os3kos
+```
 
 The desktop UI shows:
 

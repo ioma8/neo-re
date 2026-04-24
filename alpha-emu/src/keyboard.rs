@@ -185,6 +185,10 @@ fn matrix_code_to_logical(value: u8) -> Option<u8> {
     }
 }
 
+pub fn logical_key_for_matrix_code(value: u8) -> Option<u8> {
+    matrix_code_to_logical(value)
+}
+
 pub(crate) fn matrix_key_for_code(value: u8) -> Option<MatrixKey> {
     matrix_code_to_logical(value).map(|_| MatrixKey::new(value))
 }
@@ -326,15 +330,35 @@ impl Keyboard {
         self.push_phase([None, None, None, None], 64, false);
     }
 
+    pub(crate) fn tap_chord_debug(&mut self, keys: &[MatrixKey]) {
+        let mut key_codes = [None, None, None, None];
+        for (slot, key) in key_codes.iter_mut().zip(keys.iter().copied()) {
+            *slot = Some(key);
+        }
+        self.push_phase(key_codes, 1_024, false);
+        self.push_phase([None, None, None, None], 4_096, false);
+    }
+
     pub(crate) fn tap_long(&mut self, key: MatrixKey) {
         self.push_phase([Some(key), None, None, None], 50_000, false);
         self.push_phase([None, None, None, None], 5_000, false);
+    }
+
+    pub(crate) fn tap_debug(&mut self, key: MatrixKey) {
+        self.push_phase([Some(key), None, None, None], 1_024, false);
+        self.push_phase([None, None, None, None], 4_096, false);
     }
 
     pub(crate) fn tap_all_rows(&mut self, key: MatrixKey) {
         self.push_phase([Some(key), None, None, None], 50_000, true);
         self.push_phase([None, None, None, None], 5_000, true);
     }
+
+    pub(crate) fn tap_all_rows_debug(&mut self, key: MatrixKey) {
+        self.push_phase([Some(key), None, None, None], 1_024, true);
+        self.push_phase([None, None, None, None], 4_096, true);
+    }
+
 
     pub(crate) fn hold_small_rom_entry_chord(&mut self) {
         self.hold_keys_all_rows(
@@ -433,17 +457,65 @@ impl ScriptKey {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct CharKeyStroke {
+    pub(crate) key: MatrixKey,
+    pub(crate) shift: bool,
+}
+
+const LEFT_SHIFT_KEY: MatrixKey = MatrixKey::new(0x0e);
+
 pub fn matrix_key_for_char(value: char) -> Option<MatrixKey> {
-    let normalized = value.to_ascii_lowercase();
+    matrix_key_stroke_for_char(value).map(|stroke| stroke.key)
+}
+
+pub(crate) fn matrix_key_stroke_for_char(value: char) -> Option<CharKeyStroke> {
+    let (normalized, shift) = shifted_base_char(value)?;
     for row in 0..16u8 {
         for col in 0..8u8 {
             let raw = (col << 4) | row;
             if matrix_code_to_char(raw) == Some(normalized) {
-                return Some(MatrixKey::new(raw));
+                return Some(CharKeyStroke {
+                    key: MatrixKey::new(raw),
+                    shift,
+                });
             }
         }
     }
     None
+}
+
+pub(crate) fn left_shift_key() -> MatrixKey {
+    LEFT_SHIFT_KEY
+}
+
+fn shifted_base_char(value: char) -> Option<(char, bool)> {
+    let normalized = match value {
+        'A'..='Z' => (value.to_ascii_lowercase(), true),
+        '!' => ('1', true),
+        '@' => ('2', true),
+        '#' => ('3', true),
+        '$' => ('4', true),
+        '%' => ('5', true),
+        '^' => ('6', true),
+        '&' => ('7', true),
+        '*' => ('8', true),
+        '(' => ('9', true),
+        ')' => ('0', true),
+        '_' => ('-', true),
+        '+' => ('=', true),
+        '{' => ('[', true),
+        '}' => (']', true),
+        '|' => ('\\', true),
+        ':' => (';', true),
+        '"' => ('\'', true),
+        '~' => ('`', true),
+        '<' => (',', true),
+        '>' => ('.', true),
+        '?' => ('/', true),
+        value => (value.to_ascii_lowercase(), false),
+    };
+    Some(normalized)
 }
 
 fn _assert_full_matrix_tables() {
@@ -476,8 +548,8 @@ fn _validate_display_map() {
 #[cfg(test)]
 mod tests {
     use super::{
-        _assert_full_matrix_tables, matrix_cells, matrix_key_for_char, matrix_key_for_code,
-        matrix_key_label,
+        _assert_full_matrix_tables, left_shift_key, matrix_cells, matrix_key_for_char,
+        matrix_key_for_code, matrix_key_label, matrix_key_stroke_for_char,
     };
     use super::{_validate_display_map, Keyboard, MatrixKey};
 
@@ -503,6 +575,31 @@ mod tests {
         assert_eq!(matrix_key_for_char('`').map(MatrixKey::code), Some(0x4c));
         assert_eq!(matrix_key_for_char(' ').map(MatrixKey::code), Some(0x79));
         assert_eq!(matrix_key_for_char('/').map(MatrixKey::code), Some(0x73));
+    }
+
+    #[test]
+    fn shifted_chars_map_to_shift_chords() {
+        let plus = matrix_key_stroke_for_char('+').expect("plus should map");
+        assert!(plus.shift);
+        assert_eq!(plus.key.code(), matrix_key_for_char('=').unwrap().code());
+
+        let uppercase = matrix_key_stroke_for_char('A').expect("uppercase should map");
+        assert!(uppercase.shift);
+        assert_eq!(uppercase.key.code(), matrix_key_for_char('a').unwrap().code());
+
+        let seven = matrix_key_stroke_for_char('7').expect("7 should map");
+        assert!(!seven.shift);
+        assert_eq!(seven.key.code(), 0x5f);
+
+        let two = matrix_key_stroke_for_char('2').expect("2 should map");
+        assert!(!two.shift);
+        assert_eq!(two.key.code(), 0x5b);
+
+        let multiply = matrix_key_stroke_for_char('x').expect("x should map");
+        assert!(!multiply.shift);
+        assert_eq!(multiply.key.code(), 0x6b);
+
+        assert_eq!(left_shift_key().code(), 0x0e);
     }
 
     #[test]

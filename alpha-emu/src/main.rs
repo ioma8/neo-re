@@ -1,10 +1,13 @@
 use std::path::PathBuf;
+use std::process::Command;
 use std::time::Instant;
 
 use alpha_emu::firmware::FirmwareRuntime;
 use alpha_emu::firmware_session::FirmwareSession;
-use alpha_emu::keyboard::{matrix_cells, matrix_key_label};
-use alpha_emu::lcd::{LcdSnapshot, cursor_blink_snapshot};
+use alpha_emu::keyboard::{logical_key_for_matrix_code, matrix_cells, matrix_key_label};
+use alpha_emu::lcd::{
+    LcdSnapshot, cursor_blink_snapshot, render_snapshot_bits, scale_snapshot, visible_snapshot,
+};
 use alpha_emu::recovery_seed;
 use anyhow::Result;
 
@@ -15,13 +18,22 @@ fn main() -> Result<()> {
 
     let mut headless = false;
     let mut lcd_ascii = false;
+    let mut lcd_visible_ascii = false;
+    let mut lcd_bits = false;
+    let mut lcd_bits_path = None;
     let mut lcd_ranges = false;
     let mut lcd_pbm = None;
+    let mut lcd_visible_pbm = None;
     let mut lcd_blink_pbm_prefix = None;
+    let mut lcd_dump_dir = None;
+    let mut lcd_ocr = false;
+    let mut lcd_ocr_scale = 4usize;
     let mut key_events = Vec::new();
     let mut hold_events = Vec::new();
     let mut all_row_key_events = Vec::new();
     let mut type_events = Vec::new();
+    let mut key_now = Vec::new();
+    let mut type_now = Vec::new();
     let mut stop_at_pc = None;
     let mut stop_at_pc_hit = 1usize;
     let mut stop_at_resource = None;
@@ -36,6 +48,8 @@ fn main() -> Result<()> {
     let mut reinit_memory = false;
     let mut recovery_seed_path = None;
     let mut sample_lcd_after = None;
+    let mut launch_forth_mini = false;
+    let mut launch_calculator = false;
     let mut boot_left_shift_tab = false;
     let mut boot_keys = None;
     let mut boot_keys_exact = None;
@@ -59,8 +73,18 @@ fn main() -> Result<()> {
             boot_keys_exact = Some(parse_key_list(value)?);
         } else if arg == "--lcd-ascii" {
             lcd_ascii = true;
+        } else if arg == "--lcd-visible-ascii" {
+            lcd_visible_ascii = true;
+        } else if arg == "--lcd-bits" {
+            lcd_bits = true;
         } else if arg == "--lcd-ranges" {
             lcd_ranges = true;
+        } else if arg == "--lcd-ocr" {
+            lcd_ocr = true;
+        } else if arg == "--launch-forth-mini" {
+            launch_forth_mini = true;
+        } else if arg == "--launch-calculator" {
+            launch_calculator = true;
         } else if arg == "--verbose" {
             verbose = true;
         } else if arg == "--validate-alpha-usb-native" {
@@ -93,9 +117,29 @@ fn main() -> Result<()> {
             lcd_pbm = Some(PathBuf::from(value));
         } else if let Some(value) = arg
             .to_str()
+            .and_then(|arg| arg.strip_prefix("--lcd-visible-pbm="))
+        {
+            lcd_visible_pbm = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--lcd-bits-path="))
+        {
+            lcd_bits_path = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
             .and_then(|arg| arg.strip_prefix("--lcd-blink-pbm-prefix="))
         {
             lcd_blink_pbm_prefix = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--lcd-dump-dir="))
+        {
+            lcd_dump_dir = Some(PathBuf::from(value));
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--lcd-ocr-scale="))
+        {
+            lcd_ocr_scale = value.parse()?;
         } else if let Some(value) = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix("--sample-lcd-after="))
@@ -112,6 +156,10 @@ fn main() -> Result<()> {
             all_row_key_events.push(parse_key_event(value)?);
         } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--type-at=")) {
             type_events.push(parse_type_event(value)?);
+        } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--type-now=")) {
+            type_now.push(value.to_string());
+        } else if let Some(value) = arg.to_str().and_then(|arg| arg.strip_prefix("--key-now=")) {
+            key_now.extend(parse_key_name_list(value)?);
         } else if let Some(value) = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix("--stop-at-pc="))
@@ -150,6 +198,34 @@ fn main() -> Result<()> {
     }
     let path = path.unwrap_or_else(|| PathBuf::from("../analysis/cab/smallos3kneorom.os3kos"));
     let recovery_seed_path = recovery_seed_path.unwrap_or_else(recovery_seed::default_seed_path);
+    headless |= validate_alpha_usb_native
+        || validate_forth_mini
+        || lcd_ascii
+        || lcd_visible_ascii
+        || lcd_bits
+        || lcd_bits_path.is_some()
+        || lcd_ranges
+        || lcd_pbm.is_some()
+        || lcd_visible_pbm.is_some()
+        || lcd_blink_pbm_prefix.is_some()
+        || lcd_dump_dir.is_some()
+        || lcd_ocr
+        || !key_events.is_empty()
+        || !hold_events.is_empty()
+        || !all_row_key_events.is_empty()
+        || !type_events.is_empty()
+        || !key_now.is_empty()
+        || !type_now.is_empty()
+        || stop_at_pc.is_some()
+        || stop_at_resource.is_some()
+        || scan_special_keys_at.is_some()
+        || scan_matrix_visibility_at.is_some()
+        || validate_key_map_at.is_some()
+        || load_memory.is_some()
+        || dump_memory_start.is_some()
+        || dump_memory.is_some()
+        || reinit_memory
+        || sample_lcd_after.is_some();
 
     if headless {
         if reinit_memory {
@@ -162,6 +238,8 @@ fn main() -> Result<()> {
             FirmwareSession::boot_with_exact_keys(firmware, &keys, 50_000)?
         } else if let Some(keys) = boot_keys {
             FirmwareSession::boot_with_keys(firmware, &keys, 512)?
+        } else if (launch_forth_mini || launch_calculator) && is_full_system {
+            FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?
         } else if boot_left_shift_tab {
             FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?
         } else {
@@ -171,6 +249,19 @@ fn main() -> Result<()> {
             && recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?
         {
             println!("recovery_seed_loaded={}", recovery_seed_path.display());
+        }
+        if launch_forth_mini {
+            if !is_full_system {
+                anyhow::bail!("--launch-forth-mini requires the full NEO system firmware image");
+            }
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            launch_forth_mini_for_debugging(&mut session)?;
+        } else if launch_calculator {
+            if !is_full_system {
+                anyhow::bail!("--launch-calculator requires the full NEO system firmware image");
+            }
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            launch_calculator_for_debugging(&mut session)?;
         }
         if let Some(path) = load_memory {
             let overlay = std::fs::read(&path)?;
@@ -197,11 +288,20 @@ fn main() -> Result<()> {
             return Ok(());
         }
         if validate_forth_mini {
+            if !is_full_system {
+                anyhow::bail!("Forth Mini validation requires the full NEO system firmware image");
+            }
+            let firmware = FirmwareRuntime::load_small_rom(&path)?;
+            let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+            recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
             session.run_realtime_cycles(220_000_000, 25_000_000);
-            session
-                .start_applet_message_for_validation("Forth Mini", 0x19)
-                .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
-            session.run_until_pc_or_steps(0x0042_6752, 500_000);
+            launch_forth_mini_through_menu(&mut session);
+            let lcd_before = session.lcd_snapshot();
+            for key in [0x5c, 0x69, 0x5b, 0x69, 0x40, 0x69] {
+                session.tap_matrix_code_long(key);
+                session.run_steps(300_000);
+            }
+            let lcd_after = session.lcd_snapshot();
             let snapshot = session.snapshot();
             if let Some(exception) = &snapshot.last_exception {
                 let trace = snapshot
@@ -217,93 +317,10 @@ fn main() -> Result<()> {
                     .join("\n  ");
                 anyhow::bail!("Forth Mini validation failed: {exception}\n  {trace}");
             }
-            for value in [b'1', b'2'] {
-                session
-                    .start_applet_message_with_param_for_validation(
-                        "Forth Mini",
-                        0x20,
-                        u32::from(value),
-                    )
-                    .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
-                session.run_until_pc_or_steps(0x0042_6752, 500_000);
-                let snapshot = session.snapshot();
-                if let Some(exception) = &snapshot.last_exception {
-                    let trace = snapshot
-                        .trace
-                        .iter()
-                        .rev()
-                        .take(12)
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .rev()
-                        .collect::<Vec<_>>()
-                        .join("\n  ");
-                    anyhow::bail!(
-                        "Forth Mini validation failed after {:?}: {exception}\n  {trace}",
-                        char::from(value)
-                    );
-                }
-            }
-            let typed_lcd = session.lcd_snapshot();
-            session
-                .start_applet_message_with_param_for_validation("Forth Mini", 0x20, u32::from(b'5'))
-                .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
-            session.run_until_pc_or_steps(0x0042_6752, 500_000);
-            let continued_lcd = session.lcd_snapshot();
-            let input_hex = session.validation_applet_memory_hex(0x300 + 64 + 4, 3);
-            if input_hex != "31 32 35" {
-                let snapshot = session.snapshot();
-                let trace = snapshot
-                    .trace
-                    .iter()
-                    .rev()
-                    .take(12)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join("\n  ");
+            if lcd_before.pixels == lcd_after.pixels {
                 anyhow::bail!(
-                    "Forth Mini validation failed: input bytes did not reach REPL; pc=0x{:08x} exception={} input={}\n  {}",
-                    snapshot.pc,
-                    snapshot.last_exception.as_deref().unwrap_or("none"),
-                    input_hex,
-                    trace
+                    "Forth Mini validation failed: menu-launched evaluation sequence did not change the LCD"
                 );
-            }
-            if typed_lcd.pixels == continued_lcd.pixels {
-                let snapshot = session.snapshot();
-                anyhow::bail!(
-                    "Forth Mini validation failed: later 5 input did not change LCD; pc=0x{:08x} exception={} repl={}",
-                    snapshot.pc,
-                    snapshot.last_exception.as_deref().unwrap_or("none"),
-                    session.validation_applet_memory_hex(0x300 + 64, 16)
-                );
-            }
-            session
-                .start_applet_message_with_param_for_validation(
-                    "Forth Mini",
-                    0x20,
-                    u32::from(b'\r'),
-                )
-                .map_err(|error| anyhow::anyhow!("Forth Mini validation failed: {error}"))?;
-            session.run_until_pc_or_steps(0x0042_6752, 500_000);
-            let snapshot = session.snapshot();
-            if let Some(exception) = &snapshot.last_exception {
-                let trace = snapshot
-                    .trace
-                    .iter()
-                    .rev()
-                    .take(12)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join("\n  ");
-                anyhow::bail!("Forth Mini validation failed: {exception}\n  {trace}");
             }
             println!(
                 "forth_mini_validation=ok pc=0x{:08x} steps={} exception={}",
@@ -347,6 +364,20 @@ fn main() -> Result<()> {
         }
         if let Some((interval_steps, count)) = sample_lcd_after {
             print_lcd_samples(&mut session, interval_steps, count);
+        }
+        for text in &type_now {
+            if launch_forth_mini {
+                type_text_direct_to_forth(&mut session, text)?;
+            } else {
+                type_text_now(&mut session, text);
+            }
+        }
+        for code in &key_now {
+            if launch_forth_mini {
+                send_key_direct_to_forth(&mut session, *code)?;
+            } else {
+                tap_key_now(&mut session, *code);
+            }
         }
         let elapsed = started_at.elapsed();
         let snapshot = session.snapshot();
@@ -416,9 +447,26 @@ fn main() -> Result<()> {
             println!("lcd ascii:");
             print!("{}", render_lcd_ascii(&snapshot.lcd, 4, 4));
         }
+        let visible_lcd = visible_snapshot(&snapshot.lcd);
+        if lcd_visible_ascii {
+            println!("lcd visible ascii:");
+            print!("{}", render_lcd_ascii(&visible_lcd, 2, 2));
+        }
+        if lcd_bits {
+            println!("lcd bits:");
+            print!("{}", render_snapshot_bits(&snapshot.lcd));
+        }
+        if let Some(path) = lcd_bits_path {
+            std::fs::write(&path, render_snapshot_bits(&snapshot.lcd))?;
+            println!("lcd_bits={}", path.display());
+        }
         if let Some(path) = lcd_pbm {
             write_lcd_pbm(&snapshot.lcd, &path)?;
             println!("lcd_pbm={}", path.display());
+        }
+        if let Some(path) = lcd_visible_pbm {
+            write_lcd_pbm(&visible_lcd, &path)?;
+            println!("lcd_visible_pbm={}", path.display());
         }
         if let Some(prefix) = lcd_blink_pbm_prefix {
             let on_path = prefixed_path(&prefix, "on.pbm");
@@ -438,6 +486,13 @@ fn main() -> Result<()> {
                 on_path.display(),
                 off_path.display()
             );
+        }
+        if lcd_ocr {
+            let ocr_text = ocr_visible_lcd(snapshot.text_screen.as_deref(), &snapshot.lcd, lcd_ocr_scale)?;
+            println!("lcd_ocr:\n{}", ocr_text.trim_end());
+        }
+        if let Some(dir) = lcd_dump_dir {
+            write_lcd_debug_dump(snapshot.text_screen.as_deref(), &snapshot.lcd, &dir, lcd_ocr_scale)?;
         }
         if let Some(path) = dump_memory {
             std::fs::write(&path, session.memory_bytes())?;
@@ -585,6 +640,115 @@ fn print_lcd_samples(session: &mut FirmwareSession, interval_steps: usize, count
     }
 }
 
+fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
+    for _ in 0..10 {
+        session.tap_matrix_code_long(0x15);
+        session.run_steps(250_000);
+    }
+    session.tap_matrix_code_long(0x69);
+    session.run_steps(500_000);
+}
+
+fn launch_forth_mini_for_debugging(session: &mut FirmwareSession) -> Result<()> {
+    session
+        .start_applet_message_for_validation("Forth Mini", 0x18)
+        .map_err(|error| anyhow::anyhow!("failed to init Forth Mini for debugging: {error}"))?;
+    session.run_steps(500_000);
+    if let Some(exception) = session.snapshot().last_exception.clone() {
+        let trace = session
+            .snapshot()
+            .trace
+            .into_iter()
+            .rev()
+            .take(12)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n  ");
+        anyhow::bail!("Forth Mini debug init failed: {exception}\n  {trace}");
+    }
+    session
+        .start_applet_message_for_validation("Forth Mini", 0x19)
+        .map_err(|error| anyhow::anyhow!("failed to launch Forth Mini for debugging: {error}"))?;
+    session.run_steps(500_000);
+    if let Some(exception) = session.snapshot().last_exception.clone() {
+        let trace = session
+            .snapshot()
+            .trace
+            .into_iter()
+            .rev()
+            .take(12)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n  ");
+        anyhow::bail!("Forth Mini debug launch failed: {exception}\n  {trace}");
+    }
+    Ok(())
+}
+
+fn launch_calculator_for_debugging(session: &mut FirmwareSession) -> Result<()> {
+    session
+        .start_stock_applet_message_for_validation("Calculator", 0x19)
+        .map_err(|error| anyhow::anyhow!("failed to launch Calculator for debugging: {error}"))?;
+    session.run_steps(500_000);
+    if let Some(exception) = session.snapshot().last_exception.clone() {
+        let trace = session
+            .snapshot()
+            .trace
+            .into_iter()
+            .rev()
+            .take(12)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n  ");
+        anyhow::bail!("Calculator debug launch failed: {exception}\n  {trace}");
+    }
+    Ok(())
+}
+
+fn type_text_now(session: &mut FirmwareSession, text: &str) {
+    for value in text.chars() {
+        session.tap_char_debug(value);
+        session.run_steps(300_000);
+    }
+}
+
+fn tap_key_now(session: &mut FirmwareSession, code: u8) {
+    session.tap_matrix_code_debug(code);
+    session.run_steps(300_000);
+}
+
+fn type_text_direct_to_forth(session: &mut FirmwareSession, text: &str) -> Result<()> {
+    for value in text.bytes() {
+        session
+            .start_applet_message_with_param_for_validation("Forth Mini", 0x20, u32::from(value))
+            .map_err(|error| anyhow::anyhow!("failed to send Forth Mini char: {error}"))?;
+        session.run_steps(200_000);
+        if let Some(exception) = session.snapshot().last_exception {
+            anyhow::bail!("Forth Mini char dispatch failed: {exception}");
+        }
+    }
+    Ok(())
+}
+
+fn send_key_direct_to_forth(session: &mut FirmwareSession, matrix_code: u8) -> Result<()> {
+    let logical = logical_key_for_matrix_code(matrix_code)
+        .ok_or_else(|| anyhow::anyhow!("no logical key for matrix code 0x{matrix_code:02x}"))?;
+    session
+        .start_applet_message_with_param_for_validation("Forth Mini", 0x21, u32::from(logical))
+        .map_err(|error| anyhow::anyhow!("failed to send Forth Mini key: {error}"))?;
+    session.run_steps(200_000);
+    if let Some(exception) = session.snapshot().last_exception {
+        anyhow::bail!("Forth Mini key dispatch failed: {exception}");
+    }
+    Ok(())
+}
+
 fn lcd_hash(snapshot: &LcdSnapshot) -> u64 {
     let mut hash = 0xcbf2_9ce4_8422_2325u64;
     for pixel in &snapshot.pixels {
@@ -685,8 +849,8 @@ fn run_headless_steps(
             let (step, text) = &type_events[text_index];
             run_until_step(session, *step, keep_trace);
             for value in text.chars() {
-                session.tap_char(value);
-                if run_short_settle(session, keep_trace, stop) {
+                session.tap_char_debug(value);
+                if run_short_settle(session, keep_trace, stop, 300_000) {
                     return Some(true);
                 }
             }
@@ -694,16 +858,16 @@ fn run_headless_steps(
         } else if next_key_step <= next_all_row_key_step && next_key_step <= next_hold_step {
             let (step, code) = key_events[key_index];
             run_until_step(session, step, keep_trace);
-            session.tap_matrix_code_long(code);
-            if run_short_settle(session, keep_trace, stop) {
+            session.tap_matrix_code_debug(code);
+            if run_short_settle(session, keep_trace, stop, 300_000) {
                 return Some(true);
             }
             key_index += 1;
         } else if next_all_row_key_step <= next_hold_step {
             let (step, code) = all_row_key_events[all_row_key_index];
             run_until_step(session, step, keep_trace);
-            session.tap_matrix_code_all_rows(code);
-            if run_short_settle(session, keep_trace, stop) {
+            session.tap_matrix_code_all_rows_debug(code);
+            if run_short_settle(session, keep_trace, stop, 300_000) {
                 return Some(true);
             }
             all_row_key_index += 1;
@@ -715,7 +879,7 @@ fn run_headless_steps(
             } else {
                 session.release_matrix_code(code);
             }
-            if run_short_settle(session, keep_trace, stop) {
+            if run_short_settle(session, keep_trace, stop, 2_000) {
                 return Some(true);
             }
             hold_index += 1;
@@ -758,17 +922,22 @@ fn run_until_step(session: &mut FirmwareSession, step: usize, keep_trace: bool) 
     }
 }
 
-fn run_short_settle(session: &mut FirmwareSession, keep_trace: bool, stop: HeadlessStop) -> bool {
+fn run_short_settle(
+    session: &mut FirmwareSession,
+    keep_trace: bool,
+    stop: HeadlessStop,
+    settle_steps: usize,
+) -> bool {
     if let Some(stop_pc) = stop.pc {
         if stop.pc_hit > 1 {
-            return session.run_until_pc_hit_or_steps(stop_pc, stop.pc_hit, 2_000);
+            return session.run_until_pc_hit_or_steps(stop_pc, stop.pc_hit, settle_steps);
         }
-        return session.run_until_pc_or_steps(stop_pc, 2_000);
+        return session.run_until_pc_or_steps(stop_pc, settle_steps);
     }
     if keep_trace {
-        session.run_steps(2_000);
+        session.run_steps(settle_steps);
     } else {
-        session.run_realtime_steps(2_000);
+        session.run_realtime_steps(settle_steps);
     }
     false
 }
@@ -778,6 +947,10 @@ fn parse_key_event(value: &str) -> Result<(usize, u8)> {
         anyhow::bail!("--key-at expects STEP:KEY");
     };
     Ok((step.parse()?, matrix_code_for_key_name(key)?))
+}
+
+fn parse_key_name_list(value: &str) -> Result<Vec<u8>> {
+    value.split(',').map(matrix_code_for_key_name).collect()
 }
 
 fn parse_hold_event(value: &str) -> Result<(usize, usize, u8)> {
@@ -847,6 +1020,74 @@ fn write_lcd_pbm(snapshot: &LcdSnapshot, path: &std::path::Path) -> Result<()> {
         }
     }
     std::fs::write(path, output)?;
+    Ok(())
+}
+
+fn ocr_visible_lcd(text_screen: Option<&str>, snapshot: &LcdSnapshot, scale: usize) -> Result<String> {
+    if let Some(text_screen) = text_screen {
+        let trimmed = text_screen.trim_end();
+        if !trimmed.is_empty() {
+            return Ok(format!("{trimmed}\n"));
+        }
+    }
+    let visible = visible_snapshot(snapshot);
+    let cursor_off = cursor_blink_snapshot(&visible, false);
+    let scaled = scale_snapshot(&cursor_off, scale.max(1));
+    let temp_dir = std::env::temp_dir();
+    let pbm_path = temp_dir.join(format!("alpha-emu-lcd-ocr-{}.pbm", std::process::id()));
+    write_lcd_pbm(&scaled, &pbm_path)?;
+    let output = Command::new("tesseract")
+        .arg(&pbm_path)
+        .arg("stdout")
+        .arg("--psm")
+        .arg("6")
+        .arg("-c")
+        .arg("preserve_interword_spaces=1")
+        .output()?;
+    let _ = std::fs::remove_file(&pbm_path);
+    if !output.status.success() {
+        anyhow::bail!(
+            "tesseract failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn write_lcd_debug_dump(
+    text_screen: Option<&str>,
+    snapshot: &LcdSnapshot,
+    dir: &std::path::Path,
+    scale: usize,
+) -> Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let full_bits_path = dir.join("lcd-full-bits.txt");
+    let full_pbm_path = dir.join("lcd-full.pbm");
+    let visible = visible_snapshot(snapshot);
+    let visible_pbm_path = dir.join("lcd-visible.pbm");
+    let visible_scaled = scale_snapshot(&cursor_blink_snapshot(&visible, false), scale.max(1));
+    let visible_scaled_pbm_path = dir.join("lcd-visible-ocr.pbm");
+    std::fs::write(&full_bits_path, render_snapshot_bits(snapshot))?;
+    write_lcd_pbm(snapshot, &full_pbm_path)?;
+    write_lcd_pbm(&visible, &visible_pbm_path)?;
+    write_lcd_pbm(&visible_scaled, &visible_scaled_pbm_path)?;
+    println!(
+        "lcd_dump bits={} full_pbm={} visible_pbm={} visible_ocr_pbm={}",
+        full_bits_path.display(),
+        full_pbm_path.display(),
+        visible_pbm_path.display(),
+        visible_scaled_pbm_path.display()
+    );
+    match ocr_visible_lcd(text_screen, snapshot, scale) {
+        Ok(text) => {
+            let ocr_path = dir.join("lcd-ocr.txt");
+            std::fs::write(&ocr_path, &text)?;
+            println!("lcd_dump_ocr={}", ocr_path.display());
+        }
+        Err(error) => {
+            println!("lcd_dump_ocr_error={error}");
+        }
+    }
     Ok(())
 }
 
