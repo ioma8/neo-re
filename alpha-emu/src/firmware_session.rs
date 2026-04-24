@@ -486,6 +486,10 @@ impl FirmwareSession {
         self.memory.overlay_range(start, bytes);
     }
 
+    pub fn refresh_applet_storage_bounds(&mut self) {
+        self.memory.refresh_applet_storage_bounds();
+    }
+
     #[cfg(test)]
     fn select_keyboard_row_for_test(&mut self, row_addr: u32, row_value: u8) {
         let _ = self.memory.set_byte(row_addr, row_value);
@@ -716,5 +720,183 @@ mod tests {
         assert!(snapshot.last_exception.is_none());
         assert!(snapshot.lcd.pixels.iter().any(|pixel| *pixel));
         Ok(())
+    }
+
+    #[test]
+    fn forth_mini_uses_char_message_for_printable_input() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut session = boot_full_system_for_forth_validation()?;
+        session.start_applet_message_for_validation("Forth Mini", 0x19)?;
+        session.run_until_pc_or_steps(0x0042_6752, 500_000);
+        session.start_applet_message_with_param_for_validation("Forth Mini", 0x21, 0x38)?;
+        session.run_until_pc_or_steps(0x0042_6752, 500_000);
+        session.start_applet_message_with_param_for_validation(
+            "Forth Mini",
+            0x20,
+            u32::from(b'1'),
+        )?;
+        session.run_until_pc_or_steps(0x0042_6752, 500_000);
+
+        assert_eq!(
+            session.validation_applet_memory_hex(0x300 + 64 + 4, 2),
+            "31 00"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn forth_mini_evaluates_key_and_char_sequence() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = boot_full_system_for_forth_validation()?;
+        session.start_applet_message_for_validation("Forth Mini", 0x19)?;
+        session.run_until_pc_or_steps(0x0042_6752, 500_000);
+
+        for (key, byte) in [
+            (0x38, b'1'),
+            (0x40, b'\r'),
+            (0x37, b'2'),
+            (0x40, b'\r'),
+            (0x25, b'+'),
+            (0x40, b'\r'),
+        ] {
+            session.start_applet_message_with_param_for_validation("Forth Mini", 0x21, key)?;
+            session.run_until_pc_or_steps(0x0042_6752, 500_000);
+            session.start_applet_message_with_param_for_validation(
+                "Forth Mini",
+                0x20,
+                u32::from(byte),
+            )?;
+            session.run_until_pc_or_steps(0x0042_6752, 500_000);
+        }
+
+        assert_eq!(
+            session.validation_applet_memory_hex(0x300, 4),
+            "00 00 00 03"
+        );
+        assert_eq!(
+            session.validation_applet_memory_hex(0x300 + 64, 4),
+            "00 00 00 01"
+        );
+        assert_eq!(
+            session.validation_applet_memory_hex(0x300 + 64 + 4 + 64, 4),
+            "00 00 00 00"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn forth_mini_prompt_has_no_filled_input_bar() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = boot_full_system_for_forth_validation()?;
+        session.start_applet_message_for_validation("Forth Mini", 0x19)?;
+        session.run_until_pc_or_steps(0x0042_6752, 500_000);
+        session.start_applet_message_with_param_for_validation(
+            "Forth Mini",
+            0x20,
+            u32::from(b'5'),
+        )?;
+        session.run_until_pc_or_steps(0x0042_6752, 500_000);
+
+        let lcd = session.lcd_snapshot();
+        let (run, y, start_x, end_x) = max_horizontal_run_location(&lcd.pixels, lcd.width, 48..64);
+        assert!(
+            run < 40,
+            "prompt row has a long filled run: run={run} y={y} x={start_x}..{end_x}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn forth_mini_accepts_first_printable_key_after_real_launch()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = boot_full_system_smartapplets_for_forth_validation()?;
+        launch_forth_mini_through_menu(&mut session);
+
+        let lcd_before = session.lcd_snapshot();
+        session.tap_matrix_code_long(0x38);
+        session.run_steps(300_000);
+        let lcd_after = session.lcd_snapshot();
+
+        assert_ne!(lcd_before.pixels, lcd_after.pixels);
+        assert!(session.snapshot().last_exception.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn forth_mini_evaluates_after_enter_when_launched_through_menu()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = boot_full_system_smartapplets_for_forth_validation()?;
+        launch_forth_mini_through_menu(&mut session);
+
+        let lcd_before = session.lcd_snapshot();
+        for key in [0x38, 0x40, 0x37, 0x40, 0x25, 0x40] {
+            session.tap_matrix_code_long(key);
+            session.run_steps(300_000);
+        }
+        let lcd_after = session.lcd_snapshot();
+
+        assert_ne!(lcd_before.pixels, lcd_after.pixels);
+        assert!(session.snapshot().last_exception.is_none());
+        Ok(())
+    }
+
+    fn max_horizontal_run_location(
+        pixels: &[bool],
+        width: usize,
+        rows: std::ops::Range<usize>,
+    ) -> (usize, usize, usize, usize) {
+        let mut longest = 0usize;
+        let mut longest_y = 0usize;
+        let mut longest_end = 0usize;
+        for y in rows {
+            let mut current = 0;
+            for x in 0..width {
+                if pixels[y * width + x] {
+                    current += 1;
+                    if current > longest {
+                        longest = current;
+                        longest_y = y;
+                        longest_end = x;
+                    }
+                } else {
+                    current = 0;
+                }
+            }
+        }
+        let start = longest_end.saturating_sub(longest.saturating_sub(1));
+        (longest, longest_y, start, longest_end)
+    }
+
+    fn boot_full_system_for_forth_validation() -> Result<FirmwareSession, Box<dyn std::error::Error>>
+    {
+        let firmware =
+            crate::firmware::FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
+        let mut session = FirmwareSession::boot_small_rom(firmware)?;
+        crate::recovery_seed::apply_seed_file_if_present(
+            &mut session,
+            crate::recovery_seed::default_seed_path(),
+        )?;
+        session.run_realtime_cycles(220_000_000, 25_000_000);
+        Ok(session)
+    }
+
+    fn boot_full_system_smartapplets_for_forth_validation()
+    -> Result<FirmwareSession, Box<dyn std::error::Error>> {
+        let firmware =
+            crate::firmware::FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
+        let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+        crate::recovery_seed::apply_seed_file_if_present(
+            &mut session,
+            crate::recovery_seed::default_seed_path(),
+        )?;
+        session.run_realtime_cycles(220_000_000, 25_000_000);
+        Ok(session)
+    }
+
+    fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
+        for _ in 0..10 {
+            session.tap_matrix_code_long(0x15);
+            session.run_steps(250_000);
+        }
+        session.tap_matrix_code_long(0x40);
+        session.run_steps(500_000);
     }
 }
