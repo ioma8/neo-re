@@ -8,6 +8,26 @@ STOCK_LAYOUT_SLOTS = {
 }
 
 STOCK_PHYSICAL_TO_LOGICAL = {
+    "'": 0x0B,
+    ",": 0x3B,
+    ".": 0x3D,
+    "/": 0x47,
+    "0": 0x32,
+    "1": 0x38,
+    "2": 0x37,
+    "3": 0x36,
+    "4": 0x35,
+    "5": 0x39,
+    "6": 0x2F,
+    "7": 0x30,
+    "8": 0x3A,
+    "9": 0x31,
+    ";": 0x14,
+    "=": 0x25,
+    "[": 0x02,
+    "\\": 0x15,
+    "]": 0x00,
+    "`": 0x2E,
     "a": 0x18,
     "b": 0x4E,
     "c": 0x41,
@@ -34,29 +54,134 @@ STOCK_PHYSICAL_TO_LOGICAL = {
     "x": 0x42,
     "y": 0x09,
     "z": 0x43,
+    "-": 0x28,
 }
 
 
 @dataclass(frozen=True)
 class ReplacementLayout:
     display_name: str
-    char_map: dict[str, str]
+    key_map: dict[str, str]
+    base_char_overrides: dict[str, str]
+    shift_char_overrides: dict[str, str]
 
 
 REPLACEMENT_LAYOUTS = {
-    # ASCII fallback of the Czech base layer: the stable difference versus
-    # stock QWERTY is the common QWERTZ letter swap.
+    # ASCII fallback of the Czech standard QWERTZ layout. Accented letters
+    # are normalized to their unaccented ASCII forms. The first-stage
+    # firmware remap only handles key-position swaps; the later printable
+    # override supplies the Czech top-row and symbol pairs.
     "czech": ReplacementLayout(
         display_name="Czech",
-        char_map={
+        key_map={
             "y": "z",
             "z": "y",
+        },
+        base_char_overrides={
+            "`": ";",
+            "1": "+",
+            "2": "e",
+            "3": "s",
+            "4": "c",
+            "5": "r",
+            "6": "z",
+            "7": "y",
+            "8": "a",
+            "9": "i",
+            "0": "e",
+            "-": "=",
+            "=": "'",
+            "q": "q",
+            "w": "w",
+            "e": "e",
+            "r": "r",
+            "t": "t",
+            "y": "z",
+            "u": "u",
+            "i": "i",
+            "o": "o",
+            "p": "p",
+            "[": "u",
+            "]": ")",
+            "a": "a",
+            "s": "s",
+            "d": "d",
+            "f": "f",
+            "g": "g",
+            "h": "h",
+            "j": "j",
+            "k": "k",
+            "l": "l",
+            ";": "u",
+            "'": "#",
+            "\\": "\\",
+            "z": "y",
+            "x": "x",
+            "c": "c",
+            "v": "v",
+            "b": "b",
+            "n": "n",
+            "m": "m",
+            ",": ",",
+            ".": ".",
+            "/": "/",
+        },
+        shift_char_overrides={
+            "`": "~",
+            "1": "1",
+            "2": "2",
+            "3": "3",
+            "4": "4",
+            "5": "5",
+            "6": "6",
+            "7": "7",
+            "8": "8",
+            "9": "9",
+            "0": "0",
+            "-": "%",
+            "=": "^",
+            "q": "Q",
+            "w": "W",
+            "e": "E",
+            "r": "R",
+            "t": "T",
+            "y": "Z",
+            "u": "U",
+            "i": "I",
+            "o": "O",
+            "p": "P",
+            "[": "/",
+            "]": "(",
+            "a": "A",
+            "s": "S",
+            "d": "D",
+            "f": "F",
+            "g": "G",
+            "h": "H",
+            "j": "J",
+            "k": "K",
+            "l": "L",
+            ";": '"',
+            "'": "!",
+            "\\": "|",
+            "z": "Y",
+            "x": "X",
+            "c": "C",
+            "v": "V",
+            "b": "B",
+            "n": "N",
+            "m": "M",
+            ",": "?",
+            ".": ":",
+            "/": "/",
         },
     ),
     # ASCII fallback of the common Polish programmer layout is the stock
     # QWERTY base layer because accented letters normally live behind AltGr.
     "polish": ReplacementLayout(
         display_name="Polish",
-        char_map={},
+        key_map={},
+        base_char_overrides={},
+        shift_char_overrides={},
     ),
 }

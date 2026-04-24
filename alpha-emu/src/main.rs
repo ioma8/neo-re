@@ -37,6 +37,8 @@ fn main() -> Result<()> {
     let mut stop_at_pc = None;
     let mut stop_at_pc_hit = 1usize;
     let mut stop_at_resource = None;
+    let mut trace_stack_at_pc = None;
+    let mut trace_stack_at_pc_hit = 1usize;
     let mut scan_special_keys_at = None;
     let mut scan_matrix_visibility_at = None;
     let mut validate_key_map_at = None;
@@ -167,6 +169,16 @@ fn main() -> Result<()> {
             stop_at_pc = Some(parse_u32_arg(value)?);
         } else if let Some(value) = arg
             .to_str()
+            .and_then(|arg| arg.strip_prefix("--trace-stack-at-pc="))
+        {
+            trace_stack_at_pc = Some(parse_u32_arg(value)?);
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--trace-stack-at-pc-hit="))
+        {
+            trace_stack_at_pc_hit = value.parse()?;
+        } else if let Some(value) = arg
+            .to_str()
             .and_then(|arg| arg.strip_prefix("--stop-at-pc-hit="))
         {
             stop_at_pc_hit = value.parse()?;
@@ -268,6 +280,7 @@ fn main() -> Result<()> {
             session.overlay_memory_bytes(&overlay);
             println!("memory_loaded={}", path.display());
         }
+        session.set_trace_stack_at_pc(trace_stack_at_pc, trace_stack_at_pc_hit);
         if let Some(path) = dump_memory_start {
             std::fs::write(&path, session.memory_bytes())?;
             println!("memory_start={}", path.display());
@@ -650,24 +663,6 @@ fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
 }
 
 fn launch_forth_mini_for_debugging(session: &mut FirmwareSession) -> Result<()> {
-    session
-        .start_applet_message_for_validation("Forth Mini", 0x18)
-        .map_err(|error| anyhow::anyhow!("failed to init Forth Mini for debugging: {error}"))?;
-    session.run_steps(500_000);
-    if let Some(exception) = session.snapshot().last_exception.clone() {
-        let trace = session
-            .snapshot()
-            .trace
-            .into_iter()
-            .rev()
-            .take(12)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<Vec<_>>()
-            .join("\n  ");
-        anyhow::bail!("Forth Mini debug init failed: {exception}\n  {trace}");
-    }
     session
         .start_applet_message_for_validation("Forth Mini", 0x19)
         .map_err(|error| anyhow::anyhow!("failed to launch Forth Mini for debugging: {error}"))?;

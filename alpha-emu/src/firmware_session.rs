@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::num::Wrapping;
 use std::time::{Duration, Instant};
 
@@ -51,6 +52,10 @@ pub struct FirmwareSession {
     trace: Vec<String>,
     mmio_accesses: Vec<String>,
     text_screen: TextScreen,
+    trace_stack_at_pc: Option<u32>,
+    trace_stack_at_pc_hit: usize,
+    trace_stack_at_pc_target_hit: usize,
+    recent_pcs: VecDeque<u32>,
 }
 
 impl FirmwareSession {
@@ -121,7 +126,17 @@ impl FirmwareSession {
             trace: vec![format!("Firmware boot: ssp=0x{ssp:08x} pc=0x{pc:08x}")],
             mmio_accesses: Vec::new(),
             text_screen: TextScreen::default(),
+            trace_stack_at_pc: None,
+            trace_stack_at_pc_hit: 0,
+            trace_stack_at_pc_target_hit: 1,
+            recent_pcs: VecDeque::with_capacity(24),
         })
+    }
+
+    pub fn set_trace_stack_at_pc(&mut self, pc: Option<u32>, hit: usize) {
+        self.trace_stack_at_pc = pc;
+        self.trace_stack_at_pc_hit = 0;
+        self.trace_stack_at_pc_target_hit = hit.max(1);
     }
 
     pub fn run_steps(&mut self, max_steps: usize) {
@@ -190,9 +205,11 @@ impl FirmwareSession {
             return false;
         }
 
+        self.maybe_trace_stack_at_pc();
         let (pc, disassembly, cycles, exception) = self
             .cpu
             .disassembler_interpreter_exception(&mut self.memory);
+        self.record_recent_pc(pc);
         self.steps = self.steps.saturating_add(1);
         self.cycles = self.cycles.saturating_add(cycles as u64);
         self.memory.advance_cpu_cycles(cycles);
@@ -225,8 +242,10 @@ impl FirmwareSession {
                 break;
             }
 
+            self.maybe_trace_stack_at_pc();
             let pc = self.cpu.regs.pc.0;
             let (cycles, exception) = self.cpu.interpreter_exception(&mut self.memory);
+            self.record_recent_pc(pc);
             self.steps = self.steps.saturating_add(1);
             self.cycles = self.cycles.saturating_add(cycles as u64);
             self.memory.advance_cpu_cycles(cycles);
@@ -282,8 +301,10 @@ impl FirmwareSession {
                 break;
             }
 
+            self.maybe_trace_stack_at_pc();
             let pc = self.cpu.regs.pc.0;
             let (cycles, exception) = self.cpu.interpreter_exception(&mut self.memory);
+            self.record_recent_pc(pc);
             self.steps = self.steps.saturating_add(1);
             self.cycles = self.cycles.saturating_add(cycles as u64);
             self.memory.advance_cpu_cycles(cycles);
@@ -316,6 +337,62 @@ impl FirmwareSession {
             self.cpu.regs.ssp.0, self.cpu.regs.pc.0
         ));
         true
+    }
+
+    fn maybe_trace_stack_at_pc(&mut self) {
+        let Some(target_pc) = self.trace_stack_at_pc else {
+            return;
+        };
+        if self.cpu.regs.pc.0 != target_pc {
+            return;
+        }
+        self.trace_stack_at_pc_hit = self.trace_stack_at_pc_hit.saturating_add(1);
+        if self.trace_stack_at_pc_hit != self.trace_stack_at_pc_target_hit {
+            return;
+        }
+        let sp = self.cpu.regs.sp();
+        let words = [0_u32, 4, 8, 12, 16, 20]
+            .into_iter()
+            .map(|offset| self.memory.peek_long(sp.wrapping_add(offset)).unwrap_or_default())
+            .collect::<Vec<_>>();
+        let line = format!(
+            "stack_at_pc step={} pc=0x{target_pc:08x} sp=0x{sp:08x} d0=0x{:08x} d1=0x{:08x} d4=0x{:08x} d5=0x{:08x} d6=0x{:08x} d7=0x{:08x} a0=0x{:08x} a1=0x{:08x} a2=0x{:08x} a3=0x{:08x} path={}",
+            self.steps,
+            self.cpu.regs.d[0].0,
+            self.cpu.regs.d[1].0,
+            self.cpu.regs.d[4].0,
+            self.cpu.regs.d[5].0,
+            self.cpu.regs.d[6].0,
+            self.cpu.regs.d[7].0,
+            self.cpu.regs.a[0].0,
+            self.cpu.regs.a[1].0,
+            self.cpu.regs.a[2].0,
+            self.cpu.regs.a[3].0,
+            self.recent_pc_path(),
+        );
+        println!("{line}");
+        for (index, word) in words.iter().enumerate() {
+            println!(
+                "stack_at_pc_word pc=0x{target_pc:08x} offset={} value=0x{word:08x}",
+                index * 4
+            );
+        }
+        self.push_trace(line);
+    }
+
+    fn record_recent_pc(&mut self, pc: u32) {
+        if self.recent_pcs.len() == 24 {
+            self.recent_pcs.pop_front();
+        }
+        self.recent_pcs.push_back(pc);
+    }
+
+    fn recent_pc_path(&self) -> String {
+        self.recent_pcs
+            .iter()
+            .map(|pc| format!("0x{pc:08x}"))
+            .collect::<Vec<_>>()
+            .join(">")
     }
 
     #[must_use]
@@ -916,6 +993,20 @@ mod tests {
 
         assert_ne!(lcd_before.pixels, lcd_after.pixels);
         assert!(session.snapshot().last_exception.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn forth_mini_shows_prompt_input_before_enter_when_launched_through_menu()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = boot_full_system_smartapplets_for_forth_validation()?;
+        launch_forth_mini_through_menu(&mut session);
+
+        session.tap_matrix_code_long(0x5c);
+        session.run_steps(300_000);
+
+        let snapshot = session.snapshot();
+        assert!(snapshot.last_exception.is_none());
         Ok(())
     }
 
