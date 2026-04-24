@@ -228,3 +228,257 @@ OS image derived from the stock `os3kneorom.os3kos` by replacing the `dvorak`
 slot. The patched image flashed successfully through `real-check
 install-os-image` after switching the device to direct USB mode, and the device
 booted normally afterward.
+
+## 2026-04-25 Continuation: Live Translator And Patch Points
+
+The previous note correctly identified `0x5d36` and the first-stage
+`0x44c3fb` layout-remap table, but it did not yet pin down the real live
+printable-key translator that AlphaWord uses while typing.
+
+That path is now pinned well enough to patch.
+
+### Proven Live Translator
+
+The important routine for printable typing is:
+
+- `0x00423c7c`
+
+This is the live key-to-char translator used by the seeded AlphaWord typing
+path observed in the emulator.
+
+Important entry instructions:
+
+- `0x00423c7c`: `movem.l d4-d7/a3-a4, -(a7)`
+- `0x00423c80`: `subq.l #2, a7`
+- `0x00423c82`: `move.w 0x20(a7), d7`
+- `0x00423c86`: `move.w d7, d6`
+
+The call chain observed immediately before it in the live path was:
+
+- `0x00424448 -> 0x0042445c -> 0x00424460 -> 0x00423c7c`
+
+The caller that packages the result for AlphaWord message dispatch is:
+
+- `0x00417c60`
+
+That block calls `0x00423c7c`, then:
+
+- emits message `0x20` with the returned printable byte if nonzero
+- otherwise emits message `0x21` with the original key word
+
+### Meaning Of The Translator Input Word
+
+The word passed into `0x00423c7c` in `d7` is not just a logical key.
+
+Proven runtime observations:
+
+- unshifted stock physical `1` key (`raw 0x5c`) reaches `0x00423c7c` with
+  `d7 = 0x0038`
+- shifted stock physical `1` key reaches `0x00423c7c` with
+  `d7 = 0x0438`
+
+So:
+
+- low byte = logical key
+- bit `0x0400` = shift state for the live printable translator
+
+This was the decisive proof that shifted output can be remapped in firmware and
+that a full Czech patch is possible without relying only on the first-stage
+layout table.
+
+### First-Stage Layout Helper Still Matters
+
+The first-stage layout remap helper remains:
+
+- `0x00423d7a`
+
+It still:
+
+1. maps raw logical through `0x0044c37b`
+2. consults `0x5d36`
+3. applies alternate-slot remap through `0x0044c3fb` if layout != `3`
+
+This remains the right place for positional swaps such as:
+
+- `y <-> z` for Czech QWERTZ behavior
+
+But it is not enough by itself to implement full Czech top-row and shifted
+symbol behavior.
+
+### Per-Key Record Table Used By The Live Translator
+
+After early normalization, `0x00423c7c` uses a global per-logical-key pointer
+table at:
+
+- `0x0044b526`
+
+Each entry is a pointer to a variable-length record. Examples dumped during the
+investigation:
+
+- logical `0x38` -> `0x00447c8e`: `31 21 30 a1 00`
+- logical `0x37` -> `0x00447c85`: `32 40 30 99 3c 80 b0 bd 00`
+- logical `0x36` -> `0x00447c7e`: `33 23 30 a3 b0 11 00`
+- logical `0x28` -> `0x00447c5a`: `2d 5f 00`
+- logical `0x25` -> `0x00447c53`: `3d 2b 3c b1 00`
+- logical `0x15` -> `0x00447c0f`: `5c 7c 3c bb 30 ab 8c a6 00`
+
+Those records are global stock behavior, not layout-slot-specific data. Patching
+them directly would affect QWERTY too. That is why the practical patch point is
+inside `0x00423c7c`, gated by `0x5d36`.
+
+### Boot-Time Layout Fallback
+
+The layout selector byte `0x5d36` is runtime state and is normalized during
+boot.
+
+The critical fallback write is:
+
+- `0x00423ba2`: `move.b #3, 0x5d36`
+
+File offset:
+
+- runtime `0x00423ba2` -> file offset `0x00013ba2`
+
+Stock bytes there:
+
+- `13 fc 00 03 00 00 5d 36`
+
+This is why a manually selected alternate layout can appear to “revert to US”
+after restart: the OS boot path falls back to stock selector `3`, which is the
+QWERTY/pass-through mode.
+
+For an in-place replacement patch, this fallback can be changed to the replaced
+slot:
+
+- slot `0`: `13 fc 00 00 00 00 5d 36`
+- slot `1`: `13 fc 00 01 00 00 5d 36`
+- slot `2`: `13 fc 00 02 00 00 5d 36`
+
+### Current Czech Patch Strategy
+
+The current patcher uses two layers:
+
+1. first-stage slot remap in `0x44c3fb`
+2. second-stage printable-char override in `0x423c7c`
+
+For Czech, the first-stage remap is intentionally minimal:
+
+- only `y -> z`
+- only `z -> y`
+
+All other Czech behavior is handled in the second-stage printable override.
+
+### Current Hook Implementation
+
+The current hook replaces the first 10 bytes of `0x00423c7c` with a jump into
+unused ROM space.
+
+Patched entry:
+
+- runtime `0x00423c7c` / file offset `0x00013c7c`
+- stock bytes: `48 e7 0f 18 55 8f 3e 2f 00 20`
+- patched bytes: `4e f9 00 45 2e 8e 4e 71 4e 71`
+
+Meaning:
+
+- `jmp 0x00452e8e`
+- then two `nop`s to consume the full overwritten prologue window
+
+The custom hook lives at:
+
+- runtime `0x00452e8e`
+- file offset `0x00042e8e`
+
+Hook size:
+
+- code: `0x48` bytes
+- followed by:
+  - base table: `0x100` bytes at `0x00452ed6`
+  - shift table: `0x100` bytes at `0x00452fd6`
+
+The hook returns to the original routine at:
+
+- `0x00423c86`
+
+That return address is important. Earlier failed attempts showed:
+
+- returning to `0x00423c82` split the original `move.w 0x20(a7), d7`
+  instruction and crashed
+- using `jsr` instead of `jmp` at the entry patch left an extra return address
+  on the stack and also crashed
+
+The stable shape is:
+
+- entry patch uses `jmp`
+- hook either returns a replacement char directly with `rts`
+- or jumps back to `0x00423c86` to continue stock behavior
+
+### Current Hook Logic
+
+The live override is layout-slot-specific.
+
+The hook:
+
+1. recreates the overwritten prologue
+2. reads input word into `d7`
+3. rejects keys with low byte > `0x50`
+4. checks `0x5d36`
+5. only overrides when `0x5d36 == selected slot`
+6. uses low byte of `d7` as logical-key index
+7. selects base or shift table depending on `d7 & 0x0400`
+8. returns replacement byte if table entry is nonzero
+9. otherwise jumps back to stock `0x00423c86`
+
+### Current Czech ASCII Fallback Model
+
+The current Czech table is ASCII-only and was derived from the Microsoft Czech
+layout table (`kbdcz.html`) with unaccented fallbacks.
+
+Notable examples:
+
+- top row base:
+  - `` ` -> ; ``
+  - `1 -> +`
+  - `2 -> e`
+  - `3 -> s`
+  - `4 -> c`
+  - `5 -> r`
+  - `6 -> z`
+  - `7 -> y`
+  - `8 -> a`
+  - `9 -> i`
+  - `0 -> e`
+  - `- -> =`
+  - `= -> '` (acute dead key fallback)
+- top row shift:
+  - `` ` -> ~ ``
+  - `1..0 -> 1..0`
+  - `- -> %`
+  - `= -> ^` (caron dead key fallback)
+- bracket/quote region:
+  - `[ -> u`, `Shift+[ -> /`
+  - `] -> )`, `Shift+] -> (`
+  - `; -> u`, `Shift+; -> "`
+  - `' -> #`, `Shift+' -> !`
+- slash/comma area:
+  - `\\ -> \\`, `Shift+\\ -> |`
+  - `, -> ,`, `Shift+, -> ?`
+  - `. -> .`, `Shift+. -> :`
+  - `/ -> /`, `Shift+/ -> /`
+- letters:
+  - base/shift are explicit for all printable letters
+  - `y/z` and `Y/Z` are swapped to QWERTZ behavior
+
+### Remaining Unresolved Areas
+
+The following are still not fully proven:
+
+- exact semantics of all modifier bits beyond the proven `0x0400` shift bit
+- whether some firmware text-entry contexts bypass `0x00423c7c` for subsets of
+  keys or non-AlphaWord contexts
+- exact persistent UI selection flows versus boot fallback behavior on real
+  hardware after reflashing and cold boot
+
+The current patcher and emulator evidence are strong enough for continued
+iteration, but physical-device verification of the full key matrix remains the
+source of truth.
