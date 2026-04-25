@@ -29,6 +29,28 @@ Out of scope for this first redesign:
 - Inventing unvalidated Small ROM operations.
 - Exposing raw stock applet or stock firmware paths as normal user workflow.
 
+## Visual Direction
+
+The GUI should be explicitly inspired by the provided HTML snippets while remaining a native egui application. The goal is not pixel-perfect HTML parity, but the same product structure, density, and visual language.
+
+Use these visual rules during implementation:
+
+- Use a restrained Material-like utility layout: pale surface background, white/near-white content panels, thin outline borders, blue primary actions, muted gray secondary text, and red destructive operations.
+- Keep the app operational rather than marketing-like: no hero landing page after connection, no decorative gradients/orbs, no oversized empty cards.
+- Desktop uses a persistent left navigation rail with the `AlphaGUI` brand at top, icon+label tab entries, and a clear active tab state with blue accent treatment.
+- Mobile uses a compact top app bar and bottom navigation with the same tab order and icon language.
+- The connection screen is a centered connection panel with a large USB/cable symbol, status text, scan/retry action, and platform-specific instruction box.
+- Dashboard resembles the supplied file-list mockup: header row, compact file rows, document icon, name, size, and per-row backup action.
+- SmartApplets resembles the supplied checklist mockup: prominent Alpha USB action at top, applet rows with checkbox, name, version pill, short description, and size.
+- OS Operations follows the supplied system page: `Backup Everything` as the safe primary action, then visibly dangerous firmware/system cards, then a small validated-operations list.
+- About follows the supplied about page: project identity card, version pill, resources, and a separate warning/disclaimer panel.
+- Buttons should use icon+text where egui can represent the icon clearly; use text-only only where the icon would add ambiguity.
+- Cards should stay tight and tool-like, with small radii and consistent spacing. Avoid nested cards unless the nested element is an actual repeated row or warning panel.
+
+The current palette in `alpha-cli/src/gui.rs` is close enough to evolve rather than replace wholesale, but the implementation should tune it toward the snippet colors: `#0050cb` primary blue, pale `#faf8ff`/near-white surfaces, gray outlines, and `#ba1a1a` destructive red.
+
+Text in the native app should adapt the snippet copy where it clarifies the workflow, but should avoid fake version numbers or unvalidated claims.
+
 ## Product Flow
 
 ### Connection Screen
