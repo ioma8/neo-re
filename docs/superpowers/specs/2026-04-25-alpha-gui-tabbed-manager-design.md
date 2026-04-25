@@ -33,6 +33,8 @@ Out of scope for this first redesign:
 
 The GUI should be explicitly inspired by the provided HTML snippets while remaining a native egui application. The goal is not pixel-perfect HTML parity, but the same product structure, density, and visual language.
 
+Reference snippets are saved in [`assets/2026-04-25-alpha-gui-html-reference.md`](assets/2026-04-25-alpha-gui-html-reference.md). Treat those as the visual source material for connection, dashboard, SmartApplets, OS Operations, and About screens.
+
 Use these visual rules during implementation:
 
 - Use a restrained Material-like utility layout: pale surface background, white/near-white content panels, thin outline borders, blue primary actions, muted gray secondary text, and red destructive operations.
