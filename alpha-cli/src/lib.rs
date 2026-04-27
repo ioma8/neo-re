@@ -1,13 +1,26 @@
 pub mod app;
 pub mod backup;
 pub mod gui;
-pub mod protocol;
+pub mod gui_about;
+pub mod gui_applets;
+pub mod gui_connection;
+pub mod gui_dashboard;
+pub mod gui_model;
+pub mod gui_os;
+
+pub use alpha_core::{applet_workflow, bundled_assets, operation_progress, protocol};
+
+#[cfg(target_os = "android")]
+pub mod neo_client;
+
+#[cfg(not(target_os = "android"))]
+pub use alpha_core::neo_client;
 
 #[cfg(target_os = "android")]
 pub mod android_storage;
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-pub mod usb;
+pub use alpha_core::usb;
 
 #[cfg(target_os = "android")]
 pub mod usb_android;
@@ -68,7 +81,7 @@ pub mod usb {
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
-pub mod usb_support;
+pub use alpha_core::usb_support;
 
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]

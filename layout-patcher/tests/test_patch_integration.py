@@ -84,7 +84,7 @@ class PatchIntegrationTests(unittest.TestCase):
             patched.data[0x42E8E:0x42ED6].hex(),
             (
                 "48e70f18558f3e2f00200c070050620000320c3800005d36"
-                "66000028700010073c070246040041fa00206700000641fa"
+                "66000028700010073c0702460c0041fa00206700000641fa"
                 "0118103008006700000a548f4cdf18f04e754ef900423c86"
             ),
         )

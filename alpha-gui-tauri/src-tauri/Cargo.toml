@@ -1,0 +1,16 @@
+[package]
+name = "alpha-gui-tauri"
+version = "0.1.0"
+edition = "2024"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+alpha-core = { path = "../../alpha-core" }
+anyhow = "1.0.102"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -11,6 +11,7 @@ target/
 **/target/
 build/
 dist/
+node_modules/
 
 # Local Python/uv state.
 .venv/

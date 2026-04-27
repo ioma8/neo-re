@@ -1,6 +1,6 @@
 # alpha-cli
 
-Minimal terminal backup utility for AlphaSmart NEO.
+Terminal and egui desktop manager for AlphaSmart NEO.
 
 Run the terminal UI:
 
@@ -14,19 +14,42 @@ Run the GUI:
 cargo run --manifest-path alpha-cli/Cargo.toml --bin alpha-gui
 ```
 
-Behavior:
+GUI behavior:
 
-- waits for a NEO in USB HID keyboard mode
-- switches it to direct USB mode with the validated `e0 e1 e2 e3 e4` HID report sequence
-- initializes the direct updater protocol
-- shows `Files on device`
-- lists all AlphaWord slots with byte size and approximate word count
-- downloads one selected slot or `All files`
+- starts on a connection screen and shows tabs only after direct USB is available
+- desktop automatically switches HID `081e:bd04` to direct USB `081e:bd01` with the validated `e0 e1 e2 e3 e4` sequence
+- mobile explains the Alpha USB prerequisite when the device is still in HID keyboard mode
+- desktop and Android direct-mode builds use the Rust USB backend directly; no Python helper process is used
+- uses a tabbed flow inspired by the saved HTML references:
+  - `Dashboard`: lists AlphaWord files and backs up all files or individual slots
+  - `SmartApplets`: shows bundled stock applets, installed applets, and the Alpha USB install action
+  - `OS Operations`: backs up everything and exposes the validated bundled system-image flash action
+  - `About`: project info, version, resources, NEO-only validation note, and brick-risk warning
+- embeds stock applets from `exports/smartapplet-backups/20260425-forth-clean-reflash`
+- embeds Alpha USB from `exports/applets/alpha-usb-native.os3kapp`
+- embeds the validated NEO OS image from `analysis/cab/os3kneorom.os3kos`
+- shows structured progress for connection switching, inventory refresh, file backup, applet install/reflash, and OS flashing
+- requires confirmation before clearing/reinstalling applets or flashing OS images
 
-On desktop, backups are written directly under:
+Full-device backup includes:
+
+- raw AlphaWord slot dumps
+- text-converted AlphaWord exports
+- dumped installed SmartApplets
+- a backup manifest summarizing slots and applets
+
+The terminal UI remains the simpler AlphaWord backup flow.
+
+On desktop, one-slot AlphaWord backups are written under:
 
 ```text
 ~/alpha-cli/backups/{date-time}/
+```
+
+Full-device backups are written under:
+
+```text
+~/alpha-cli/device-backups/{date-time}/
 ```
 
 On Android, backups are written to the public Documents tree:
@@ -37,7 +60,9 @@ On Android, backups are written to the public Documents tree:
 
 For Android 11 and newer, the app declares `MANAGE_EXTERNAL_STORAGE` and opens the system "All files access" settings page if that privilege has not been granted yet. Enable access for Alpha GUI, return to the app, and retry the backup. On older Android versions, the app requests `WRITE_EXTERNAL_STORAGE` at runtime.
 
-The app saves only `.txt` files. The downloaded byte stream is converted host-side by replacing NUL bytes with spaces and CR bytes with LF bytes. The converted text length is validated against the downloaded byte length before the file is accepted.
+The text export path converts downloaded bytes host-side by replacing NUL bytes
+with spaces and CR bytes with LF bytes. The converted text length is validated
+against the downloaded byte length before the file is accepted.
 
 Logs are written to:
 
@@ -51,7 +76,9 @@ The GUI writes its own log file:
 ~/alpha-cli/logs/alpha-gui.log
 ```
 
-The GUI uses `eframe`/`egui` with the lighter `glow` renderer. It shares the same protocol, USB, and backup code as the terminal UI.
+The GUI uses `eframe`/`egui` with the lighter `glow` renderer. Manager flows use
+the Rust direct USB backend in this crate; they do not shell out to Python or
+`real-check`.
 
 USB support:
 

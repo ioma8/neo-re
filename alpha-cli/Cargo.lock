@@ -49,6 +49,7 @@ checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 name = "alpha-cli"
 version = "0.1.0"
 dependencies = [
+ "alpha-core",
  "android-activity",
  "anyhow",
  "chrono",
@@ -62,6 +63,18 @@ dependencies = [
  "tracing",
  "tracing-android",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "alpha-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "directories",
+ "rusb",
+ "serde",
+ "tracing",
 ]
 
 [[package]]

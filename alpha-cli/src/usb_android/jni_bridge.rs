@@ -138,8 +138,8 @@ impl AndroidUsb {
         Ok(())
     }
 
-    pub fn bulk_read(&self, length: usize) -> anyhow::Result<Vec<u8>> {
-        with_env(|env| bulk_read(env, &self.connection, &self.in_endpoint, length))
+    pub fn bulk_read_timeout(&self, length: usize, timeout_ms: i32) -> anyhow::Result<Vec<u8>> {
+        with_env(|env| bulk_read(env, &self.connection, &self.in_endpoint, length, timeout_ms))
     }
 }
 
@@ -431,6 +431,7 @@ fn bulk_read(
     connection: &Global<JObject<'static>>,
     endpoint: &Global<JObject<'static>>,
     length: usize,
+    timeout_ms: i32,
 ) -> anyhow::Result<Vec<u8>> {
     let array = env.new_byte_array(length)?;
     let transferred = env
@@ -442,7 +443,7 @@ fn bulk_read(
                 JValue::Object(endpoint.as_obj()),
                 JValue::Object(array.as_ref()),
                 JValue::Int(length as i32),
-                JValue::Int(TIMEOUT_MS),
+                JValue::Int(timeout_ms),
             ],
         )?
         .i()?;

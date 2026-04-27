@@ -7,6 +7,7 @@ edition = "2024"
 crate-type = ["rlib", "cdylib"]
 
 [dependencies]
+alpha-core = { path = "../alpha-core" }
 anyhow = "1.0.102"
 chrono = "0.4.44"
 crossterm = "0.29.0"

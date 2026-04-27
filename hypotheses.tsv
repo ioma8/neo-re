@@ -67,3 +67,6 @@ Restoring printable and backspace handling on on_key without reclaiming Enter fi
 In the menu-launched emulator path, prompt text disappears because a later callback after keypress repaints without the current input line	needs further investigation
 Patching the startup fallback at 0x423ba2 from layout 3 to the replaced slot should keep Czech active across restart instead of falling back to QWERTY	proven
 Forth Mini prompt rendering uses the SDK text-trap display path, so an empty emulator text_screen means the draw callback did not run rather than an OCR blind spot	needs further investigation
+Alpha GUI root UI does not fill native window, so only the occupied content rect is painted and the rest remains black	proven
+Alpha GUI content is clipped by explicit viewport max/min sizing instead of root UI fill	disproven
+Alpha GUI black area is caused by OS/window compositor outside the app, not egui layout	disproven

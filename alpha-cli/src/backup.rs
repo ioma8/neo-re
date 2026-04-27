@@ -14,14 +14,27 @@ pub struct SavedFile {
     pub bytes: usize,
 }
 
+pub struct SavedPayload {
+    pub path: PathBuf,
+    pub bytes: usize,
+}
+
 pub fn app_dir() -> anyhow::Result<PathBuf> {
     let dirs = BaseDirs::new().context("resolve home directory")?;
     Ok(dirs.home_dir().join("alpha-cli"))
 }
 
 pub fn create_backup_dir() -> anyhow::Result<PathBuf> {
+    create_timestamped_dir("backups")
+}
+
+pub fn create_device_backup_dir() -> anyhow::Result<PathBuf> {
+    create_timestamped_dir("device-backups")
+}
+
+pub fn create_timestamped_dir(kind: &str) -> anyhow::Result<PathBuf> {
     let dir = backup_root_dir()?
-        .join("backups")
+        .join(kind)
         .join(Local::now().format("%Y-%m-%d_%H-%M-%S").to_string());
     fs::create_dir_all(&dir)
         .with_context(|| format!("create backup directory {}", dir.display()))?;
@@ -54,7 +67,28 @@ pub fn save_file(dir: &Path, entry: &FileEntry, payload: &[u8]) -> anyhow::Resul
     })
 }
 
-fn text_export_bytes(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
+pub fn save_raw_payload(
+    dir: &Path,
+    base_name: &str,
+    extension: &str,
+    payload: &[u8],
+) -> anyhow::Result<SavedPayload> {
+    if !dir.is_dir() {
+        bail!("backup target is not a directory: {}", dir.display());
+    }
+    let path = dir.join(format!("{base_name}.{extension}"));
+    fs::write(&path, payload).with_context(|| format!("write {}", path.display()))?;
+    Ok(SavedPayload {
+        path,
+        bytes: payload.len(),
+    })
+}
+
+pub fn text_export_bytes(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
+    text_export_bytes_inner(payload)
+}
+
+fn text_export_bytes_inner(payload: &[u8]) -> anyhow::Result<Vec<u8>> {
     let text = payload
         .iter()
         .map(|byte| match *byte {
