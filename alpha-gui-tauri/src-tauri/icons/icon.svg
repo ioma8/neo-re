@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="AlphaGUI icon">
+  <rect width="1024" height="1024" rx="232" fill="#0050cb"/>
+  <path d="M208 700h608c38 0 68 30 68 68v34H140v-34c0-38 30-68 68-68Z" fill="#003a95" opacity="0.32"/>
+
+  <g>
+    <rect x="210" y="234" width="604" height="438" rx="70" fill="#ffffff"/>
+    <rect x="278" y="306" width="468" height="226" rx="34" fill="#f8fbff"/>
+    <rect x="330" y="368" width="364" height="32" rx="16" fill="#0050cb" opacity="0.16"/>
+    <rect x="330" y="430" width="250" height="32" rx="16" fill="#0050cb" opacity="0.16"/>
+    <circle cx="662" cy="452" r="34" fill="#0050cb" opacity="0.14"/>
+    <rect x="310" y="574" width="404" height="34" rx="17" fill="#0050cb" opacity="0.18"/>
+    <rect x="740" y="568" width="44" height="44" rx="12" fill="#0050cb"/>
+  </g>
+
+  <g fill="none" stroke="#ffffff" stroke-width="42" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M348 750h218c37 0 66 30 66 66v18"/>
+    <path d="M632 814h74"/>
+    <path d="M706 770v88"/>
+  </g>
+  <circle cx="830" cy="274" r="46" fill="#d3e4fe"/>
+  <path d="M810 274h40M830 254v40" stroke="#0050cb" stroke-width="18" stroke-linecap="round"/>
+</svg>
