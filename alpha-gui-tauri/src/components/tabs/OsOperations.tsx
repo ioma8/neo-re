@@ -52,7 +52,7 @@ export function OsOperations({ onBackupEverything, onFlashSystem }: Props) {
           </div>
           <div className="space-y-5 p-6">
             <p className="text-on-surface-variant">
-              Reinstall the bundled AlphaSmart NEO OS image. This can brick the device if interrupted.
+              Reinstall the bundled OS image. This can brick the device if interrupted.
             </p>
             <Button
               variant="danger"

@@ -23,8 +23,8 @@ export function AppShell({ activeTab, onTabChange, connectedLabel, children }: P
     <div className="mobile-screen bg-background text-on-surface">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-gray-200 bg-gray-50 font-sans text-sm tracking-normal lg:flex lg:flex-col">
         <div className="px-6 py-8">
-          <h1 className="text-xl font-black text-primary">AlphaGUI Pro</h1>
-          <p className="mt-1 text-sm text-on-surface-variant">NEO Manager</p>
+          <h1 className="text-xl font-black text-primary">AlphaGUI</h1>
+          <p className="mt-1 text-sm text-on-surface-variant">Manager for Alpha writing devices</p>
         </div>
         <nav className="flex w-full flex-col gap-2 px-4">
           {tabs.map((tab) => (

@@ -33,7 +33,7 @@ export function Dashboard({
         <div>
           <h2 className="text-h1 text-on-surface">Dashboard</h2>
           <p className="mt-1 text-body-md text-on-surface-variant">
-            Manage files on the connected AlphaSmart NEO.
+            Manage files on the connected Alpha writing device.
           </p>
         </div>
         <Button icon={<Icon name="backup" className="text-lg" />} onClick={onBackupAll}>

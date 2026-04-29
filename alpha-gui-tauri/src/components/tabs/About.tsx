@@ -14,8 +14,8 @@ export function About() {
               <h2 className="text-h1 text-on-surface">AlphaGUI</h2>
             </div>
             <p className="mt-5 text-lg text-on-surface-variant">
-              AlphaGUI manages AlphaSmart NEO files, SmartApplets, and validated recovery operations.
-              It has been validated only on AlphaSmart NEO.
+              Manager for Alpha writing devices. AlphaGUI manages files, SmartApplets,
+              flashing, backups, and validated recovery operations.
             </p>
           </div>
           <span className="rounded-full bg-surface-container px-4 py-2 font-mono text-sm">

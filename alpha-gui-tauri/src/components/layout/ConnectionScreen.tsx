@@ -31,7 +31,7 @@ export function ConnectionScreen({
             </div>
             <div>
               <p className="text-h3 text-primary">AlphaGUI</p>
-              <p className="text-body-sm text-on-surface-variant">AlphaSmart devices manager</p>
+              <p className="text-body-sm text-on-surface-variant">Manager for Alpha writing devices</p>
             </div>
           </div>
           <div className="relative grid size-[128px] place-items-center rounded-[2rem] border border-primary-fixed bg-gradient-to-br from-primary-fixed/80 to-surface-container-low shadow-inner">
@@ -41,7 +41,7 @@ export function ConnectionScreen({
           <div className="space-y-sm">
             <h1 className="text-h2 text-on-surface">Awaiting Device</h1>
             <p className="text-body-lg text-on-surface-variant">
-              Connect your AlphaSmart NEO over USB. AlphaGUI will detect it and switch HID mode automatically.
+              Connect your Alpha writing device over USB. AlphaGUI will detect it and switch HID mode automatically.
             </p>
           </div>
           <div className="w-full overflow-hidden rounded-xl border border-outline-variant bg-surface-container-lowest text-left shadow-sm">

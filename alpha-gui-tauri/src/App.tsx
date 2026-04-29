@@ -78,7 +78,7 @@ export default function App() {
   const [debugBypass, setDebugBypass] = useState(false);
   const [showDebugBypass, setShowDebugBypass] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [connectionMessage, setConnectionMessage] = useState("Scanning for AlphaSmart NEO...");
+  const [connectionMessage, setConnectionMessage] = useState("Scanning for Alpha writing device...");
   const [tab, setTab] = useState<TabKey>("dashboard");
   const [inventory, setInventory] = useState<Inventory>(emptyInventory);
   const [checkedKeys, setCheckedKeys] = useState<Set<string>>(new Set());
@@ -139,7 +139,7 @@ export default function App() {
     if (scanInFlight.current) return;
     scanInFlight.current = true;
     if (showSpinner) setScanning(true);
-    setConnectionMessage("Scanning for AlphaSmart NEO...");
+    setConnectionMessage("Scanning for Alpha writing device...");
     try {
       let nextMode = await detectDevice();
       setMode(nextMode);
@@ -309,7 +309,7 @@ export default function App() {
               setConfirmRequest({
                 title: "Reflash bundled NEO OS image?",
                 message:
-                  "This writes the bundled OS image to the device and can brick the AlphaSmart NEO if interrupted. Back up everything first.",
+                  "This writes the bundled OS image to the device and can brick the Alpha writing device if interrupted. Back up everything first.",
                 confirmLabel: "Reflash OS",
                 destructive: true,
                 onConfirm: () =>
@@ -319,7 +319,7 @@ export default function App() {
                       operationId: "flash-system",
                       title: "Flash system image",
                       phase: "Device restarted",
-                      item: "Reconnect the AlphaSmart NEO after it finishes rebooting.",
+                      item: "Reconnect the Alpha writing device after it finishes rebooting.",
                       completed: null,
                       total: null,
                       indeterminate: true,
