@@ -10,6 +10,9 @@ import {
   flashSystemImage,
   getInventory,
   installAlphaUsb,
+  readRecoveryDiagnostics,
+  restartDevice,
+  restoreOriginalStockApplets,
   switchHidToDirect,
 } from "./api/commands";
 import { selectAppletFile } from "./api/applets";
@@ -34,6 +37,7 @@ import { OsOperations } from "./components/tabs/OsOperations";
 import { About } from "./components/tabs/About";
 import { ProgressDialog } from "./components/ui/ProgressDialog";
 import { ConfirmDialog, type ConfirmRequest } from "./components/ui/ConfirmDialog";
+import { DiagnosticLogDialog } from "./components/ui/DiagnosticLogDialog";
 
 const emptyInventory: Inventory = {
   files: [],
@@ -89,6 +93,7 @@ export default function App() {
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
+  const [diagnosticLog, setDiagnosticLog] = useState<string | null>(null);
   const scanInFlight = useRef(false);
 
   useEffect(() => {
@@ -330,6 +335,66 @@ export default function App() {
                   }),
               })
             }
+            onFlashSystemFromSmallRom={() =>
+              setConfirmRequest({
+                title: "Reflash bundled OS from Small ROM?",
+                message:
+                  "Use this only after entering Small ROM/updater mode and connecting USB. This flashes the bundled stock OS image and can brick the device if interrupted.",
+                confirmLabel: "Reflash OS",
+                destructive: true,
+                onConfirm: () =>
+                  void runOperationWithoutRefresh(async () => {
+                    await flashSystemImage(false);
+                    setProgress({
+                      operationId: "flash-system",
+                      title: "Flash system image",
+                      phase: "Device restarted",
+                      item: "Reconnect the Alpha writing device after it finishes rebooting.",
+                      completed: null,
+                      total: null,
+                      indeterminate: true,
+                      log: null,
+                    });
+                    setConnected(false);
+                    setMode("missing");
+                  }),
+              })
+            }
+            onRestartDevice={() =>
+              setConfirmRequest({
+                title: "Restart device?",
+                message:
+                  "This restarts the connected device. USB will disconnect temporarily while it reboots.",
+                confirmLabel: "Restart",
+                destructive: false,
+                onConfirm: () =>
+                  void runOperationWithoutRefresh(async () => {
+                    await restartDevice();
+                    setConnected(false);
+                    setMode("missing");
+                  }),
+              })
+            }
+            onReadDiagnostics={() =>
+              void runOperationWithoutRefresh(async () => {
+                const result = await readRecoveryDiagnostics();
+                setDiagnosticLog(result.log);
+              })
+            }
+            onRestoreStockApplets={() =>
+              setConfirmRequest({
+                title: "Restore original stock applets?",
+                message:
+                  "This clears the SmartApplet area and reinstalls only bundled original stock applets. Alpha USB and user applets will not be installed by this recovery action. Back up everything first.",
+                confirmLabel: "Restore Stock Applets",
+                destructive: true,
+                onConfirm: () =>
+                  void runOperation(async () => {
+                    setInventory(await restoreOriginalStockApplets());
+                    setAddedApplets([]);
+                  }),
+              })
+            }
           />
         )}
         {tab === "about" && <About />}
@@ -341,6 +406,11 @@ export default function App() {
           setProgress(null);
           setError(null);
         }}
+      />
+      <DiagnosticLogDialog
+        open={diagnosticLog !== null}
+        log={diagnosticLog ?? ""}
+        onClose={() => setDiagnosticLog(null)}
       />
       <ConfirmDialog request={confirmRequest} onCancel={() => setConfirmRequest(null)} />
     </>
