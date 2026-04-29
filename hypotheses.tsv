@@ -70,3 +70,24 @@ Forth Mini prompt rendering uses the SDK text-trap display path, so an empty emu
 Alpha GUI root UI does not fill native window, so only the occupied content rect is painted and the rest remains black	proven
 Alpha GUI content is clipped by explicit viewport max/min sizing instead of root UI fill	disproven
 Alpha GUI black area is caused by OS/window compositor outside the app, not egui layout	disproven
+Tauri Android safe-area regression is caused by applying safe-area padding to the root plus header/footer, double-counting top inset and mispositioning fixed bottom nav	proven
+Correct mobile pattern is viewport-fit=cover with safe-area padding only on edge UI and content bottom reserved as nav height plus bottom inset	proven
+Tauri dialog open({ directory: true }) cannot open on Android because mobile folder picking is not implemented in tauri-plugin-dialog	proven
+Missing dialog permission prevents Android folder picker from opening	disproven
+Custom Android SAF picker plus ContentResolver writer can support real backup folders without filesystem paths	proven
+Dashboard backup path button does not open Android picker because WebView userAgent detection does not route to the Android SAF command	proven
+Backup path picker still appears inert because frontend and Android bridge convert native picker failures into silent cancellation	proven
+Android SAF picker command can hang indefinitely when activity result is lost because the blocking queue has no timeout	proven
+Mobile added-applet file support is incomplete because content:// URI reads are treated as filesystem paths	proven
+First-time Android USB permission flow is incomplete because requestPermission has no grant wait/callback path	proven
+Picker/file-dialog errors are now surfaced through the shared progress error dialog instead of disappearing in fire-and-forget handlers	proven
+Android SAF picker failures and lost activity results are now bounded and propagated to Rust	proven
+Android content:// applet file reads are now routed through ContentResolver instead of fs::read	proven
+Android USB permission flow now waits for the permission broadcast result before continuing	proven
+Android JNI write/USB permission calls can still bypass exception clearing because call_static_method uses ? before check_exception	proven
+Android USB permission wait can race UI-thread receiver registration because background thread starts final wait before UI setup is acknowledged	proven
+Basic Writer m68k release link fails because the applet uses operations that require compiler-builtins integer helper symbols such as __mulsi3	proven
+Basic Writer can use currently known AlphaWord file traps to implement owned-file load/save/commit without more reverse engineering	disproven
+Android JNI write and USB permission calls now clear Java exceptions before converting JNI call results	proven
+Android USB permission request now acknowledges UI-thread registration and cancels delayed setup after timeout	proven
+Android packaged permissions match SAF plus USB-host design without obsolete external-storage permissions	proven

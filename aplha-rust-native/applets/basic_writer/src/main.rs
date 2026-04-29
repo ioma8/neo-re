@@ -3,6 +3,7 @@
 #![cfg_attr(target_arch = "m68k", feature(asm_experimental_arch))]
 
 mod editor;
+mod storage;
 
 #[cfg(target_arch = "m68k")]
 use core::arch::global_asm;
@@ -36,6 +37,7 @@ impl Applet for BasicWriter {
     fn on_focus(ctx: &mut Context) -> Status {
         with_state(|state| {
             *state = AppState::new();
+            let _ = storage::load_slot(state.active_slot, &mut state.document);
             draw_document(ctx, &state.document);
         });
         Status::OK
@@ -53,6 +55,7 @@ impl Applet for BasicWriter {
                     _ => InputAction::Ignore,
                 },
             );
+            let _ = storage::save_slot(state.active_slot, &state.document);
             draw_document(ctx, &state.document);
         });
         Status::OK
@@ -61,6 +64,7 @@ impl Applet for BasicWriter {
     fn on_key(ctx: &mut Context) -> Status {
         with_state(|state| {
             let _ = apply_action(state, input_action_for_key(ctx.param()));
+            let _ = storage::save_slot(state.active_slot, &state.document);
             draw_document(ctx, &state.document);
         });
         Status::OK
@@ -125,15 +129,18 @@ fn apply_action(state: &mut AppState, action: InputAction) -> bool {
             false
         }
         InputAction::SwitchFile(slot) => {
+            let _ = storage::save_slot(state.active_slot, &state.document);
             state
                 .navigation
                 .store(state.active_slot, state.document.cursor(), state.document.viewport());
             state.active_slot = slot;
             if let Some((cursor, viewport)) = state.navigation.restore(slot) {
+                let _ = storage::load_slot(slot, &mut state.document);
                 state.document.set_cursor(cursor);
                 state.document.set_viewport(viewport);
             } else {
                 state.document = Document::new();
+                let _ = storage::load_slot(slot, &mut state.document);
                 state.document.set_viewport(Viewport { row: 0 });
             }
             false
