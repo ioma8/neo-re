@@ -13,6 +13,7 @@ pub struct AppletManifest {
     pub base_memory_size: u32,
     pub extra_memory_size: u32,
     pub copyright: &'static str,
+    pub file_count: u8,
     pub alphaword_write_metadata: bool,
 }
 
@@ -77,6 +78,7 @@ pub fn build_image(manifest: &AppletManifest, entry_code: &[u8]) -> Result<Vec<u
     write_be32(&mut image, 0x10, manifest.flags);
     image[0x14..0x16].copy_from_slice(&manifest.id.to_be_bytes());
     image[0x16] = 1;
+    image[0x17] = manifest.file_count;
     write_ascii_field(&mut image, 0x18, 0x28, manifest.name);
     image[0x3C] = manifest.version.major_bcd;
     image[0x3D] = manifest.version.minor_bcd;
@@ -160,6 +162,7 @@ mod tests {
             base_memory_size: 0x100,
             extra_memory_size: 0x2000,
             copyright: "neo-re benign SmartApplet probe",
+            file_count: 0,
             alphaword_write_metadata: true,
         };
         let image = build_image(&manifest, &[0x4E, 0x75])?;
@@ -183,6 +186,7 @@ mod tests {
             base_memory_size: 0x400,
             extra_memory_size: 0x2000,
             copyright: "neo-re native Rust SmartApplet",
+            file_count: 0,
             alphaword_write_metadata: false,
         };
         let image = build_image(&manifest, &[0x4E, 0x75])?;
@@ -192,6 +196,47 @@ mod tests {
         assert_eq!(&image[0x3C..0x40], &[0x00, 0x01, 0x00, 0x01]);
         assert_eq!(&image[0x94..0x96], &[0x4E, 0x75]);
         assert_eq!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);
+        validate_image(&image)?;
+        Ok(())
+    }
+
+    #[test]
+    fn packages_basic_writer_shape() -> Result<(), Box<dyn Error>> {
+        let manifest = AppletManifest {
+            id: 0xA132,
+            name: "Basic Writer",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x7000,
+            extra_memory_size: 0x2000,
+            copyright: "neo-re native Rust SmartApplet",
+            file_count: 8,
+            alphaword_write_metadata: true,
+        };
+        let image = build_image(&manifest, &[0x4E, 0x75])?;
+
+        assert_eq!(&image[0x00..0x04], &[0xC0, 0xFF, 0xEE, 0xAD]);
+        assert_eq!(&image[0x14..0x18], &[0xA1, 0x32, 0x01, 0x08]);
+        assert_eq!(&image[0x18..0x24], b"Basic Writer");
+        assert_eq!(&image[0x94..0x96], &[0x4E, 0x75]);
+        assert_eq!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);
+        for key in 0x8011_u16..=0x8018 {
+            let record = [
+                0xC0,
+                0x01,
+                (key >> 8) as u8,
+                key as u8,
+                0x00,
+                0x06,
+                b'w',
+                b'r',
+                b'i',
+                b't',
+                b'e',
+                0x00,
+            ];
+            assert!(image.windows(record.len()).any(|window| window == record));
+        }
         validate_image(&image)?;
         Ok(())
     }
