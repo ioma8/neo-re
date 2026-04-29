@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AddedAppletFile, BackupResult, BundledApplet, DeviceMode, Inventory } from "./types";
+import type {
+  AddedAppletFile,
+  BackupResult,
+  BundledApplet,
+  DeviceMode,
+  Inventory,
+  RecoveryDiagnostics,
+} from "./types";
 
 export function detectDevice(): Promise<DeviceMode> {
   return invoke("detect_device");
@@ -54,6 +61,18 @@ export function flashApplets(
   addedFiles: AddedAppletFile[],
 ): Promise<Inventory> {
   return invoke("flash_applets", { selection: { checkedKeys, addedFiles } });
+}
+
+export function restoreOriginalStockApplets(): Promise<Inventory> {
+  return invoke("restore_original_stock_applets");
+}
+
+export function restartDevice(): Promise<void> {
+  return invoke("restart_device");
+}
+
+export function readRecoveryDiagnostics(): Promise<RecoveryDiagnostics> {
+  return invoke("read_recovery_diagnostics");
 }
 
 export function flashSystemImage(reformatRestOfRom: boolean): Promise<void> {

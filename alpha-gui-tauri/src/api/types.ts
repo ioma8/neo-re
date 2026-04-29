@@ -64,3 +64,7 @@ export interface ProgressEvent {
   indeterminate: boolean;
   log: string | null;
 }
+
+export interface RecoveryDiagnostics {
+  log: string;
+}
