@@ -20,6 +20,7 @@ pub fn run() {
             commands::list_bundled_applets,
             commands::install_alpha_usb,
             commands::flash_applets,
+            commands::restore_original_stock_applets,
             commands::flash_system_image,
         ])
         .run(tauri::generate_context!())

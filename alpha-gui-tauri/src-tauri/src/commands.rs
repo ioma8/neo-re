@@ -366,6 +366,55 @@ pub async fn flash_applets(
     .map_err(error_string)
 }
 
+#[tauri::command]
+pub async fn restore_original_stock_applets(app: AppHandle) -> Result<InventoryDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let catalog = BundledCatalog::dev_defaults();
+        let applets = catalog.original_stock_restore_applets();
+        if applets.is_empty() {
+            anyhow::bail!("no bundled stock applets available for restore");
+        }
+
+        let mut client = NeoClient::open_and_init()?;
+        emit_progress(
+            &app,
+            "restore-stock-applets",
+            "Restore stock applets",
+            "Clearing SmartApplet area",
+            None,
+            Some(0),
+            Some(applets.len()),
+        );
+        client.clear_smart_applet_area()?;
+
+        for (index, applet) in applets.iter().enumerate() {
+            let bytes = resolve_source(&applet.source)?;
+            let applet_id = applet
+                .applet_id
+                .ok_or_else(|| anyhow::anyhow!("stock applet {} has no id", applet.name))?;
+            emit_progress(
+                &app,
+                "restore-stock-applets",
+                "Restore stock applets",
+                "Installing",
+                Some(applet.name.clone()),
+                Some(index + 1),
+                Some(applets.len()),
+            );
+            client.install_smart_applet_with_progress(&bytes, |event| {
+                emit_client_progress(&app, "restore-stock-applets", "Restore stock applets", event);
+            })?;
+            let installed = client.list_smart_applets()?;
+            verify_installed_applet_id(&installed, applet_id)?;
+        }
+
+        inventory_from_client(&mut client)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(error_string)
+}
+
 struct ResolvedAppletImage {
     key: String,
     bytes: Vec<u8>,
@@ -532,6 +581,26 @@ fn resolve_source(source: &BundledSource) -> anyhow::Result<Vec<u8>> {
     match source {
         BundledSource::Embedded { bytes, .. } => Ok(bytes.to_vec()),
         BundledSource::DevPath(path) => Ok(fs::read(path)?),
+    }
+}
+
+#[cfg(test)]
+fn original_stock_restore_plan_ids() -> Vec<u16> {
+    BundledCatalog::dev_defaults()
+        .original_stock_restore_applets()
+        .into_iter()
+        .filter_map(|applet| applet.applet_id)
+        .collect()
+}
+
+fn verify_installed_applet_id(
+    installed: &[SmartAppletRecord],
+    applet_id: u16,
+) -> anyhow::Result<()> {
+    if installed.iter().any(|record| record.applet_id == applet_id) {
+        Ok(())
+    } else {
+        anyhow::bail!("applet 0x{applet_id:04x} did not appear after install")
     }
 }
 
@@ -806,5 +875,33 @@ mod tests {
         let first = backup_timestamp();
         let second = backup_timestamp();
         assert_ne!(first, second);
+    }
+
+    #[test]
+    fn restore_stock_ids_exclude_alpha_usb_and_system() {
+        let ids = original_stock_restore_plan_ids();
+        assert_eq!(
+            ids,
+            vec![
+                0xa000, 0xaf00, 0xaf75, 0xaf02, 0xaf73, 0xaf03, 0xa004, 0xa007, 0xa006,
+                0xa001, 0xa002, 0xa027, 0xa005,
+            ]
+        );
+        assert!(!ids.contains(&0xa130));
+        assert!(!ids.contains(&0x0000));
+    }
+
+    #[test]
+    fn stock_restore_verification_requires_new_id_in_inventory() {
+        let installed = vec![SmartAppletRecord {
+            applet_id: 0xa000,
+            version: "3.4".to_owned(),
+            name: "AlphaWord Plus".to_owned(),
+            file_size: 1,
+            applet_class: 1,
+        }];
+
+        assert!(verify_installed_applet_id(&installed, 0xa000).is_ok());
+        assert!(verify_installed_applet_id(&installed, 0xa001).is_err());
     }
 }
