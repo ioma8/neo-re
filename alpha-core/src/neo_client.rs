@@ -229,6 +229,125 @@ impl<T: DirectTransport> SharedNeoClient<T> {
         self.require_status(0x52, "restart device")
     }
 
+    pub fn read_recovery_diagnostics(&mut self) -> anyhow::Result<String> {
+        let mut lines = Vec::new();
+        self.append_smartapplet_diagnostics(&mut lines)?;
+        self.append_alpha_word_attribute_diagnostics(&mut lines)?;
+        Ok(lines.join("\n"))
+    }
+
+    fn append_smartapplet_diagnostics(&mut self, lines: &mut Vec<String>) -> anyhow::Result<()> {
+        lines.push("SmartApplet records".to_owned());
+        let mut page_offset = 0_u32;
+        let page_size = 7_u16;
+        let mut row = 0_usize;
+
+        loop {
+            self.write(&protocol::list_applets_command(page_offset, page_size))?;
+            let response = self.read_response()?;
+            lines.push(format!(
+                "page_offset={page_offset} status=0x{:02x} argument={} trailing=0x{:04x}",
+                response.status, response.argument, response.trailing
+            ));
+            if response.status == 0x90 || response.argument == 0 {
+                break;
+            }
+            if response.status != 0x44 {
+                lines.push(format!(
+                    "stop: unexpected applet list status 0x{:02x}",
+                    response.status
+                ));
+                break;
+            }
+            if !(response.argument as usize).is_multiple_of(protocol::SMARTAPPLET_HEADER_SIZE) {
+                lines.push(format!(
+                    "stop: applet list payload length {} is not a multiple of 0x84",
+                    response.argument
+                ));
+                break;
+            }
+
+            let payload = self.read_exact(response.argument as usize)?;
+            let actual = checksum16(&payload);
+            lines.push(format!(
+                "payload_sum16=0x{actual:04x} expected=0x{:04x}",
+                response.trailing
+            ));
+            if actual != response.trailing {
+                lines.push("stop: applet list payload checksum mismatch".to_owned());
+                break;
+            }
+
+            let records = payload
+                .chunks_exact(protocol::SMARTAPPLET_HEADER_SIZE)
+                .collect::<Vec<_>>();
+            for record in &records {
+                match protocol::parse_smartapplet_record(record) {
+                    Ok(metadata) => lines.push(format!(
+                        "row={row} applet_id=0x{:04x} version={} name={} file_size={} applet_class=0x{:02x} record={}",
+                        metadata.applet_id,
+                        metadata.version,
+                        metadata.name,
+                        metadata.file_size,
+                        metadata.applet_class,
+                        hex_bytes(record)
+                    )),
+                    Err(error) => lines.push(format!(
+                        "row={row} parse_error={error} record={}",
+                        hex_bytes(record)
+                    )),
+                }
+                row += 1;
+            }
+            if records.len() < usize::from(page_size) {
+                break;
+            }
+            page_offset += records.len() as u32;
+        }
+        Ok(())
+    }
+
+    fn append_alpha_word_attribute_diagnostics(
+        &mut self,
+        lines: &mut Vec<String>,
+    ) -> anyhow::Result<()> {
+        lines.push("AlphaWord file attributes".to_owned());
+        for slot in 1..=8_u8 {
+            self.write(&protocol::command(
+                0x13,
+                u32::from(slot),
+                protocol::ALPHAWORD_APPLET_ID,
+            ))?;
+            let response = self.read_response()?;
+            lines.push(format!(
+                "slot {slot} status=0x{:02x} argument={} trailing=0x{:04x}",
+                response.status, response.argument, response.trailing
+            ));
+            if response.status != 0x5A {
+                continue;
+            }
+
+            let payload = self.read_exact(response.argument as usize)?;
+            let actual = checksum16(&payload);
+            lines.push(format!(
+                "slot {slot} payload_sum16=0x{actual:04x} expected=0x{:04x}",
+                response.trailing
+            ));
+            if actual != response.trailing {
+                lines.push(format!("slot {slot} checksum_mismatch"));
+                continue;
+            }
+            match protocol::parse_file_entry(slot, &payload) {
+                Ok(entry) => lines.push(format!(
+                    "slot {} name={} attribute_bytes={}",
+                    entry.slot, entry.name, entry.attribute_bytes
+                )),
+                Err(error) => lines.push(format!("slot {slot} parse_error={error}")),
+            }
+        }
+        Ok(())
+    }
+
     fn enter_updater_mode(&mut self) -> anyhow::Result<()> {
         self.write(&protocol::reset_packet())?;
         self.write(&protocol::switch_packet())?;
@@ -312,13 +431,25 @@ impl<T: DirectTransport> SharedNeoClient<T> {
 }
 
 fn validate_payload_sum(payload: &[u8], expected: u16, label: &str) -> anyhow::Result<()> {
-    let actual = payload
-        .iter()
-        .fold(0_u16, |sum, byte| sum.wrapping_add(u16::from(*byte)));
+    let actual = checksum16(payload);
     if actual != expected {
         bail!("{label} checksum mismatch: got 0x{actual:04x}, expected 0x{expected:04x}");
     }
     Ok(())
+}
+
+fn checksum16(payload: &[u8]) -> u16 {
+    payload
+        .iter()
+        .fold(0_u16, |sum, byte| sum.wrapping_add(u16::from(*byte)))
+}
+
+fn hex_bytes(payload: &[u8]) -> String {
+    payload
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
@@ -456,6 +587,56 @@ mod tests {
         }));
     }
 
+    #[test]
+    fn recovery_diagnostics_include_raw_applet_records() {
+        let record = smartapplet_record(0xa000, "AlphaWord Plus", 0x200);
+        let transport = FakeTransport::new(
+            [
+                vec![b"Switched".to_vec()],
+                vec![
+                    protocol::command(0x44, record.len() as u32, checksum(&record)).to_vec(),
+                    record,
+                    protocol::command(0x90, 0, 0).to_vec(),
+                ],
+                empty_attribute_reads(),
+            ]
+            .concat(),
+        );
+        let mut client = SharedNeoClient::new(transport).unwrap();
+
+        let report = client.read_recovery_diagnostics().unwrap();
+
+        assert!(report.contains("SmartApplet records"));
+        assert!(report.contains("page_offset=0 status=0x44"));
+        assert!(report.contains("applet_id=0xa000"));
+        assert!(report.contains("AlphaWord Plus"));
+        assert!(report.contains("AlphaWord file attributes"));
+    }
+
+    #[test]
+    fn recovery_diagnostics_include_file_attribute_statuses() {
+        let attributes = alpha_word_attributes_record("File 1", 512);
+        let transport = FakeTransport::new(
+            [
+                vec![b"Switched".to_vec()],
+                empty_applet_reads(),
+                vec![
+                    protocol::command(0x5a, attributes.len() as u32, checksum(&attributes)).to_vec(),
+                    attributes,
+                ],
+                empty_attribute_reads_for_slots(2..=8),
+            ]
+            .concat(),
+        );
+        let mut client = SharedNeoClient::new(transport).unwrap();
+
+        let report = client.read_recovery_diagnostics().unwrap();
+
+        assert!(report.contains("slot 1 status=0x5a"));
+        assert!(report.contains("name=File 1"));
+        assert!(report.contains("attribute_bytes=512"));
+    }
+
     fn smartapplet_image(len: usize) -> Vec<u8> {
         let mut image = vec![0_u8; len];
         image[0x00..0x04].copy_from_slice(&0xC0FF_EEAD_u32.to_be_bytes());
@@ -478,5 +659,47 @@ mod tests {
         image[0x50..0x54].copy_from_slice(&0x0041_0000_u32.to_be_bytes());
         image[0x54..0x58].copy_from_slice(&(payload_len as u32).to_be_bytes());
         image
+    }
+
+    fn smartapplet_record(applet_id: u16, name: &str, file_size: u32) -> Vec<u8> {
+        let mut record = vec![0_u8; protocol::SMARTAPPLET_HEADER_SIZE];
+        record[0x00..0x04].copy_from_slice(&0xC0FF_EEAD_u32.to_be_bytes());
+        record[0x04..0x08].copy_from_slice(&file_size.to_be_bytes());
+        record[0x14..0x16].copy_from_slice(&applet_id.to_be_bytes());
+        record[0x16] = 1;
+        record[0x17] = 1;
+        record[0x18..0x18 + name.len()].copy_from_slice(name.as_bytes());
+        record[0x3C] = 0x03;
+        record[0x3D] = 0x04;
+        record[0x3F] = 1;
+        record
+    }
+
+    fn alpha_word_attributes_record(name: &str, attribute_bytes: u32) -> Vec<u8> {
+        let mut record = vec![0_u8; 0x28];
+        record[0x00..0x00 + name.len()].copy_from_slice(name.as_bytes());
+        record[0x1c..0x20].copy_from_slice(&attribute_bytes.to_be_bytes());
+        record
+    }
+
+    fn empty_applet_reads() -> Vec<Vec<u8>> {
+        vec![protocol::command(0x90, 0, 0).to_vec()]
+    }
+
+    fn empty_attribute_reads() -> Vec<Vec<u8>> {
+        empty_attribute_reads_for_slots(1..=8)
+    }
+
+    fn empty_attribute_reads_for_slots(slots: impl IntoIterator<Item = u8>) -> Vec<Vec<u8>> {
+        slots
+            .into_iter()
+            .map(|_| protocol::command(0x90, 0, 0).to_vec())
+            .collect()
+    }
+
+    fn checksum(payload: &[u8]) -> u16 {
+        payload
+            .iter()
+            .fold(0_u16, |sum, byte| sum.wrapping_add(u16::from(*byte)))
     }
 }
