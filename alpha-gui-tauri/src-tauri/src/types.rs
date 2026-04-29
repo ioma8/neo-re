@@ -101,3 +101,9 @@ pub struct ProgressEventDto {
     pub indeterminate: bool,
     pub log: Option<String>,
 }
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryDiagnosticsDto {
+    pub log: String,
+}

@@ -21,6 +21,8 @@ pub fn run() {
             commands::install_alpha_usb,
             commands::flash_applets,
             commands::restore_original_stock_applets,
+            commands::restart_device,
+            commands::read_recovery_diagnostics,
             commands::flash_system_image,
         ])
         .run(tauri::generate_context!())

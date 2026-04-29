@@ -22,7 +22,7 @@ use tauri::{AppHandle, Emitter};
 use crate::types::{
     AddedAppletSelectionDto, AppletChecklistRowDto, AppletSelectionDto, BackupResultDto,
     BackupTargetDto, BundledAppletDto, DeviceModeDto, FileDto, InventoryDto, ProgressEventDto,
-    SmartAppletDto,
+    RecoveryDiagnosticsDto, SmartAppletDto,
 };
 
 const PROGRESS_EVENT: &str = "alpha-progress";
@@ -409,6 +409,58 @@ pub async fn restore_original_stock_applets(app: AppHandle) -> Result<InventoryD
         }
 
         inventory_from_client(&mut client)
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(error_string)
+}
+
+#[tauri::command]
+pub async fn restart_device(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        emit_progress(
+            &app,
+            "restart-device",
+            "Restart device",
+            "Sending restart command",
+            None,
+            None,
+            None,
+        );
+        let mut client = NeoClient::open_and_init()?;
+        client.restart_device()
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(error_string)
+}
+
+#[tauri::command]
+pub async fn read_recovery_diagnostics(
+    app: AppHandle,
+) -> Result<RecoveryDiagnosticsDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        emit_progress(
+            &app,
+            "recovery-diagnostics",
+            "Read diagnostics",
+            "Opening device",
+            None,
+            None,
+            None,
+        );
+        let mut client = NeoClient::open_and_init()?;
+        emit_progress(
+            &app,
+            "recovery-diagnostics",
+            "Read diagnostics",
+            "Reading diagnostic records",
+            None,
+            None,
+            None,
+        );
+        let log = client.read_recovery_diagnostics()?;
+        Ok(RecoveryDiagnosticsDto { log })
     })
     .await
     .map_err(|error| error.to_string())?
