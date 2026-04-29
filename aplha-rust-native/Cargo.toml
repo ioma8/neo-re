@@ -4,6 +4,7 @@ members = [
     "crates/alpha-neo-sdk",
     "applets/alpha_usb",
     "applets/forth_mini",
+    "applets/basic_writer",
 ]
 default-members = [
     "crates/alpha-neo-pack",
