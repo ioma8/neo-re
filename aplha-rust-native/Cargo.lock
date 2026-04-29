@@ -21,6 +21,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "basic-writer-applet"
+version = "0.1.0"
+dependencies = [
+ "alpha-neo-sdk",
+]
+
+[[package]]
 name = "forth-mini-applet"
 version = "0.1.0"
 dependencies = [
