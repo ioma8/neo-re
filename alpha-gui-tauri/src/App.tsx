@@ -3,6 +3,8 @@ import {
   backupAllFiles,
   backupEverything,
   backupFile,
+  debugBypassEnabled,
+  defaultBackupRoot,
   detectDevice,
   flashApplets,
   flashSystemImage,
@@ -11,6 +13,11 @@ import {
   switchHidToDirect,
 } from "./api/commands";
 import { selectAppletFile } from "./api/applets";
+import {
+  loadBackupRoot,
+  saveBackupRoot,
+  selectBackupDirectory,
+} from "./api/backupSettings";
 import { listenForProgress } from "./api/progress";
 import type {
   AddedAppletFile,
@@ -69,6 +76,7 @@ export default function App() {
   const [mode, setMode] = useState<DeviceMode>("missing");
   const [connected, setConnected] = useState(false);
   const [debugBypass, setDebugBypass] = useState(false);
+  const [showDebugBypass, setShowDebugBypass] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [connectionMessage, setConnectionMessage] = useState("Scanning for AlphaSmart NEO...");
   const [tab, setTab] = useState<TabKey>("dashboard");
@@ -76,6 +84,8 @@ export default function App() {
   const [checkedKeys, setCheckedKeys] = useState<Set<string>>(new Set());
   const [baselineKeys, setBaselineKeys] = useState<Set<string>>(new Set());
   const [addedApplets, setAddedApplets] = useState<AddedAppletFile[]>([]);
+  const [backupRoot, setBackupRoot] = useState<string | null>(() => loadBackupRoot());
+  const [defaultBackupRootPath, setDefaultBackupRootPath] = useState<string | null>(null);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
@@ -95,6 +105,18 @@ export default function App() {
       cleanup = unlisten;
     });
     return () => cleanup?.();
+  }, []);
+
+  useEffect(() => {
+    void defaultBackupRoot()
+      .then(setDefaultBackupRootPath)
+      .catch(() => setDefaultBackupRootPath(null));
+  }, []);
+
+  useEffect(() => {
+    void debugBypassEnabled()
+      .then(setShowDebugBypass)
+      .catch(() => setShowDebugBypass(false));
   }, []);
 
   useEffect(() => {
@@ -178,6 +200,7 @@ export default function App() {
           mode={mode}
           scanning={scanning}
           message={connectionMessage}
+          showDebugOpen={showDebugBypass}
           onDebugOpen={() => {
             setDebugBypass(true);
             setInventory(debugInventory);
@@ -194,8 +217,29 @@ export default function App() {
         {tab === "dashboard" && (
           <Dashboard
             files={inventory.files}
-            onBackupAll={() => void runOperation(async () => void (await backupAllFiles()))}
-            onBackupFile={(slot) => void runOperation(async () => void (await backupFile(slot)))}
+            backupRoot={backupRoot}
+            defaultBackupRoot={defaultBackupRootPath}
+            onBackupAll={() => void runOperationWithoutRefresh(async () => void (await backupAllFiles(backupRoot)))}
+            onBackupFile={(slot) =>
+              void runOperationWithoutRefresh(async () => void (await backupFile(slot, backupRoot)))
+            }
+            onChooseBackupRoot={() =>
+              void (async () => {
+                setError(null);
+                try {
+                  const selected = await selectBackupDirectory();
+                  if (!selected) return;
+                  setBackupRoot(selected);
+                  saveBackupRoot(selected);
+                } catch (err) {
+                  setError(String(err));
+                }
+              })()
+            }
+            onResetBackupRoot={() => {
+              setBackupRoot(null);
+              saveBackupRoot(null);
+            }}
             onRefresh={() => void refreshInventory()}
           />
         )}
@@ -219,12 +263,17 @@ export default function App() {
             }
             onAddFromFile={() =>
               void (async () => {
-                const added = await selectAppletFile();
-                if (!added) return;
-                setAddedApplets((current) =>
-                  current.some((item) => item.key === added.key) ? current : [...current, added],
-                );
-                setCheckedKeys((current) => new Set(current).add(added.key));
+                setError(null);
+                try {
+                  const added = await selectAppletFile();
+                  if (!added) return;
+                  setAddedApplets((current) =>
+                    current.some((item) => item.key === added.key) ? current : [...current, added],
+                  );
+                  setCheckedKeys((current) => new Set(current).add(added.key));
+                } catch (err) {
+                  setError(String(err));
+                }
               })()
             }
             onToggle={(key) => {
@@ -253,7 +302,9 @@ export default function App() {
         )}
         {tab === "os" && (
           <OsOperations
-            onBackupEverything={() => void runOperation(async () => void (await backupEverything()))}
+            onBackupEverything={() =>
+              void runOperationWithoutRefresh(async () => void (await backupEverything(backupRoot)))
+            }
             onFlashSystem={() =>
               setConfirmRequest({
                 title: "Reflash bundled NEO OS image?",

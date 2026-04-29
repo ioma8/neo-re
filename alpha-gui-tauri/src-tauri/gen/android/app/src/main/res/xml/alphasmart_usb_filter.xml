@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- AlphaSmart NEO direct USB mode, including the Alpha USB SmartApplet path. -->
+    <usb-device vendor-id="2078" product-id="48385" />
+    <!-- HID keyboard mode is listed for attach visibility; Android may deny UsbManager access. -->
+    <usb-device vendor-id="2078" product-id="48388" />
+</resources>

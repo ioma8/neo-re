@@ -1,4 +1,11 @@
-use std::{collections::BTreeSet, fs};
+use std::{
+    collections::BTreeSet,
+    fs,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+use chrono::Local;
 
 use alpha_core::{
     applet_workflow::{AppletChecklist, AppletSourceKind},
@@ -8,14 +15,18 @@ use alpha_core::{
     protocol::{FileEntry, SmartAppletRecord},
     usb::{self, NeoClient, NeoMode},
 };
+#[cfg(target_os = "android")]
+use tauri::Manager;
 use tauri::{AppHandle, Emitter};
 
 use crate::types::{
     AddedAppletSelectionDto, AppletChecklistRowDto, AppletSelectionDto, BackupResultDto,
-    BundledAppletDto, DeviceModeDto, FileDto, InventoryDto, ProgressEventDto, SmartAppletDto,
+    BackupTargetDto, BundledAppletDto, DeviceModeDto, FileDto, InventoryDto, ProgressEventDto,
+    SmartAppletDto,
 };
 
 const PROGRESS_EVENT: &str = "alpha-progress";
+static BACKUP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[tauri::command]
 pub async fn detect_device() -> Result<DeviceModeDto, String> {
@@ -57,7 +68,47 @@ pub async fn list_bundled_applets() -> Result<Vec<BundledAppletDto>, String> {
 }
 
 #[tauri::command]
-pub async fn backup_file(slot: u8, app: AppHandle) -> Result<BackupResultDto, String> {
+pub async fn default_backup_root(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        default_backup_root_for_app(&app).map(|path| path.display().to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+    .map_err(error_string)
+}
+
+#[tauri::command]
+pub fn runtime_platform() -> &'static str {
+    #[cfg(target_os = "android")]
+    {
+        "android"
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        "desktop"
+    }
+}
+
+#[tauri::command]
+pub fn debug_bypass_enabled() -> bool {
+    cfg!(debug_assertions)
+}
+
+#[tauri::command]
+pub async fn pick_backup_folder() -> Result<Option<String>, String> {
+    tauri::async_runtime::spawn_blocking(crate::android_saf::pick_backup_folder)
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(error_string)
+}
+
+#[tauri::command]
+pub async fn backup_file(
+    slot: u8,
+    target: Option<BackupTargetDto>,
+    app: AppHandle,
+) -> Result<BackupResultDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
         emit_progress(
             &app,
@@ -76,8 +127,8 @@ pub async fn backup_file(slot: u8, app: AppHandle) -> Result<BackupResultDto, St
             .ok_or_else(|| anyhow::anyhow!("slot {slot} is empty or not listed"))?
             .clone();
         let payload = client.download_file(slot)?;
-        let dir = backup::create_backup_dir()?;
-        let saved = backup::save_file(&dir, &entry, &payload)?;
+        let target = create_backup_target(&app, target, "backups")?;
+        save_device_file(&target, &entry, &payload)?;
         emit_progress(
             &app,
             "backup-file",
@@ -88,10 +139,10 @@ pub async fn backup_file(slot: u8, app: AppHandle) -> Result<BackupResultDto, St
             Some(1),
         );
         Ok(BackupResultDto {
-            directory: dir.display().to_string(),
+            directory: target.display_path(),
             saved_files: 1,
             saved_applets: 0,
-            bytes: saved.bytes,
+            bytes: payload.len(),
         })
     })
     .await
@@ -100,7 +151,10 @@ pub async fn backup_file(slot: u8, app: AppHandle) -> Result<BackupResultDto, St
 }
 
 #[tauri::command]
-pub async fn backup_all_files(app: AppHandle) -> Result<BackupResultDto, String> {
+pub async fn backup_all_files(
+    target: Option<BackupTargetDto>,
+    app: AppHandle,
+) -> Result<BackupResultDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
         emit_progress(
             &app,
@@ -112,7 +166,7 @@ pub async fn backup_all_files(app: AppHandle) -> Result<BackupResultDto, String>
             None,
         );
         let mut client = NeoClient::open_and_init()?;
-        let dir = backup::create_backup_dir()?;
+        let target = create_backup_target(&app, target, "backups")?;
         let files = client.list_files()?;
         let mut bytes = 0;
         let mut saved_files = 0;
@@ -127,12 +181,12 @@ pub async fn backup_all_files(app: AppHandle) -> Result<BackupResultDto, String>
                 Some(files.len()),
             );
             let payload = client.download_file(entry.slot)?;
-            let saved = backup::save_file(&dir, entry, &payload)?;
-            bytes += saved.bytes;
+            save_device_file(&target, entry, &payload)?;
+            bytes += payload.len();
             saved_files += 1;
         }
         Ok(BackupResultDto {
-            directory: dir.display().to_string(),
+            directory: target.display_path(),
             saved_files,
             saved_applets: 0,
             bytes,
@@ -144,7 +198,10 @@ pub async fn backup_all_files(app: AppHandle) -> Result<BackupResultDto, String>
 }
 
 #[tauri::command]
-pub async fn backup_everything(app: AppHandle) -> Result<BackupResultDto, String> {
+pub async fn backup_everything(
+    target: Option<BackupTargetDto>,
+    app: AppHandle,
+) -> Result<BackupResultDto, String> {
     tauri::async_runtime::spawn_blocking(move || {
         emit_progress(
             &app,
@@ -156,7 +213,7 @@ pub async fn backup_everything(app: AppHandle) -> Result<BackupResultDto, String
             None,
         );
         let mut client = NeoClient::open_and_init()?;
-        let dir = backup::create_device_backup_dir()?;
+        let target = create_backup_target(&app, target, "device-backups")?;
         let files = client.list_files()?;
         let mut bytes = 0;
         let mut saved_files = 0;
@@ -171,13 +228,11 @@ pub async fn backup_everything(app: AppHandle) -> Result<BackupResultDto, String
                 Some(files.len()),
             );
             let payload = client.download_file(entry.slot)?;
-            let saved = backup::save_file(&dir, entry, &payload)?;
-            bytes += saved.bytes;
+            save_device_file(&target, entry, &payload)?;
+            bytes += payload.len();
             saved_files += 1;
         }
 
-        let applet_dir = dir.join("applets");
-        fs::create_dir_all(&applet_dir)?;
         let applets = client.list_smart_applets()?;
         let mut saved_applets = 0;
         for (index, applet) in applets.iter().enumerate() {
@@ -191,18 +246,19 @@ pub async fn backup_everything(app: AppHandle) -> Result<BackupResultDto, String
                 Some(applets.len()),
             );
             let payload = client.download_smart_applet(applet.applet_id)?;
-            let saved = backup::save_raw_payload(
-                &applet_dir,
+            save_raw_backup_payload(
+                &target,
+                Some("applets"),
                 &format!("{:04x}-{}", applet.applet_id, safe_name(&applet.name)),
                 "os3kapp",
                 &payload,
             )?;
-            bytes += saved.bytes;
+            bytes += payload.len();
             saved_applets += 1;
         }
 
         Ok(BackupResultDto {
-            directory: dir.display().to_string(),
+            directory: target.display_path(),
             saved_files,
             saved_applets,
             bytes,
@@ -344,12 +400,20 @@ fn resolve_applet_flash_plan(
             AppletSourceKind::AddedFromFile { path } => {
                 resolved.push(ResolvedAppletImage {
                     key: row.key.clone(),
-                    bytes: fs::read(path)?,
+                    bytes: read_applet_file(path)?,
                 });
             }
         }
     }
     Ok(resolved)
+}
+
+fn read_applet_file(path: &str) -> anyhow::Result<Vec<u8>> {
+    if crate::android_saf::is_android_content_uri(path) {
+        crate::android_saf::read_content_uri(path)
+    } else {
+        fs::read(path).map_err(Into::into)
+    }
 }
 
 fn added_file_row(
@@ -471,6 +535,161 @@ fn resolve_source(source: &BundledSource) -> anyhow::Result<Vec<u8>> {
     }
 }
 
+enum BackupTarget {
+    Filesystem {
+        dir: PathBuf,
+    },
+    AndroidTree {
+        root_uri: String,
+        kind: String,
+        timestamp: String,
+    },
+}
+
+impl BackupTarget {
+    fn display_path(&self) -> String {
+        match self {
+            Self::Filesystem { dir } => dir.display().to_string(),
+            Self::AndroidTree {
+                root_uri,
+                kind,
+                timestamp,
+            } => format!("{root_uri}/{kind}/{timestamp}"),
+        }
+    }
+}
+
+fn create_backup_target(
+    app: &AppHandle,
+    target: Option<BackupTargetDto>,
+    kind: &str,
+) -> anyhow::Result<BackupTarget> {
+    match target.and_then(|target| target.backup_root) {
+        Some(root) if is_android_tree_uri(&root) => Ok(BackupTarget::AndroidTree {
+            root_uri: root,
+            kind: kind.to_owned(),
+            timestamp: backup_timestamp(),
+        }),
+        Some(root) if !root.trim().is_empty() => {
+            let root = PathBuf::from(root);
+            ensure_backup_root(&root)?;
+            Ok(BackupTarget::Filesystem {
+                dir: backup::create_timestamped_dir_in(root, kind)?,
+            })
+        }
+        _ => Ok(BackupTarget::Filesystem {
+            dir: backup::create_timestamped_dir_in(default_backup_root_for_app(app)?, kind)?,
+        }),
+    }
+}
+
+fn save_device_file(
+    target: &BackupTarget,
+    entry: &FileEntry,
+    payload: &[u8],
+) -> anyhow::Result<()> {
+    let base = format!("slot-{:02}-{}", entry.slot, safe_name(&entry.name));
+    let text = backup::text_export_bytes(payload)?;
+    save_backup_bytes(target, None, &format!("{base}.txt"), &text)
+}
+
+fn save_raw_backup_payload(
+    target: &BackupTarget,
+    subdir: Option<&str>,
+    base_name: &str,
+    extension: &str,
+    payload: &[u8],
+) -> anyhow::Result<()> {
+    save_backup_bytes(target, subdir, &format!("{base_name}.{extension}"), payload)
+}
+
+fn save_backup_bytes(
+    target: &BackupTarget,
+    subdir: Option<&str>,
+    file_name: &str,
+    bytes: &[u8],
+) -> anyhow::Result<()> {
+    match target {
+        BackupTarget::Filesystem { dir } => {
+            let dir = match subdir {
+                Some(subdir) => {
+                    let dir = dir.join(subdir);
+                    fs::create_dir_all(&dir)?;
+                    dir
+                }
+                None => dir.clone(),
+            };
+            fs::write(dir.join(file_name), bytes)?;
+            Ok(())
+        }
+        BackupTarget::AndroidTree {
+            root_uri,
+            kind,
+            timestamp,
+        } => {
+            let relative_path = match subdir {
+                Some(subdir) => backup_relative_path(
+                    kind,
+                    timestamp,
+                    &format!("{}/{}", subdir.trim_matches('/'), file_name),
+                ),
+                None => backup_relative_path(kind, timestamp, file_name),
+            };
+            crate::android_saf::write_backup_file(root_uri, &relative_path, bytes)
+        }
+    }
+}
+
+fn backup_timestamp() -> String {
+    let sequence = BACKUP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    format!(
+        "{}-{sequence:04}",
+        Local::now().format("%Y-%m-%d_%H-%M-%S-%9f")
+    )
+}
+
+fn is_android_tree_uri(value: &str) -> bool {
+    value.starts_with("content://") && value.contains("/tree/")
+}
+
+fn backup_relative_path(kind: &str, timestamp: &str, file_name: &str) -> String {
+    format!(
+        "{}/{}/{}",
+        kind.trim_matches('/'),
+        timestamp.trim_matches('/'),
+        file_name.trim_matches('/')
+    )
+}
+
+fn default_backup_root_for_app(app: &AppHandle) -> anyhow::Result<PathBuf> {
+    #[cfg(target_os = "android")]
+    {
+        let root = app.path().document_dir()?.join("AlphaGUI");
+        fs::create_dir_all(&root)?;
+        Ok(root)
+    }
+
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        backup::default_backup_root_dir()
+    }
+}
+
+fn ensure_backup_root(root: &Path) -> anyhow::Result<()> {
+    if root.exists() && root.is_dir() {
+        Ok(())
+    } else if root.exists() {
+        anyhow::bail!("backup path is not a directory: {}", root.display())
+    } else {
+        fs::create_dir_all(root)
+            .map_err(Into::into)
+            .map_err(|error: anyhow::Error| {
+                error.context(format!("create backup root {}", root.display()))
+            })
+    }
+}
+
 fn device_mode_dto(mode: NeoMode) -> DeviceModeDto {
     match mode {
         NeoMode::Missing => DeviceModeDto::Missing,
@@ -562,4 +781,30 @@ fn safe_name(name: &str) -> String {
 
 fn error_string(error: anyhow::Error) -> String {
     format!("{error:#}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn android_tree_uri_targets_are_detected() {
+        assert!(is_android_tree_uri(
+            "content://com.android.externalstorage.documents/tree/primary%3ADocuments"
+        ));
+        assert!(!is_android_tree_uri("/tmp/alpha-gui"));
+    }
+
+    #[test]
+    fn backup_relative_paths_use_forward_slashes() {
+        let path = backup_relative_path("backups", "2026-04-27_12-30-00", "slot-01-Notes.txt");
+        assert_eq!(path, "backups/2026-04-27_12-30-00/slot-01-Notes.txt");
+    }
+
+    #[test]
+    fn backup_timestamps_are_distinct_for_same_second_operations() {
+        let first = backup_timestamp();
+        let second = backup_timestamp();
+        assert_ne!(first, second);
+    }
 }

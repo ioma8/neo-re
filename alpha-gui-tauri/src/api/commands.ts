@@ -13,16 +13,32 @@ export function getInventory(): Promise<Inventory> {
   return invoke("get_inventory");
 }
 
-export function backupFile(slot: number): Promise<BackupResult> {
-  return invoke("backup_file", { slot });
+export function defaultBackupRoot(): Promise<string> {
+  return invoke("default_backup_root");
 }
 
-export function backupAllFiles(): Promise<BackupResult> {
-  return invoke("backup_all_files");
+export function runtimePlatform(): Promise<"android" | "desktop"> {
+  return invoke("runtime_platform");
 }
 
-export function backupEverything(): Promise<BackupResult> {
-  return invoke("backup_everything");
+export function debugBypassEnabled(): Promise<boolean> {
+  return invoke("debug_bypass_enabled");
+}
+
+export function pickBackupFolder(): Promise<string | null> {
+  return invoke("pick_backup_folder");
+}
+
+export function backupFile(slot: number, backupRoot: string | null): Promise<BackupResult> {
+  return invoke("backup_file", { slot, target: { backupRoot } });
+}
+
+export function backupAllFiles(backupRoot: string | null): Promise<BackupResult> {
+  return invoke("backup_all_files", { target: { backupRoot } });
+}
+
+export function backupEverything(backupRoot: string | null): Promise<BackupResult> {
+  return invoke("backup_everything", { target: { backupRoot } });
 }
 
 export function listBundledApplets(): Promise<BundledApplet[]> {

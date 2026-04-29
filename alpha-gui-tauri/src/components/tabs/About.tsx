@@ -23,10 +23,10 @@ export function About() {
           </span>
         </div>
         <div className="mt-8 flex flex-wrap gap-4">
-          <a className="font-semibold text-primary" href="https://github.com/" target="_blank" rel="noreferrer">
+          <a className="font-semibold text-primary" href="https://github.com/ioma8/neo-re" target="_blank" rel="noreferrer">
             GitHub Repository
           </a>
-          <a className="font-semibold text-primary" href="https://github.com/" target="_blank" rel="noreferrer">
+          <a className="font-semibold text-primary" href="https://github.com/ioma8/neo-re/tree/master/docs" target="_blank" rel="noreferrer">
             Documentation
           </a>
         </div>

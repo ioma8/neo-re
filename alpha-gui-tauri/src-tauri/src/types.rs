@@ -70,6 +70,12 @@ pub struct BackupResultDto {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BackupTargetDto {
+    pub backup_root: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AppletSelectionDto {
     pub checked_keys: Vec<String>,
     pub added_files: Vec<AddedAppletSelectionDto>,

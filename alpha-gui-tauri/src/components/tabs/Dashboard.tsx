@@ -5,12 +5,28 @@ import { Icon } from "../ui/Icon";
 
 interface Props {
   files: DeviceFile[];
+  backupRoot: string | null;
+  defaultBackupRoot: string | null;
   onBackupAll: () => void;
   onBackupFile: (slot: number) => void;
+  onChooseBackupRoot: () => void;
+  onResetBackupRoot: () => void;
   onRefresh: () => void;
 }
 
-export function Dashboard({ files, onBackupAll, onBackupFile, onRefresh }: Props) {
+export function Dashboard({
+  files,
+  backupRoot,
+  defaultBackupRoot,
+  onBackupAll,
+  onBackupFile,
+  onChooseBackupRoot,
+  onResetBackupRoot,
+  onRefresh,
+}: Props) {
+  const effectiveBackupRoot = backupRoot || defaultBackupRoot || "Resolving default backup folder...";
+  const backupMode = backupRoot ? "Custom" : "Default";
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col justify-between gap-4 md:flex-row md:items-end">
@@ -24,6 +40,36 @@ export function Dashboard({ files, onBackupAll, onBackupFile, onRefresh }: Props
           Backup All Files
         </Button>
       </div>
+      <Card className="px-4 py-3">
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-center">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="mt-0.5 rounded-lg bg-surface-container p-2 text-primary">
+              <Icon name="backup" className="text-xl" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-sm font-semibold text-on-surface">Backup path</p>
+                <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-xs font-medium text-on-surface-variant">
+                  {backupMode}
+                </span>
+              </div>
+              <p className="mt-1 break-all text-body-sm text-on-surface-variant">
+                Currently saving backups to: <span className="text-on-surface">{effectiveBackupRoot}</span>
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <Button variant="secondary" onClick={onChooseBackupRoot}>
+              Set Backup Path
+            </Button>
+            {backupRoot && (
+              <Button variant="ghost" onClick={onResetBackupRoot}>
+                Use Default
+              </Button>
+            )}
+          </div>
+        </div>
+      </Card>
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between border-b border-outline-variant bg-surface-container-low px-6 py-4">
           <h3 className="text-xs font-bold uppercase tracking-[0.18em] text-on-surface-variant">

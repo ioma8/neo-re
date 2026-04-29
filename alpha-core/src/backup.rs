@@ -33,7 +33,11 @@ pub fn create_device_backup_dir() -> anyhow::Result<PathBuf> {
 }
 
 pub fn create_timestamped_dir(kind: &str) -> anyhow::Result<PathBuf> {
-    let dir = backup_root_dir()?
+    create_timestamped_dir_in(default_backup_root_dir()?, kind)
+}
+
+pub fn create_timestamped_dir_in(root: PathBuf, kind: &str) -> anyhow::Result<PathBuf> {
+    let dir = root
         .join(kind)
         .join(Local::now().format("%Y-%m-%d_%H-%M-%S").to_string());
     fs::create_dir_all(&dir)
@@ -41,7 +45,7 @@ pub fn create_timestamped_dir(kind: &str) -> anyhow::Result<PathBuf> {
     Ok(dir)
 }
 
-fn backup_root_dir() -> anyhow::Result<PathBuf> {
+pub fn default_backup_root_dir() -> anyhow::Result<PathBuf> {
     #[cfg(target_os = "android")]
     {
         bail!("Android public document storage is not implemented in alpha-core yet")
