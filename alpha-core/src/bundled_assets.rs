@@ -40,6 +40,22 @@ impl BundledCatalog {
     pub fn os_image_by_kind(&self, kind: BundledOsImageKind) -> Option<&BundledOsImage> {
         self.os_images.iter().find(|image| image.kind == kind)
     }
+
+    pub fn original_stock_restore_applets(&self) -> Vec<&BundledApplet> {
+        const RESTORE_ORDER: &[u16] = &[
+            0xa000, 0xaf00, 0xaf75, 0xaf02, 0xaf73, 0xaf03, 0xa004, 0xa007, 0xa006, 0xa001,
+            0xa002, 0xa027, 0xa005,
+        ];
+
+        RESTORE_ORDER
+            .iter()
+            .filter_map(|id| {
+                self.applets
+                    .iter()
+                    .find(|applet| applet.kind == BundledAppletKind::Stock && applet.applet_id == Some(*id))
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -275,6 +291,39 @@ mod tests {
             catalog
                 .os_image_by_kind(BundledOsImageKind::Firmware)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn original_stock_restore_order_excludes_alpha_usb_and_system() {
+        let catalog = BundledCatalog::dev_defaults();
+        let ordered = catalog.original_stock_restore_applets();
+        let ids = ordered
+            .iter()
+            .filter_map(|item| item.applet_id)
+            .collect::<Vec<_>>();
+
+        assert!(!ids.contains(&0xa130), "Alpha USB must not be restored here");
+        assert!(!ids.contains(&0x0000), "System applet must not be restored here");
+        assert_eq!(
+            ids,
+            vec![
+                0xa000, 0xaf00, 0xaf75, 0xaf02, 0xaf73, 0xaf03, 0xa004, 0xa007, 0xa006,
+                0xa001, 0xa002, 0xa027, 0xa005,
+            ]
+        );
+    }
+
+    #[test]
+    fn original_stock_restore_order_is_resolvable_without_picker() {
+        let catalog = BundledCatalog::dev_defaults();
+
+        assert!(
+            catalog
+                .original_stock_restore_applets()
+                .iter()
+                .all(|item| item.kind == BundledAppletKind::Stock
+                    && item.source.is_resolvable_without_picker())
         );
     }
 }
