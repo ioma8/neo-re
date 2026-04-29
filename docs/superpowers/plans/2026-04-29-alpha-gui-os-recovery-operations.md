@@ -656,7 +656,7 @@ Cards inside:
 Small ROM copy must include:
 
 ```text
-Enter the NEO Small ROM Updater using the device's documented updater key sequence, then connect USB. SmartApplet operations are not available in Small ROM; use this only to reflash the bundled OS.
+Hold Right Shift + comma + period + slash while powering on, then enter the password "ernie" when prompted. Connect USB after the Small ROM Updater appears. SmartApplet operations are not available in Small ROM; use this only to reflash the bundled OS.
 ```
 
 - [ ] **Step 4: Run validation**

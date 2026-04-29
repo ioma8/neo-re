@@ -112,8 +112,9 @@ export function OsOperations({
             <div>
               <h4 className="text-xl font-semibold">Small ROM Recovery</h4>
               <p className="mt-2 text-sm text-on-surface-variant">
-                Enter the NEO Small ROM Updater using the device&apos;s documented updater key sequence, then connect USB.
-                SmartApplet operations are not available in Small ROM; use this only to reflash the bundled OS.
+                Hold Right Shift + comma + period + slash while powering on, then enter the password &quot;ernie&quot;
+                when prompted. Connect USB after the Small ROM Updater appears. SmartApplet operations are not
+                available in Small ROM; use this only to reflash the bundled OS.
               </p>
             </div>
             <Button

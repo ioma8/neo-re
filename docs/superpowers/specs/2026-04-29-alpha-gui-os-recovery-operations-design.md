@@ -216,21 +216,22 @@ The panel should explain:
   available.
 - SmartApplet operations are not available in Small ROM; local recovery notes
   observed status `0x92` for those commands.
+- The validated physical entry sequence is to hold `Right Shift` + `,` + `.`
+  + `/` while powering on, then enter password `ernie` when prompted. Firmware
+  evidence: Small ROM entry gate at `0x00401378` checks encoded keys `0x6e`,
+  `0x60`, `0x62`, and `0x73`; the password path at `0x004013c0` checks bytes
+  `3a 3d 7f 30 3a` for `ernie`.
 
 The panel should provide a `Reflash Bundled OS from Small ROM` button. It calls
 the same backend as `Reflash Bundled OS`, with copy tailored to Small ROM. It
 does not use a different OS image.
 
-The exact physical Small ROM entry key sequence is not yet documented in the
-repo material reviewed for this spec. The GUI copy should therefore avoid
-inventing a sequence. It should say:
+The GUI copy should say:
 
-> Enter the NEO Small ROM Updater using the device's documented updater
-> key sequence, then connect USB. When AlphaGUI detects direct USB, run this
-> bundled OS flash.
-
-If the exact sequence is later validated and documented, update the instruction
-copy in a separate change.
+> Hold Right Shift + comma + period + slash while powering on, then enter the
+> password "ernie" when prompted. Connect USB after the Small ROM Updater
+> appears. SmartApplet operations are not available in Small ROM; use this only
+> to reflash the bundled OS.
 
 ## Backend Changes
 
