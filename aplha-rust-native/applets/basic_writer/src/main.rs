@@ -62,6 +62,9 @@ impl Applet for BasicWriter {
     }
 
     fn on_key(ctx: &mut Context) -> Status {
+        if is_exit_key(ctx.param()) {
+            return Status::APPLET_EXIT;
+        }
         with_state(|state| {
             let _ = apply_action(state, input_action_for_key(ctx.param()));
             let _ = storage::save_slot(state.active_slot, &state.document);
@@ -69,6 +72,10 @@ impl Applet for BasicWriter {
         });
         Status::OK
     }
+}
+
+fn is_exit_key(raw: u32) -> bool {
+    matches!(raw, 0x044B | 0x084B | 0x29)
 }
 
 export_applet!(BasicWriter);
@@ -230,6 +237,13 @@ mod tests {
         assert_eq!(input_action_for_key(0x38), InputAction::Insert(b'1'));
         assert_eq!(input_action_for_key(0x40), InputAction::Insert(b'\n'));
         assert_eq!(input_action_for_key(0x03), InputAction::Backspace);
+    }
+
+    #[test]
+    fn recognizes_applet_exit_keys() {
+        assert!(super::is_exit_key(0x044B));
+        assert!(super::is_exit_key(0x084B));
+        assert!(super::is_exit_key(0x29));
     }
 }
 

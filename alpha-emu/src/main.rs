@@ -351,33 +351,23 @@ fn main() -> Result<()> {
             if !is_full_system {
                 anyhow::bail!("Basic Writer validation requires the full NEO system firmware image");
             }
+            let firmware = FirmwareRuntime::load_small_rom(&path)?;
+            let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+            recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
             session.run_realtime_cycles(220_000_000, 25_000_000);
-            session
-                .start_applet_message_for_validation("Basic Writer", 0x19)
-                .map_err(|error| anyhow::anyhow!("failed to launch Basic Writer: {error}"))?;
-            session.run_steps(10_000);
+            launch_basic_writer_through_menu(&mut session);
             bail_if_exception(&session, "Basic Writer focus")?;
             let lcd_before = session.lcd_snapshot();
-            for byte in b"abc" {
-                session
-                    .start_applet_message_with_param_for_validation(
-                        "Basic Writer",
-                        0x20,
-                        u32::from(*byte),
-                    )
-                    .map_err(|error| anyhow::anyhow!("failed to send Basic Writer char: {error}"))?;
-                session.run_steps(10_000);
+            for key in [0x2c, 0x7d, 0x71] {
+                session.tap_matrix_code_long(key);
+                session.run_steps(300_000);
                 bail_if_exception(&session, "Basic Writer char")?;
             }
-            session
-                .start_applet_message_with_param_for_validation("Basic Writer", 0x21, 0x49)
-                .map_err(|error| anyhow::anyhow!("failed to send Basic Writer left key: {error}"))?;
-            session.run_steps(10_000);
+            session.tap_matrix_code_long(0x75);
+            session.run_steps(300_000);
             bail_if_exception(&session, "Basic Writer left key")?;
-            session
-                .start_applet_message_with_param_for_validation("Basic Writer", 0x20, u32::from(b'X'))
-                .map_err(|error| anyhow::anyhow!("failed to send Basic Writer char: {error}"))?;
-            session.run_steps(10_000);
+            session.tap_matrix_code_long(0x7b);
+            session.run_steps(300_000);
             bail_if_exception(&session, "Basic Writer inserted char")?;
             let lcd_after = session.lcd_snapshot();
             let snapshot = session.snapshot();
@@ -737,6 +727,15 @@ fn print_lcd_samples(session: &mut FirmwareSession, interval_steps: usize, count
 
 fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
     for _ in 0..10 {
+        session.tap_matrix_code_long(0x15);
+        session.run_steps(250_000);
+    }
+    session.tap_matrix_code_long(0x69);
+    session.run_steps(500_000);
+}
+
+fn launch_basic_writer_through_menu(session: &mut FirmwareSession) {
+    for _ in 0..11 {
         session.tap_matrix_code_long(0x15);
         session.run_steps(250_000);
     }

@@ -91,6 +91,11 @@ Basic Writer can use currently known AlphaWord file traps to implement owned-fil
 Basic Writer package fails with .got because applet code uses bounds-checked indexing that pulls in panic formatting/GOT-backed data	proven
 Basic Writer emulator validation crashes because validation applet memory at 0x7f000 overlaps the validation stack for a 4 KiB editor state	proven
 Basic Writer char validation crash is caused by the direct-message harness running too many steps after a fast callback returns into invalid validation context	proven
+Basic Writer GUI typing is broken because direct validation bypassed the real firmware matrix-key dispatch path	needs further investigation
+Basic Writer traps the Applets key because on_key returns OK for the applets logical key instead of APPLET_EXIT	needs further investigation
+Basic Writer GUI key presses appear inert because GUI matrix taps only advance 2,000 steps, too short for the firmware to poll and dispatch applet key input	needs further investigation
 Android JNI write and USB permission calls now clear Java exceptions before converting JNI call results	proven
 Android USB permission request now acknowledges UI-thread registration and cancels delayed setup after timeout	proven
 Android packaged permissions match SAF plus USB-host design without obsolete external-storage permissions	proven
+Android SAF JNI class lookup fails because the MainActivity class is absent from the APK	disproven
+Android SAF JNI class lookup fails because Rust attached threads use a class loader that cannot resolve app classes via FindClass	proven

@@ -22,6 +22,7 @@ const MAX_REALTIME_STEPS_PER_FRAME: usize = 1_000_000;
 const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(16);
 const MAX_REALTIME_WORK_PER_FRAME: Duration = Duration::from_millis(15);
 const SPEED_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
+const GUI_KEY_SETTLE_STEPS: usize = 300_000;
 const NEO_VISIBLE_LCD_HEIGHT: usize = 64;
 const NEO_VISIBLE_LCD_WIDTH: usize = 264;
 const LCD_INNER_PADDING: f32 = 4.0;
@@ -352,7 +353,7 @@ impl AlphaEmuApp {
                             } else {
                                 tap.release(session);
                             }
-                            session.run_realtime_steps(2_000);
+                            session.run_realtime_steps(GUI_KEY_SETTLE_STEPS);
                             handled = true;
                         }
                     }
@@ -361,7 +362,7 @@ impl AlphaEmuApp {
             }
         });
         if handled {
-            session.run_realtime_steps(2_000);
+            session.run_realtime_steps(GUI_KEY_SETTLE_STEPS);
         }
     }
 }
@@ -716,7 +717,7 @@ fn render_functional_keys(ui: &mut egui::Ui, session: &mut FirmwareSession) {
         &mut any_pressed,
     );
     if any_pressed {
-        session.run_realtime_steps(2_000);
+        session.run_realtime_steps(GUI_KEY_SETTLE_STEPS);
     }
 }
 
