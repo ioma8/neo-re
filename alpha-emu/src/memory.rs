@@ -27,6 +27,7 @@ const TIMER_COUNTER_DENOMINATOR: u64 = CPU_HZ * TIMER_PRESCALER;
 const EXTRA_APPLET_PATHS: &[&str] = &[
     "../exports/applets/alpha-usb-native.os3kapp",
     "../exports/applets/forth-mini.os3kapp",
+    "../exports/applets/basic-writer.os3kapp",
 ];
 
 #[derive(Debug, Error)]
@@ -42,6 +43,7 @@ pub(crate) struct AppletMemoryValidation {
     pub(crate) end: u32,
     pub(crate) alpha_usb_native: Option<u32>,
     pub(crate) forth_mini: Option<u32>,
+    pub(crate) basic_writer: Option<u32>,
     pub(crate) valid: bool,
 }
 
@@ -178,6 +180,7 @@ impl EmuMemory {
         let mut count = 0usize;
         let mut alpha_usb_native = None;
         let mut forth_mini = None;
+        let mut basic_writer = None;
         let mut valid = true;
 
         while cursor + 0x84 <= self.bytes.len() {
@@ -197,6 +200,7 @@ impl EmuMemory {
             match name.as_deref() {
                 Some("Alpha USB") => alpha_usb_native = Some(cursor as u32),
                 Some("Forth Mini") => forth_mini = Some(cursor as u32),
+                Some("Basic Writer") => basic_writer = Some(cursor as u32),
                 _ => {}
             }
             count = count.saturating_add(1);
@@ -208,13 +212,15 @@ impl EmuMemory {
                 .applet_storage_end
                 .is_some_and(|expected_end| expected_end as usize == cursor)
             && alpha_usb_native.is_some()
-            && forth_mini.is_some();
+            && forth_mini.is_some()
+            && basic_writer.is_some();
         AppletMemoryValidation {
             count,
             start: start as u32,
             end: cursor as u32,
             alpha_usb_native,
             forth_mini,
+            basic_writer,
             valid,
         }
     }
@@ -792,6 +798,7 @@ mod tests {
         let applet_storage = &memory.bytes[applet_start..applet_end];
         assert!(contains_bytes(applet_storage, b"Alpha USB"));
         assert!(contains_bytes(applet_storage, b"Forth Mini"));
+        assert!(contains_bytes(applet_storage, b"Basic Writer"));
 
         let validation = memory.applet_memory_validation();
         assert!(validation.valid);
@@ -799,6 +806,7 @@ mod tests {
         assert_eq!(validation.end as usize, applet_end);
         assert!(validation.alpha_usb_native.is_some());
         assert!(validation.forth_mini.is_some());
+        assert!(validation.basic_writer.is_some());
         Ok(())
     }
 

@@ -89,6 +89,8 @@ Android USB permission wait can race UI-thread receiver registration because bac
 Basic Writer m68k release link fails because the applet uses operations that require compiler-builtins integer helper symbols such as __mulsi3	proven
 Basic Writer can use currently known AlphaWord file traps to implement owned-file load/save/commit without more reverse engineering	disproven
 Basic Writer package fails with .got because applet code uses bounds-checked indexing that pulls in panic formatting/GOT-backed data	proven
+Basic Writer emulator validation crashes because validation applet memory at 0x7f000 overlaps the validation stack for a 4 KiB editor state	proven
+Basic Writer char validation crash is caused by the direct-message harness running too many steps after a fast callback returns into invalid validation context	proven
 Android JNI write and USB permission calls now clear Java exceptions before converting JNI call results	proven
 Android USB permission request now acknowledges UI-thread registration and cancels delayed setup after timeout	proven
 Android packaged permissions match SAF plus USB-host design without obsolete external-storage permissions	proven

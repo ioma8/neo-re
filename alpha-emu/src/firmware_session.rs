@@ -608,7 +608,7 @@ impl FirmwareSession {
             .ok_or_else(|| format!("applet not found: {applet_name}"))?;
         const VALIDATION_STACK: u32 = 0x0007_fb00;
         const VALIDATION_STATUS: u32 = 0x0000_1200;
-        const VALIDATION_APPLET_MEMORY: u32 = 0x0007_f000;
+        const VALIDATION_APPLET_MEMORY: u32 = 0x0007_8000;
         self.cpu.regs.pc = Wrapping(entry);
         self.cpu.regs.ssp = Wrapping(VALIDATION_STACK);
         self.cpu.regs.a[5] = Wrapping(VALIDATION_APPLET_MEMORY);
@@ -630,7 +630,7 @@ impl FirmwareSession {
 
     #[must_use]
     pub fn validation_applet_memory_hex(&self, offset: u32, len: usize) -> String {
-        const VALIDATION_APPLET_MEMORY: u32 = 0x0007_f000;
+        const VALIDATION_APPLET_MEMORY: u32 = 0x0007_8000;
         (0..len)
             .filter_map(|index| {
                 self.memory

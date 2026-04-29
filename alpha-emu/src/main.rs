@@ -44,6 +44,7 @@ fn main() -> Result<()> {
     let mut validate_key_map_at = None;
     let mut validate_alpha_usb_native = false;
     let mut validate_forth_mini = false;
+    let mut validate_basic_writer = false;
     let mut load_memory = None;
     let mut dump_memory_start = None;
     let mut dump_memory = None;
@@ -93,6 +94,8 @@ fn main() -> Result<()> {
             validate_alpha_usb_native = true;
         } else if arg == "--validate-forth-mini" {
             validate_forth_mini = true;
+        } else if arg == "--validate-basic-writer" {
+            validate_basic_writer = true;
         } else if let Some(value) = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix("--load-memory="))
@@ -212,6 +215,7 @@ fn main() -> Result<()> {
     let recovery_seed_path = recovery_seed_path.unwrap_or_else(recovery_seed::default_seed_path);
     headless |= validate_alpha_usb_native
         || validate_forth_mini
+        || validate_basic_writer
         || lcd_ascii
         || lcd_visible_ascii
         || lcd_bits
@@ -337,6 +341,65 @@ fn main() -> Result<()> {
             }
             println!(
                 "forth_mini_validation=ok pc=0x{:08x} steps={} exception={}",
+                snapshot.pc,
+                snapshot.steps,
+                snapshot.last_exception.as_deref().unwrap_or("none")
+            );
+            return Ok(());
+        }
+        if validate_basic_writer {
+            if !is_full_system {
+                anyhow::bail!("Basic Writer validation requires the full NEO system firmware image");
+            }
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            session
+                .start_applet_message_for_validation("Basic Writer", 0x19)
+                .map_err(|error| anyhow::anyhow!("failed to launch Basic Writer: {error}"))?;
+            session.run_steps(10_000);
+            bail_if_exception(&session, "Basic Writer focus")?;
+            let lcd_before = session.lcd_snapshot();
+            for byte in b"abc" {
+                session
+                    .start_applet_message_with_param_for_validation(
+                        "Basic Writer",
+                        0x20,
+                        u32::from(*byte),
+                    )
+                    .map_err(|error| anyhow::anyhow!("failed to send Basic Writer char: {error}"))?;
+                session.run_steps(10_000);
+                bail_if_exception(&session, "Basic Writer char")?;
+            }
+            session
+                .start_applet_message_with_param_for_validation("Basic Writer", 0x21, 0x49)
+                .map_err(|error| anyhow::anyhow!("failed to send Basic Writer left key: {error}"))?;
+            session.run_steps(10_000);
+            bail_if_exception(&session, "Basic Writer left key")?;
+            session
+                .start_applet_message_with_param_for_validation("Basic Writer", 0x20, u32::from(b'X'))
+                .map_err(|error| anyhow::anyhow!("failed to send Basic Writer char: {error}"))?;
+            session.run_steps(10_000);
+            bail_if_exception(&session, "Basic Writer inserted char")?;
+            let lcd_after = session.lcd_snapshot();
+            let snapshot = session.snapshot();
+            if let Some(exception) = &snapshot.last_exception {
+                let trace = snapshot
+                    .trace
+                    .iter()
+                    .rev()
+                    .take(12)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join("\n  ");
+                anyhow::bail!("Basic Writer validation failed: {exception}\n  {trace}");
+            }
+            if lcd_before.pixels == lcd_after.pixels {
+                anyhow::bail!("Basic Writer validation failed: input sequence did not change the LCD");
+            }
+            println!(
+                "basic_writer_validation=ok pc=0x{:08x} steps={} exception={}",
                 snapshot.pc,
                 snapshot.steps,
                 snapshot.last_exception.as_deref().unwrap_or("none")
@@ -515,6 +578,25 @@ fn main() -> Result<()> {
     } else {
         alpha_emu::gui::run(path)
     }
+}
+
+fn bail_if_exception(session: &FirmwareSession, label: &str) -> Result<()> {
+    let snapshot = session.snapshot();
+    if let Some(exception) = &snapshot.last_exception {
+        let trace = snapshot
+            .trace
+            .iter()
+            .rev()
+            .take(12)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect::<Vec<_>>()
+            .join("\n  ");
+        anyhow::bail!("{label} failed: {exception}\n  {trace}");
+    }
+    Ok(())
 }
 
 fn scan_special_keys(base_session: &FirmwareSession) {
