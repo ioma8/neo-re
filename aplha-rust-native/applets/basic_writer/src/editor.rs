@@ -37,11 +37,14 @@ impl SlotNavigation {
 
     pub fn store(&mut self, slot: usize, cursor: usize, viewport: Viewport) {
         if (1..=FILE_COUNT).contains(&slot) {
-            self.states[slot - 1] = NavigationState {
-                cursor,
-                viewport,
-                present: true,
-            };
+            // SAFETY: Slot range was checked above and maps to 0..FILE_COUNT.
+            unsafe {
+                *self.states.get_unchecked_mut(slot - 1) = NavigationState {
+                    cursor,
+                    viewport,
+                    present: true,
+                };
+            }
         }
     }
 
@@ -50,7 +53,8 @@ impl SlotNavigation {
         if !(1..=FILE_COUNT).contains(&slot) {
             return None;
         }
-        let state = self.states[slot - 1];
+        // SAFETY: Slot range was checked above and maps to 0..FILE_COUNT.
+        let state = unsafe { *self.states.get_unchecked(slot - 1) };
         if state.present {
             Some((state.cursor, state.viewport))
         } else {
@@ -93,7 +97,8 @@ impl Document {
     #[must_use]
     #[allow(dead_code, reason = "used by storage save path in later implementation task")]
     pub fn as_bytes(&self) -> &[u8] {
-        &self.bytes[..self.len]
+        // SAFETY: `self.len` is maintained as <= MAX_FILE_BYTES.
+        unsafe { core::slice::from_raw_parts(self.bytes.as_ptr(), self.len) }
     }
 
     #[must_use]
@@ -134,10 +139,11 @@ impl Document {
         }
         let mut index = self.len;
         while index > self.cursor {
-            self.bytes[index] = self.bytes[index - 1];
+            let previous = self.byte_at(index - 1);
+            self.set_byte(index, previous);
             index -= 1;
         }
-        self.bytes[self.cursor] = byte;
+        self.set_byte(self.cursor, byte);
         self.len += 1;
         self.cursor += 1;
         self.ensure_cursor_visible();
@@ -150,7 +156,8 @@ impl Document {
         }
         let mut index = self.cursor - 1;
         while index + 1 < self.len {
-            self.bytes[index] = self.bytes[index + 1];
+            let next = self.byte_at(index + 1);
+            self.set_byte(index, next);
             index += 1;
         }
         self.len -= 1;
@@ -197,7 +204,7 @@ impl Document {
         let wanted_row = self.viewport.row + screen_row;
         let mut index = 0;
         while index < SCREEN_COLS {
-            output[index] = b' ';
+            set_output_byte(output, index, b' ');
             index += 1;
         }
 
@@ -210,10 +217,10 @@ impl Document {
             }
             if position.row == wanted_row && position.col < SCREEN_COLS {
                 if byte_index == self.cursor {
-                    output[position.col] = b'|';
+                    set_output_byte(output, position.col, b'|');
                     cursor_marked = true;
-                } else if byte_index < self.len && self.bytes[byte_index] != b'\n' {
-                    output[position.col] = self.bytes[byte_index];
+                } else if byte_index < self.len && self.byte_at(byte_index) != b'\n' {
+                    set_output_byte(output, position.col, self.byte_at(byte_index));
                 }
             }
             if byte_index == self.len {
@@ -223,7 +230,21 @@ impl Document {
         }
 
         if !cursor_marked && screen_row == 0 {
-            output[0] = b'|';
+            set_output_byte(output, 0, b'|');
+        }
+    }
+
+    fn byte_at(&self, index: usize) -> u8 {
+        debug_assert!(index < self.len);
+        // SAFETY: Callers only read initialized document bytes.
+        unsafe { *self.bytes.get_unchecked(index) }
+    }
+
+    fn set_byte(&mut self, index: usize, value: u8) {
+        debug_assert!(index < MAX_FILE_BYTES);
+        // SAFETY: Callers only write inside the fixed document buffer.
+        unsafe {
+            *self.bytes.get_unchecked_mut(index) = value;
         }
     }
 
@@ -233,7 +254,7 @@ impl Document {
         let limit = cursor.min(self.len);
         let mut index = 0;
         while index < limit {
-            if self.bytes[index] == b'\n' {
+            if self.byte_at(index) == b'\n' {
                 row += 1;
                 col = 0;
             } else {
@@ -263,6 +284,14 @@ impl Document {
             index += 1;
         }
         self.len
+    }
+}
+
+fn set_output_byte(output: &mut [u8; SCREEN_COLS], index: usize, value: u8) {
+    debug_assert!(index < SCREEN_COLS);
+    // SAFETY: Callers pass columns in 0..SCREEN_COLS.
+    unsafe {
+        *output.get_unchecked_mut(index) = value;
     }
 }
 

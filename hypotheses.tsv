@@ -88,6 +88,7 @@ Android JNI write/USB permission calls can still bypass exception clearing becau
 Android USB permission wait can race UI-thread receiver registration because background thread starts final wait before UI setup is acknowledged	proven
 Basic Writer m68k release link fails because the applet uses operations that require compiler-builtins integer helper symbols such as __mulsi3	proven
 Basic Writer can use currently known AlphaWord file traps to implement owned-file load/save/commit without more reverse engineering	disproven
+Basic Writer package fails with .got because applet code uses bounds-checked indexing that pulls in panic formatting/GOT-backed data	proven
 Android JNI write and USB permission calls now clear Java exceptions before converting JNI call results	proven
 Android USB permission request now acknowledges UI-thread registration and cancels delayed setup after timeout	proven
 Android packaged permissions match SAF plus USB-host design without obsolete external-storage permissions	proven

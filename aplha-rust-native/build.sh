@@ -21,8 +21,13 @@ case "${APPLET}" in
     PACKER_NAME="forth-mini"
     OUTPUT="../exports/applets/forth-mini.os3kapp"
     ;;
+  basic_writer)
+    PACKAGE="basic-writer-applet"
+    PACKER_NAME="basic-writer"
+    OUTPUT="../exports/applets/basic-writer.os3kapp"
+    ;;
   *)
-    echo "usage: ./build.sh alpha_usb|forth_mini" >&2
+    echo "usage: ./build.sh alpha_usb|forth_mini|basic_writer" >&2
     exit 2
     ;;
 esac
