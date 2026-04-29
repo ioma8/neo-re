@@ -359,17 +359,21 @@ fn main() -> Result<()> {
             bail_if_exception(&session, "Basic Writer focus")?;
             let lcd_before = session.lcd_snapshot();
             for key in [0x2c, 0x7d, 0x71] {
-                session.tap_matrix_code_long(key);
+                session.tap_matrix_code(key);
                 session.run_steps(300_000);
                 bail_if_exception(&session, "Basic Writer char")?;
             }
-            session.tap_matrix_code_long(0x75);
+            session.tap_matrix_code(0x75);
             session.run_steps(300_000);
             bail_if_exception(&session, "Basic Writer left key")?;
-            session.tap_matrix_code_long(0x7b);
+            session.tap_matrix_code(0x7b);
             session.run_steps(300_000);
             bail_if_exception(&session, "Basic Writer inserted char")?;
             let lcd_after = session.lcd_snapshot();
+            session.tap_matrix_code(0x46);
+            session.run_steps(300_000);
+            bail_if_exception(&session, "Basic Writer applets exit")?;
+            let lcd_after_exit = session.lcd_snapshot();
             let snapshot = session.snapshot();
             if let Some(exception) = &snapshot.last_exception {
                 let trace = snapshot
@@ -387,6 +391,9 @@ fn main() -> Result<()> {
             }
             if lcd_before.pixels == lcd_after.pixels {
                 anyhow::bail!("Basic Writer validation failed: input sequence did not change the LCD");
+            }
+            if lcd_after.pixels == lcd_after_exit.pixels {
+                anyhow::bail!("Basic Writer validation failed: Applets key did not change the LCD");
             }
             println!(
                 "basic_writer_validation=ok pc=0x{:08x} steps={} exception={}",
@@ -736,10 +743,10 @@ fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
 
 fn launch_basic_writer_through_menu(session: &mut FirmwareSession) {
     for _ in 0..11 {
-        session.tap_matrix_code_long(0x15);
+        session.tap_matrix_code(0x15);
         session.run_steps(250_000);
     }
-    session.tap_matrix_code_long(0x69);
+    session.tap_matrix_code(0x69);
     session.run_steps(500_000);
 }
 
