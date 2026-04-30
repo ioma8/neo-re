@@ -13,8 +13,12 @@ static void test_recorded_source_replays_on_reload(void) {
     char output[128];
 
     forth_init(&machine);
-    expect_ok(forth_record_line(&machine, ": sq dup * ;"));
-    expect_ok(forth_record_line(&machine, "7 sq ."));
+    expect_ok(forth_eval_line(&machine, ": sq dup * ;", output, sizeof(output)));
+    if(forth_should_persist_line(&machine, ": sq dup * ;")) {
+        expect_ok(forth_append_source_line(&machine, ": sq dup * ;"));
+    }
+    expect_ok(forth_eval_line(&machine, "7 sq .", output, sizeof(output)));
+    assert(forth_should_persist_line(&machine, "7 sq .") == 0);
 
     forth_init(&restored);
     expect_ok(forth_load_source(&restored, forth_source(&machine)));

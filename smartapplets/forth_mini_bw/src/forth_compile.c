@@ -132,10 +132,13 @@ ForthResult forth_compile_text(
     char* output,
     size_t output_size) {
     char token[FORTH_MAX_TOKEN + 1];
+    char result_storage[sizeof(ForthResult) + 1];
+    ForthResult* result =
+        (ForthResult*)((((unsigned long)result_storage) + 1UL) & ~1UL);
     const char* cursor = text;
     while(next_token(&cursor, token)) {
-        ForthResult result = run_token(machine, token, output, output_size);
-        if(result.code != FORTH_OK) return result;
+        *result = run_token(machine, token, output, output_size);
+        if(result->code != FORTH_OK) return *result;
     }
     if(machine->expect_name || machine->patch_depth != 0) {
         return error_result(FORTH_BAD_CONTROL_FLOW, "incomplete compile");

@@ -11,7 +11,12 @@ extern void SYS_A2DC(void);
 extern unsigned long SYS_A2EC(void);
 extern void SYS_A2FC(void);
 
-enum { CURRENT_FILE = 0, MODE_READ = 1, MODE_WRITE = 2, IO_FLAGS = 1 };
+enum { CURRENT_FILE = 1, MODE_READ = 1, MODE_WRITE = 2, IO_FLAGS = 1 };
+
+typedef struct {
+    char magic[4];
+    ForthMachine machine;
+} ForthSnapshot;
 
 static void ensure_workspace_ready(void) {
     SYS_A2DC();
@@ -20,29 +25,30 @@ static void ensure_workspace_ready(void) {
     }
 }
 
-int storage_load(char* buffer, size_t capacity) {
-    if(capacity == 0) return 0;
-    forth_memset(buffer, 0, capacity);
-    return 1;
-#if 0
+int storage_load_machine(ForthMachine* machine) {
+    ForthSnapshot snapshot;
+    forth_memset(&snapshot, 0, sizeof(snapshot));
     ensure_workspace_ready();
     SYS_A190(CURRENT_FILE, 0, MODE_READ);
-    FileReadBuffer(CURRENT_FILE, buffer, (unsigned long)(capacity - 1), IO_FLAGS);
+    FileReadBuffer(CURRENT_FILE, &snapshot, (unsigned long)sizeof(snapshot), IO_FLAGS);
     FileClose();
+    if(snapshot.magic[0] != 'F' || snapshot.magic[1] != 'M' || snapshot.magic[2] != 'N' || snapshot.magic[3] != '1') {
+        return 0;
+    }
+    forth_memcpy(machine, &snapshot.machine, sizeof(*machine));
     return 1;
-#endif
 }
 
-int storage_save(const char* buffer) {
-    (void)buffer;
-    return 1;
-#if 0
+int storage_save_machine(const ForthMachine* machine) {
+    ForthSnapshot snapshot;
+    snapshot.magic[0] = 'F';
+    snapshot.magic[1] = 'M';
+    snapshot.magic[2] = 'N';
+    snapshot.magic[3] = '1';
+    forth_memcpy(&snapshot.machine, machine, sizeof(snapshot.machine));
     ensure_workspace_ready();
     SYS_A190(CURRENT_FILE, 0, MODE_WRITE);
-    FileWriteBuffer(CURRENT_FILE, buffer, (unsigned long)forth_strlen(buffer), IO_FLAGS);
+    FileWriteBuffer(CURRENT_FILE, &snapshot, (unsigned long)sizeof(snapshot), IO_FLAGS);
     FileClose();
-    SYS_A2BC();
-    SYS_A2C0();
     return 1;
-#endif
 }

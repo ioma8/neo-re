@@ -10,6 +10,7 @@ typedef struct {
     ForthMachine machine;
     char input[INPUT_CAPACITY + 1];
     uint8_t input_len;
+    uint8_t storage_loaded;
     char transcript[OUTPUT_LINES][LINE_WIDTH + 1];
 } AppState;
 

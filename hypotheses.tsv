@@ -138,3 +138,20 @@ keyboard layout handling is implemented in full OS firmware and Dvorak reference
 layout selection uses the Dvorak-related strings plus a logical-key remap table in full OS	proven
 layout selector byte is 0x5d36 and value 3 is the default QWERTY pass-through mode	proven
 previous HID-focused hypothesis for alphaword layout switching was the wrong layer	disproven
+AlphaWord file persistence path can be recovered from file-workspace trap xrefs	needs further investigation
+AlphaWord helpers at 0x131dc, 0x13fd8, and 0x140a0 are compact slot/workspace descriptor codec helpers rather than direct file I/O entrypoints	proven
+Raw string-address search hits at 0x144b0, 0x147b0, and 0x147d0 land in pointer/data tables, not executable code sites	proven
+The provisional RE names for 0xA1C8/0xA1CC/0xA198 are likely misleading, and the Betawise SDK names FileOpen/FileClose/FileWriteBuffer are closer to the real generic ABI	needs further investigation
+The current rebuilt Forth Mini applet is the chooser target reached by 19 down presses from SmartApplets before Enter	proven
+The direct start_applet_message validation path does not create a persistent interactive session for this applet class; menu launch is required for live keyboard validation	proven
+In the current headless live keyboard path, shifted punctuation for Forth syntax is not being delivered correctly even when raw shift combinations are sent; unshifted syntax works better than shifted syntax	proven
+Forth Mini persistence failure is only lazy-load timing; saved source actually survives exit	disproven
+Forth Mini current save path writes no durable file data across exit/relaunch	disproven
+A2BC/A2C0 commit traps are safe and required specifically during MSG_KILLFOCUS for Forth Mini persistence	disproven
+Forth Mini applet-owned file I/O must target file id 0x8011 instead of handle 0	needs further investigation
+Forth Mini applet-owned runtime file handle may be 0x11, matching the low bits of metadata key 0x8011	disproven
+Forth Mini persistence validator overshoots on relaunch because the menu remains on the previous applet row after Applets-exit	proven
+Forth Mini relaunch crash is caused by compiling malformed bytes returned by storage_load, not by the raw storage_load trap sequence alone	disproven
+Forth Mini applet-owned runtime file handle is 1 for durable source persistence	proven
+ForthResult becomes byte-aligned under -fshort-enums, and GCC then emits odd stack slots that are illegal for some m68k struct copies	proven
+Forth Mini one-file persistence is reliable if the applet saves and restores a binary ForthMachine snapshot on handle 1 instead of replaying source on target	proven

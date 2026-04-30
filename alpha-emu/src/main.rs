@@ -372,6 +372,17 @@ fn main() -> Result<()> {
             assert_forth_screen_contains(&session, "3 2 1", "Forth Mini while/repeat")?;
             print_ocr_checkpoint("forth_mini_while_repeat", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
 
+            exit_forth_to_menu(&mut session);
+            bail_if_exception(&session, "Forth Mini exit to menu")?;
+            relaunch_current_menu_item(&mut session);
+            bail_if_exception(&session, "Forth Mini relaunch")?;
+            enter_forth_line(&mut session, "8 sq .");
+            bail_if_exception(&session, "Forth Mini persistence reload first")?;
+            if !session.snapshot().text_screen.unwrap_or_default().contains("64") {
+                print_forth_state_ascii_runs(&session, "forth_mini_relaunch_state_after_first");
+            }
+            assert_forth_screen_contains(&session, "64", "Forth Mini persistence reload")?;
+            print_ocr_checkpoint("forth_mini_relaunch", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             let snapshot = session.snapshot();
             println!(
                 "forth_mini_validation=ok pc=0x{:08x} steps={} exception={}",
@@ -983,6 +994,44 @@ fn debug_word(snapshot: &alpha_emu::firmware_session::FirmwareSnapshot, addr: u3
         .find_map(|(word_addr, value)| (*word_addr == addr).then_some(*value))
 }
 
+fn read_be_u32(bytes: &[u8], addr: usize) -> Option<u32> {
+    let slice = bytes.get(addr..addr + 4)?;
+    Some(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+fn print_forth_state_ascii_runs(session: &FirmwareSession, label: &str) {
+    const FORTH_SOURCE_OFFSET: usize = 5772;
+    let snapshot = session.snapshot();
+    let Some(slot) = debug_word(&snapshot, 0x0000_35e2) else {
+        println!("{label}: missing_slot");
+        return;
+    };
+    let bytes = session.memory_bytes();
+    let table_addr = 0x0000_355eusize + (slot as usize) * 4;
+    let Some(a5) = read_be_u32(bytes, table_addr) else {
+        println!("{label}: missing_a5");
+        return;
+    };
+    let state_base = a5 as usize + 0x300;
+    let source_base = state_base + FORTH_SOURCE_OFFSET;
+    let Some(region) = bytes.get(source_base..source_base + 128) else {
+        println!("{label}: missing_state_region a5=0x{a5:08x}");
+        return;
+    };
+    let mut preview = String::new();
+    for &byte in region {
+        if byte == 0 {
+            break;
+        }
+        preview.push(if (0x20..=0x7e).contains(&byte) {
+            byte as char
+        } else {
+            '.'
+        });
+    }
+    println!("{label}: a5=0x{a5:08x} src={preview}");
+}
+
 fn parse_sample_lcd_after(value: &str) -> Result<(usize, usize)> {
     let Some((interval, count)) = value.split_once(':') else {
         anyhow::bail!("--sample-lcd-after expects INTERVAL_STEPS:COUNT");
@@ -1040,6 +1089,14 @@ fn enter_forth_line(session: &mut FirmwareSession, line: &str) {
 fn exit_forth_to_menu(session: &mut FirmwareSession) {
     tap_key_now(session, 0x46);
     session.run_steps(2_000_000);
+}
+
+fn relaunch_current_menu_item(session: &mut FirmwareSession) {
+    session.press_matrix_code(0x69);
+    session.run_steps(3_000_000);
+    session.release_matrix_code(0x69);
+    session.run_steps(3_000_000);
+    session.clear_keyboard_transients();
 }
 
 fn assert_forth_screen_contains(session: &FirmwareSession, needle: &str, label: &str) -> Result<()> {

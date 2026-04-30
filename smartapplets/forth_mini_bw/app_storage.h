@@ -1,9 +1,9 @@
 #ifndef FORTH_MINI_APP_STORAGE_H
 #define FORTH_MINI_APP_STORAGE_H
 
-#include <stddef.h>
+#include "src/forth_core.h"
 
-int storage_load(char* buffer, size_t capacity);
-int storage_save(const char* buffer);
+int storage_load_machine(ForthMachine* machine);
+int storage_save_machine(const ForthMachine* machine);
 
 #endif

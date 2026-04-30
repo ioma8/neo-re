@@ -47,6 +47,8 @@ Use these rules. They come directly from the working path:
 - use a custom no-global applet runtime
 - store all mutable applet state at `A5 + 0x300`
 - pack the final ELF with local `alpha-neo-pack`
+- for applet-owned persistence, use the proven runtime file handle and trap path,
+  not guessed metadata ids
 
 In practice that means:
 
@@ -56,6 +58,12 @@ In practice that means:
 - dispatch `MSG_SETFOCUS`, `MSG_CHAR`, and `MSG_KEY` yourself
 - do not rely on writable global C variables
 - keep the linker script simple and discard `.bss`, `.data`, `.got`, `.rela`, `.rel`
+
+For the currently validated one-file persistence path used by `forth_mini_bw`:
+
+- runtime file handle is `1`
+- workspace/file sequence is `A2DC -> A2EC/A2FC -> A190 -> FileReadBuffer/FileWriteBuffer -> FileClose`
+- persisting a binary app state or machine snapshot is safer than replaying source on target when the code uses struct returns under `-fshort-enums`
 
 ## Compiler profiles
 

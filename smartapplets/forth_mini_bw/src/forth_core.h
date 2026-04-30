@@ -33,7 +33,7 @@ typedef enum {
 typedef struct {
     ForthCode code;
     char message[FORTH_MAX_MESSAGE];
-} ForthResult;
+} __attribute__((aligned(2))) ForthResult;
 
 typedef struct {
     uint8_t op;
@@ -73,6 +73,7 @@ void forth_init(ForthMachine* machine);
 ForthResult forth_load_source(ForthMachine* machine, const char* source);
 ForthResult forth_record_line(ForthMachine* machine, const char* line);
 ForthResult forth_append_source_line(ForthMachine* machine, const char* line);
+int forth_should_persist_line(const ForthMachine* machine, const char* line);
 const char* forth_source(const ForthMachine* machine);
 ForthResult forth_eval_line(
     ForthMachine* machine,

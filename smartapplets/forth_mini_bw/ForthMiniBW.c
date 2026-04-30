@@ -28,11 +28,13 @@ static void backspace(AppState* state) {
 }
 
 static void reload_from_storage(AppState* state) {
-    app_reset(state);
-    if(storage_load(state->machine.source, FORTH_MAX_SOURCE)) {
-        if(state->machine.source[0] != '\0') {
-            (void)forth_load_source(&state->machine, state->machine.source);
-        }
+    (void)storage_load_machine(&state->machine);
+    state->storage_loaded = 1;
+}
+
+static void ensure_storage_loaded(AppState* state) {
+    if(!state->storage_loaded) {
+        reload_from_storage(state);
     }
 }
 
@@ -44,10 +46,12 @@ static void commit_line(AppState* state) {
     command = state->input;
     result = forth_eval_line(&state->machine, command, output, sizeof(output));
     if(result.code == FORTH_OK) {
-        result = forth_append_source_line(&state->machine, command);
-        if(result.code == FORTH_OK && !storage_save(forth_source(&state->machine))) {
-            result.code = FORTH_SOURCE_FULL;
-            forth_strcpy(result.message, "save failed");
+        if(forth_should_persist_line(&state->machine, command)) {
+            result = forth_append_source_line(&state->machine, command);
+            if(result.code == FORTH_OK && !storage_save_machine(&state->machine)) {
+                result.code = FORTH_SOURCE_FULL;
+                forth_strcpy(result.message, "save failed");
+            }
         }
     }
     app_push_result(state, command, &result, output);
@@ -57,6 +61,7 @@ static void commit_line(AppState* state) {
 
 static void handle_char(AppState* state, uint32_t param) {
     char byte = (char)(param & 0xff);
+    ensure_storage_loaded(state);
     if(byte == '\r' || byte == '\n') commit_line(state);
     else if(byte == '\b' || byte == 0x7f) backspace(state);
     else accept_printable(state, param);
