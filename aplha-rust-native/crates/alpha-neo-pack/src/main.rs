@@ -70,11 +70,11 @@ fn manifest_for(applet: AppletName) -> AppletManifest {
             name: "Basic Writer",
             version: Version::decimal(0, 1),
             flags: 0xFF00_00CE,
-            base_memory_size: 0x7000,
+            base_memory_size: 0x2000,
             extra_memory_size: 0x2000,
             copyright: "neo-re native Rust SmartApplet",
-            file_count: 8,
-            alphaword_write_metadata: true,
+            file_count: 0,
+            alphaword_write_metadata: false,
         },
     }
 }

@@ -207,7 +207,7 @@ mod tests {
             name: "Basic Writer",
             version: Version::decimal(0, 1),
             flags: 0xFF00_00CE,
-            base_memory_size: 0x7000,
+            base_memory_size: 0x2000,
             extra_memory_size: 0x2000,
             copyright: "neo-re native Rust SmartApplet",
             file_count: 8,
@@ -217,6 +217,7 @@ mod tests {
 
         assert_eq!(&image[0x00..0x04], &[0xC0, 0xFF, 0xEE, 0xAD]);
         assert_eq!(&image[0x14..0x18], &[0xA1, 0x32, 0x01, 0x08]);
+        assert_eq!(image[0x17], 8);
         assert_eq!(&image[0x18..0x24], b"Basic Writer");
         assert_eq!(&image[0x94..0x96], &[0x4E, 0x75]);
         assert_eq!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);

@@ -103,8 +103,34 @@ fn load_image_from_elf(bytes: &[u8], elf: &Elf<'_>) -> Result<Vec<u8>, ExtractEr
     if image.is_empty() {
         return Err(ExtractError::MissingLoadSection);
     }
+    image = strip_embedded_os3k_wrapper(image);
     validate_load_image_safety(&image)?;
     Ok(image)
+}
+
+fn strip_embedded_os3k_wrapper(mut image: Vec<u8>) -> Vec<u8> {
+    const EMBEDDED_HEADER_MAGIC: [u8; 4] = [0xC0, 0xFF, 0xEE, 0xAD];
+    const EMBEDDED_ENTRY_OFFSET: usize = 0x94;
+    const EMBEDDED_META_OFFSET: usize = 0x84;
+    const EMBEDDED_FOOTER_MAGIC: [u8; 4] = [0xCA, 0xFE, 0xFE, 0xED];
+
+    let has_embedded_header = image.starts_with(&EMBEDDED_HEADER_MAGIC)
+        && image.len() >= EMBEDDED_ENTRY_OFFSET
+        && image.get(EMBEDDED_META_OFFSET..EMBEDDED_ENTRY_OFFSET)
+            == Some(&[
+                0x00, 0x00, 0x00, 0x94, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00,
+                0x00, 0x00, 0x02,
+            ]);
+    if !has_embedded_header {
+        return image;
+    }
+
+    image.drain(..EMBEDDED_ENTRY_OFFSET);
+    if image.ends_with(&EMBEDDED_FOOTER_MAGIC) {
+        let new_len = image.len() - EMBEDDED_FOOTER_MAGIC.len();
+        image.truncate(new_len);
+    }
+    image
 }
 
 fn validate_load_image_safety(image: &[u8]) -> Result<(), ExtractError> {

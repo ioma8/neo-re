@@ -45,6 +45,7 @@ fn main() -> Result<()> {
     let mut validate_alpha_usb_native = false;
     let mut validate_forth_mini = false;
     let mut validate_basic_writer = false;
+    let mut probe_basic_writer_key = None;
     let mut load_memory = None;
     let mut dump_memory_start = None;
     let mut dump_memory = None;
@@ -96,6 +97,11 @@ fn main() -> Result<()> {
             validate_forth_mini = true;
         } else if arg == "--validate-basic-writer" {
             validate_basic_writer = true;
+        } else if let Some(value) = arg
+            .to_str()
+            .and_then(|arg| arg.strip_prefix("--probe-basic-writer-key="))
+        {
+            probe_basic_writer_key = Some(matrix_code_for_key_name(value)?);
         } else if let Some(value) = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix("--load-memory="))
@@ -216,6 +222,7 @@ fn main() -> Result<()> {
     headless |= validate_alpha_usb_native
         || validate_forth_mini
         || validate_basic_writer
+        || probe_basic_writer_key.is_some()
         || lcd_ascii
         || lcd_visible_ascii
         || lcd_bits
@@ -355,25 +362,58 @@ fn main() -> Result<()> {
             let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
             recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
             session.run_realtime_cycles(220_000_000, 25_000_000);
-            launch_basic_writer_through_menu(&mut session);
+            launch_basic_writer_through_menu(&mut session, lcd_ocr_scale)?;
+            session.run_steps(1_500_000);
             bail_if_exception(&session, "Basic Writer focus")?;
-            let lcd_before = session.lcd_snapshot();
-            for key in [0x2c, 0x7d, 0x71] {
-                session.tap_matrix_code(key);
-                session.run_steps(300_000);
-                bail_if_exception(&session, "Basic Writer char")?;
+            print_ocr_checkpoint("basic_writer_focus", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            print_basic_writer_state("basic_writer_focus_state", &session);
+            assert_basic_writer_state(&session, 1, "", 0, 0)?;
+            for (index, key) in [0x2c, 0x3c, 0x6a].into_iter().enumerate() {
+                session.press_matrix_code(key);
+                session.run_steps(500_000);
+                session.release_matrix_code(key);
+                session.run_steps(500_000);
+                let label = match index {
+                    0 => "basic_writer_after_a",
+                    1 => "basic_writer_after_b",
+                    _ => "basic_writer_after_c",
+                };
+                print_ocr_checkpoint(label, &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             }
-            session.tap_matrix_code(0x75);
-            session.run_steps(300_000);
-            bail_if_exception(&session, "Basic Writer left key")?;
-            session.tap_matrix_code(0x7b);
-            session.run_steps(300_000);
-            bail_if_exception(&session, "Basic Writer inserted char")?;
-            let lcd_after = session.lcd_snapshot();
-            session.tap_matrix_code(0x46);
-            session.run_steps(300_000);
-            bail_if_exception(&session, "Basic Writer applets exit")?;
-            let lcd_after_exit = session.lcd_snapshot();
+            session.press_matrix_code(0x75);
+            session.run_steps(500_000);
+            session.release_matrix_code(0x75);
+            wait_for_basic_writer_state(&mut session, |state| state.len == 3 && state.cursor == 2)?;
+            bail_if_exception(&session, "Basic Writer left")?;
+            print_ocr_checkpoint("basic_writer_after_left", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            print_basic_writer_state("basic_writer_after_left_state", &session);
+            assert_basic_writer_state(&session, 1, "aqc", 3, 2)?;
+            session.press_matrix_code(0x6b);
+            session.run_steps(500_000);
+            session.release_matrix_code(0x6b);
+            session.run_steps(500_000);
+            session.press_matrix_code(0x4a);
+            wait_for_basic_writer_state(&mut session, |state| state.active_slot == 2)?;
+            session.release_matrix_code(0x4a);
+            session.run_steps(3_000_000);
+            bail_if_exception(&session, "Basic Writer file2")?;
+            print_ocr_checkpoint("basic_writer_file2", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            print_basic_writer_state("basic_writer_file2_state", &session);
+            assert_basic_writer_state(&session, 2, "", 0, 0)?;
+            assert_basic_writer_slot_state(&session, 1, "aqxc", 4, 3)?;
+            session.press_matrix_code(0x7d);
+            session.run_steps(500_000);
+            session.release_matrix_code(0x7d);
+            session.run_steps(500_000);
+            session.press_matrix_code(0x4b);
+            wait_for_basic_writer_state(&mut session, |state| state.active_slot == 1)?;
+            session.release_matrix_code(0x4b);
+            session.run_steps(3_000_000);
+            bail_if_exception(&session, "Basic Writer file1")?;
+            print_ocr_checkpoint("basic_writer_file1_return", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            print_basic_writer_state("basic_writer_file1_return_state", &session);
+            assert_basic_writer_state(&session, 1, "aqxc", 4, 3)?;
+            assert_basic_writer_slot_state(&session, 2, "b", 1, 1)?;
             let snapshot = session.snapshot();
             if let Some(exception) = &snapshot.last_exception {
                 let trace = snapshot
@@ -389,14 +429,41 @@ fn main() -> Result<()> {
                     .join("\n  ");
                 anyhow::bail!("Basic Writer validation failed: {exception}\n  {trace}");
             }
-            if lcd_before.pixels == lcd_after.pixels {
-                anyhow::bail!("Basic Writer validation failed: input sequence did not change the LCD");
-            }
-            if lcd_after.pixels == lcd_after_exit.pixels {
-                anyhow::bail!("Basic Writer validation failed: Applets key did not change the LCD");
-            }
             println!(
                 "basic_writer_validation=ok pc=0x{:08x} steps={} exception={}",
+                snapshot.pc,
+                snapshot.steps,
+                snapshot.last_exception.as_deref().unwrap_or("none")
+            );
+            return Ok(());
+        }
+        if let Some(key) = probe_basic_writer_key {
+            if !is_full_system {
+                anyhow::bail!("Basic Writer probing requires the full NEO system firmware image");
+            }
+            let firmware = FirmwareRuntime::load_small_rom(&path)?;
+            let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+            recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            launch_basic_writer_through_menu(&mut session, lcd_ocr_scale)?;
+            bail_if_exception(&session, "Basic Writer focus")?;
+            print_ocr_checkpoint("basic_writer_probe_focus", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            print_basic_writer_state("basic_writer_probe_focus_state", &session);
+            session.press_matrix_code(key);
+            let before = basic_writer_state(&session);
+            wait_for_basic_writer_state(&mut session, |state| {
+                state.preview != before.preview
+                    || state.len != before.len
+                    || state.active_slot != before.active_slot
+            })?;
+            session.release_matrix_code(key);
+            session.run_steps(3_000_000);
+            bail_if_exception(&session, "Basic Writer probe key")?;
+            print_ocr_checkpoint("basic_writer_probe_after_key", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            print_basic_writer_state("basic_writer_probe_after_key_state", &session);
+            let snapshot = session.snapshot();
+            println!(
+                "basic_writer_probe=ok pc=0x{:08x} steps={} exception={}",
                 snapshot.pc,
                 snapshot.steps,
                 snapshot.last_exception.as_deref().unwrap_or("none")
@@ -596,6 +663,197 @@ fn bail_if_exception(session: &FirmwareSession, label: &str) -> Result<()> {
     Ok(())
 }
 
+fn print_ocr_checkpoint(label: &str, snapshot: &alpha_emu::firmware_session::FirmwareSnapshot, enabled: bool, scale: usize) -> Result<()> {
+    if !enabled {
+        return Ok(());
+    }
+    let text = ocr_visible_lcd(snapshot.text_screen.as_deref(), &snapshot.lcd, scale)?;
+    println!("{label}:\n{}", text.trim_end());
+    Ok(())
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct BasicWriterState {
+    active_slot: u32,
+    preview: String,
+    len: u32,
+    cursor: u32,
+    viewport: u32,
+    last_exit_key: u32,
+}
+
+fn basic_writer_state(session: &FirmwareSession) -> BasicWriterState {
+    let active_slot = basic_writer_active_slot(session);
+    let mut state = basic_writer_slot_state(session, active_slot);
+    state.active_slot = active_slot;
+    state.last_exit_key = basic_writer_last_exit_key(session);
+    state
+}
+
+fn basic_writer_active_slot(session: &FirmwareSession) -> u32 {
+    let snapshot = session.snapshot();
+    let a5 = snapshot.a[5];
+    let state_base = a5.saturating_add(0x300) as usize;
+    let bytes = session.memory_bytes();
+    let read_u32 = |offset: usize| -> Option<u32> {
+        let start = state_base.checked_add(offset)?;
+        let chunk = bytes.get(start..start + 4)?;
+        Some(u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+    };
+    read_u32(0).unwrap_or_default()
+}
+
+fn basic_writer_last_exit_key(session: &FirmwareSession) -> u32 {
+    let snapshot = session.snapshot();
+    let a5 = snapshot.a[5];
+    let state_base = a5.saturating_add(0x300) as usize;
+    let bytes = session.memory_bytes();
+    const SLOT_OFFSET: usize = 4;
+    const SLOT_BYTES: usize = 268;
+    let start = state_base + SLOT_OFFSET + 8 * SLOT_BYTES;
+    bytes
+        .get(start..start + 4)
+        .map(|chunk| u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .unwrap_or_default()
+}
+
+fn basic_writer_slot_state(session: &FirmwareSession, slot: u32) -> BasicWriterState {
+    let snapshot = session.snapshot();
+    let a5 = snapshot.a[5];
+    let state_base = a5.saturating_add(0x300) as usize;
+    let bytes = session.memory_bytes();
+    const SLOT_OFFSET: usize = 4;
+    const SLOT_BYTES: usize = 268;
+    let slot_index = slot.saturating_sub(1).min(7) as usize;
+    let slot_base = state_base + SLOT_OFFSET + slot_index * SLOT_BYTES;
+    let len = bytes
+        .get(slot_base..slot_base + 4)
+        .map(|chunk| u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .unwrap_or_default();
+    let cursor = bytes
+        .get(slot_base + 4..slot_base + 8)
+        .map(|chunk| u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .unwrap_or_default();
+    let viewport = bytes
+        .get(slot_base + 8..slot_base + 12)
+        .map(|chunk| u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .unwrap_or_default();
+    let preview = bytes
+        .get(slot_base + 12..slot_base + 20)
+        .unwrap_or(&[])
+        .iter()
+        .map(|byte| match *byte {
+            b' '..=b'~' => *byte as char,
+            b'\n' => 'n',
+            _ => '.',
+        })
+        .collect::<String>();
+    BasicWriterState {
+        active_slot: slot,
+        preview,
+        len,
+        cursor,
+        viewport,
+        last_exit_key: 0,
+    }
+}
+
+fn print_basic_writer_state(label: &str, session: &FirmwareSession) {
+    let state = basic_writer_state(session);
+    let snapshot = session.snapshot();
+    println!(
+        "{label}: slot={} preview={:?} len={} cursor={} viewport={} last_exit=0x{:08x} pc=0x{:08x} stopped={}",
+        state.active_slot,
+        state.preview,
+        state.len,
+        state.cursor,
+        state.viewport,
+        state.last_exit_key,
+        snapshot.pc,
+        snapshot.stopped
+    );
+}
+
+fn assert_basic_writer_state(
+    session: &FirmwareSession,
+    expected_slot: u32,
+    expected_preview: &str,
+    expected_len: u32,
+    expected_cursor: u32,
+) -> Result<()> {
+    let state = basic_writer_state(session);
+    if state.active_slot != expected_slot
+        || !state.preview.starts_with(expected_preview)
+        || state.len != expected_len
+        || state.cursor != expected_cursor
+    {
+        anyhow::bail!(
+            "Basic Writer state mismatch: expected slot {} preview prefix {:?} len {} cursor {}, got slot {} preview {:?} len {} cursor {}",
+            expected_slot,
+            expected_preview,
+            expected_len,
+            expected_cursor,
+            state.active_slot,
+            state.preview,
+            state.len,
+            state.cursor,
+        );
+    }
+    Ok(())
+}
+
+fn assert_basic_writer_slot_state(
+    session: &FirmwareSession,
+    slot: u32,
+    expected_preview: &str,
+    expected_len: u32,
+    expected_cursor: u32,
+) -> Result<()> {
+    let state = basic_writer_slot_state(session, slot);
+    if !state.preview.starts_with(expected_preview) || state.len != expected_len || state.cursor != expected_cursor {
+        anyhow::bail!(
+            "Basic Writer slot {} mismatch: expected preview prefix {:?} len {} cursor {}, got preview {:?} len {} cursor {}",
+            slot,
+            expected_preview,
+            expected_len,
+            expected_cursor,
+            state.preview,
+            state.len,
+            state.cursor,
+        );
+    }
+    Ok(())
+}
+
+fn wait_for_basic_writer_state(
+    session: &mut FirmwareSession,
+    predicate: impl Fn(&BasicWriterState) -> bool,
+) -> Result<()> {
+    const CHUNK_STEPS: usize = 50_000;
+    const MAX_STEPS: usize = 3_000_000;
+
+    let mut elapsed = 0;
+    while elapsed < MAX_STEPS {
+        session.run_steps(CHUNK_STEPS);
+        elapsed += CHUNK_STEPS;
+        bail_if_exception(session, "Basic Writer wait")?;
+        let state = basic_writer_state(session);
+        if predicate(&state) {
+            return Ok(());
+        }
+    }
+
+    let state = basic_writer_state(session);
+    anyhow::bail!(
+        "Basic Writer state did not reach expected condition within {} steps; slot {} preview {:?} len {} exit=0x{:08x}",
+        MAX_STEPS,
+        state.active_slot,
+        state.preview,
+        state.len,
+        state.last_exit_key,
+    );
+}
+
 fn scan_special_keys(base_session: &FirmwareSession) {
     for raw in 0..=0x7f {
         let mut session = base_session.clone();
@@ -741,13 +999,17 @@ fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
     session.run_steps(500_000);
 }
 
-fn launch_basic_writer_through_menu(session: &mut FirmwareSession) {
-    for _ in 0..11 {
-        session.tap_matrix_code(0x15);
+fn launch_basic_writer_through_menu(session: &mut FirmwareSession, _ocr_scale: usize) -> Result<()> {
+    for _ in 0..29 {
+        session.tap_matrix_code_long(0x15);
         session.run_steps(250_000);
     }
-    session.tap_matrix_code(0x69);
-    session.run_steps(500_000);
+    session.press_matrix_code(0x69);
+    session.run_steps(3_000_000);
+    session.release_matrix_code(0x69);
+    session.run_steps(3_000_000);
+    session.clear_keyboard_transients();
+    Ok(())
 }
 
 fn launch_forth_mini_for_debugging(session: &mut FirmwareSession) -> Result<()> {
@@ -1154,6 +1416,11 @@ fn write_lcd_debug_dump(
     write_lcd_pbm(snapshot, &full_pbm_path)?;
     write_lcd_pbm(&visible, &visible_pbm_path)?;
     write_lcd_pbm(&visible_scaled, &visible_scaled_pbm_path)?;
+    if let Some(text_screen) = text_screen {
+        let text_screen_path = dir.join("text-screen.txt");
+        std::fs::write(&text_screen_path, text_screen)?;
+        println!("lcd_dump_text_screen={}", text_screen_path.display());
+    }
     println!(
         "lcd_dump bits={} full_pbm={} visible_pbm={} visible_ocr_pbm={}",
         full_bits_path.display(),

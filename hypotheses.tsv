@@ -1,101 +1,140 @@
-keyboard layout handling is implemented in full OS firmware and Dvorak references point to menu strings plus layout tables	proven
-previous HID-focused hypothesis for alphaword layout switching was the wrong layer	disproven
-layout selection uses the Dvorak-related strings plus a logical-key remap table in full OS	proven
-layout selector byte is 0x5d36 and value 3 is the default QWERTY pass-through mode	proven
-internal layout values 0,1,2 map to the three alternate layouts and likely correspond to Dvorak/Left/Right in UI order	needs further investigation
-Direct stock Calculator launch context is sufficient to validate keyboard interaction in headless mode	disproven
-Real SmartApplets boot plus chooser navigation is the reliable acceptance path for validating stock Calculator in headless mode	proven
-Headless --type-at drops shifted printable symbols because matrix_key_for_char only maps unshifted keys	proven
-Custom OCR atlas applet would be the best path for precise LCD OCR	not relevant
-The emulator can reconstruct applet LCD text more precisely by capturing A-line text traps than by bitmap OCR	proven
-Stock Calculator REPL printable input should use the firmware display-table character mapping rather than the HID/logical matrix mapping	disproven
-Headless type-at/type-now drops some printable Calculator input because it uses the short tap_char pulse instead of the debug tap profile	proven
-Exact Czech top-row shifted-digit behavior is impossible with the current single logical remap table	disproven
-Forth Mini exported package stale relative to source before rebuild	needs further investigation
+A Czech full-layout patch should hook inside 0x423c7c after 0x423d7a remap so it can stay layout-slot-specific	needs further investigation
+A custom Betawise-based applet using syscall stubs plus A5+0x300 state can run correctly in the full-system emulator	proven
+Alpha GUI black area is caused by OS/window compositor outside the app, not egui layout	disproven
+Alpha GUI content is clipped by explicit viewport max/min sizing instead of root UI fill	disproven
+Alpha GUI root UI does not fill native window, so only the occupied content rect is painted and the rest remains black	proven
+AlphaGUI Android debug APK is unusable on-device because it embeds devUrl localhost:1420 in assets/tauri.conf.json	proven
+AlphaGUI Android old icon is caused by stale installed launcher state rather than current regenerated mipmap assets	needs further investigation
+AlphaGUI debug DMG bundling failure is caused by local macOS DMG packaging environment, not icon configuration	proven
 AlphaWord has a later key-to-character stage beyond the documented logical remap table	proven
-Firmware contains separate character lookup tables after the layout/key stage	proven
-Forth Mini modal on_focus keyboard loop is fighting the full OS applet input path; restoring event-driven Char/Key callbacks should fix live REPL behavior	proven
-Physical raw key 0x5c is the AlphaWord text-entry path for the stock '1' key	proven
-Table 0x44c288 indexed by logical 0x38 is not the direct AlphaWord unshifted typing table for stock '1'	disproven
 AlphaWord printable char delivery uses low RAM bytes 0x433/0x434/0x435 rather than reading 0x44c288 directly at send time	proven
-Ordinary printable chars reach AlphaWord through 0x434eb4/0x434eb8..0x434ee8 -> 0x417d00 -> 0x417acc	proven
-Shifted key-event dispatch uses 0x4183a6..0x4183ae -> 0x418754..0x41878a -> 0x417ae6, separate from the printable-char send path	proven
-Shifted printable chars rejoin the ordinary printable pipeline via 0x435a20..0x435a5a before 0x434eb8..0x434ee8	proven
-Forth Mini full-system runs may still be loading stale applet state via recovery seed	needs further investigation
-Forth Mini full-system runs may still be loading stale applet state via recovery seed	disproven
-Forth Mini modal loop receives raw-key prompt input correctly in full-system headless mode	proven
-Forth Mini rows 1-3 can render fixed text in full-system headless mode	proven
-Forth Mini composed transcript rows lose bytes after the first command byte during line-buffer composition	proven
-Dynamic transcript-line composition in applet memory should be replaced by segmented row drawing	needs further investigation
-Fresh full-system build->reinit still leaves Forth Mini blank after Enter	proven
-Switching Forth Mini back to event-driven on_char/on_key with plain transcript rows fixes the live blank screen	disproven
-Current live failure is not caused by stale exported applet package or stale recovery seed	proven
-Forth Mini full-system callback sequence on real menu launch includes SetFocus followed by repeated message-0 callbacks	proven
-Full-system Enter for Forth Mini is delivered as a Key (0x21) callback	disproven
-Full-system Enter for Forth Mini is delivered as a Char (0x20) callback with param 0x0d	proven
+Android JNI write and USB permission calls now clear Java exceptions before converting JNI call results	proven
+Android JNI write/USB permission calls can still bypass exception clearing because call_static_method uses ? before check_exception	proven
+Android SAF JNI class lookup fails because Rust attached threads use a class loader that cannot resolve app classes via FindClass	proven
+Android SAF JNI class lookup fails because the MainActivity class is absent from the APK	disproven
+Android SAF picker command can hang indefinitely when activity result is lost because the blocking queue has no timeout	proven
+Android SAF picker failures and lost activity results are now bounded and propagated to Rust	proven
+Android USB permission flow now waits for the permission broadcast result before continuing	proven
+Android USB permission request now acknowledges UI-thread registration and cancels delayed setup after timeout	proven
+Android USB permission wait can race UI-thread receiver registration because background thread starts final wait before UI setup is acknowledged	proven
+Android content:// applet file reads are now routed through ContentResolver instead of fs::read	proven
+Android packaged permissions match SAF plus USB-host design without obsolete external-storage permissions	proven
+Backup path picker still appears inert because frontend and Android bridge convert native picker failures into silent cancellation	proven
+Basic Writer Enter/newline bug is caused by using LF in the document model while the firmware TextBox uses CR line breaks	proven
+Basic Writer GUI key presses appear inert because GUI matrix taps only advance 2,000 steps, too short for the firmware to poll and dispatch applet key input	needs further investigation
+Basic Writer GUI typing is broken because direct validation bypassed the real firmware matrix-key dispatch path	needs further investigation
+Basic Writer SDK refactor reintroduced a forbidden .got section because a shared textbox-exit slice constant created global-pointer data	proven
+Basic Writer applet-state inspection via current A5+0x300 after launch reflects real editor memory	disproven
+Basic Writer bad scrolling around line breaks is a consequence of feeding LF into the firmware TextBox instead of its native CR line breaks	proven
+Basic Writer callback decoding is wrong for post-launch GUI typing	disproven
+Basic Writer can use currently known AlphaWord file traps to implement owned-file load/save/commit without more reverse engineering	disproven
+Basic Writer char validation crash is caused by the direct-message harness running too many steps after a fast callback returns into invalid validation context	proven
+Basic Writer emulator validation crashes because validation applet memory at 0x7f000 overlaps the validation stack for a 4 KiB editor state	proven
+Basic Writer file_count=8 packaging is required for firmware key dispatch	disproven
+Basic Writer first post-launch key read is a stale chooser event and draining the firmware key queue on focus will restore real input	disproven
+Basic Writer header file_count=0 is sufficient to restore Char/Key callbacks	disproven
+Basic Writer idle message path decodes raw matrix key codes as logical key codes	proven
+Basic Writer keyboard trap returns firmware text bytes directly rather than logical-key values	disproven
+Basic Writer large black rectangle on focus is caused by passing a wide cursor region into the firmware row/cursor trap instead of a single-cell cursor width	proven
+Basic Writer large-struct copies in hot path may be clobbering target state	needs further investigation
+Basic Writer launched through the chooser still ignores host text injection via type-at/type-now	proven
+Basic Writer launches through the chooser when Enter is held after scheduled Down events	proven
+Basic Writer m68k release link fails because the applet uses operations that require compiler-builtins integer helper symbols such as __mulsi3	proven
+Basic Writer menu launch helper opens the applet once its OCR text is visible	needs further investigation
+Basic Writer modal on_focus read_key loop can receive post-launch text input without returning control to the OS	disproven
+Basic Writer modal read_key trap returns physical matrix codes rather than logical key values	proven
+Basic Writer multi-key failure is still inside emulator/firmware callback sequencing after the first accepted key	needs further investigation
+Basic Writer only receives one post-focus idle dispatch because the applet does not yield/request continued scheduling the way AlphaWord does	needs further investigation
+Basic Writer package fails with .got because applet code uses bounds-checked indexing that pulls in panic formatting/GOT-backed data	proven
+Basic Writer receives SetFocus after chooser launch but no subsequent Char/Key callbacks	proven
+Basic Writer requires a custom message-0 entry path to receive interactive key handling under real firmware dispatch	proven
+Basic Writer second key fails because post-first-key row selection leaves later keys on other rows invisible to the key-read path	disproven
+Basic Writer traps the Applets key because on_key returns OK for the applets logical key instead of APPLET_EXIT	needs further investigation
+Basic Writer write metadata table is the reason Char/Key callbacks are suppressed	disproven
+Betawise ELF images embed their own OS3K header/payload/footer and must be unwrapped before alpha-neo-pack repackaging	proven
+Betawise applet runtime incompatibility is caused by Homebrew m68k-elf-gcc lacking Betawise's patched data-segment/codegen behavior	disproven
+Betawise local m68k-elf toolchain build is not required on this machine if Homebrew m68k-elf-gcc installs cleanly	proven
+Betawise os3k.c runtime wrapper is still incompatible with the current full-system emulator focus path after repackaging	proven
+Betawise raw OS3KApp images are directly compatible with the current emulator applet loader	disproven
+Building the transcript row in a local buffer before copying it into transcript_3 fixes the live truncation	disproven
+Clearing scripted keyboard phases after menu launch must preserve the firmware-selected keyboard rows	proven
+Correct mobile pattern is viewport-fit=cover with safe-area padding only on edge UI and content bottom reserved as nav height plus bottom inset	proven
 Current Forth Mini drops full-system Enter because on_char ignores 0x0d and on_key never receives it	proven
+Current live failure is not caused by stale exported applet package or stale recovery seed	proven
+Custom Android SAF picker plus ContentResolver writer can support real backup folders without filesystem paths	proven
+Custom OCR atlas applet would be the best path for precise LCD OCR	not relevant
+Dashboard backup path button does not open Android picker because WebView userAgent detection does not route to the Android SAF command	proven
+Direct stock Calculator launch context is sufficient to validate keyboard interaction in headless mode	disproven
+Dynamic transcript-line composition in applet memory should be replaced by segmented row drawing	needs further investigation
+Exact Czech top-row shifted-digit behavior is impossible with the current single logical remap table	disproven
+Firmware contains separate character lookup tables after the layout/key stage	proven
+First-time Android USB permission flow is incomplete because requestPermission has no grant wait/callback path	proven
+Forth Mini composed transcript rows lose bytes after the first command byte during line-buffer composition	proven
+Forth Mini enter() is not executing in the live full-system path	disproven
+Forth Mini exported package stale relative to source before rebuild	needs further investigation
+Forth Mini full-system callback sequence on real menu launch includes SetFocus followed by repeated message-0 callbacks	proven
+Forth Mini full-system runs may still be loading stale applet state via recovery seed	disproven
+Forth Mini input_len is already corrupted before Enter in the live full-system path	disproven
+Forth Mini live '.s' rendering is now correct; the remaining live output bug is specific to '.' pending-output state	proven
 Forth Mini live line truncation is caused by by-value line copies in draw()	disproven
 Forth Mini live line truncation is specific to the success-transcript path after evaluation	proven
-Patching the generic 0x434f14 printable-byte writer will affect non-keyboard firmware text paths too	proven
-Guarding the 0x434f14 hook only on RAM byte 0x423 is sufficient to limit translation to typed keyboard input	disproven
-The current Czech patcher regression is caused by the late printable-char hook path replacing the device-proven layout-table remap	proven
-Building the transcript row in a local buffer before copying it into transcript_3 fixes the live truncation	disproven
-Forth Mini enter() is not executing in the live full-system path	disproven
-Forth Mini live stack state updates correctly after Enter, but runtime line initialization leaves transcript buffers zero-filled	proven
-Forth Mini input_len is already corrupted before Enter in the live full-system path	disproven
-Restoring the documented A5 + 0x300 REPL placement fixes the live Forth Mini transcript truncation	disproven
-Volatile byte access for line buffers fixes the live Forth Mini transcript truncation	disproven
-Forth Mini local command_len remains stable across eval in the live full-system path	disproven
-Forth Mini local command_len is corrupted across eval before transcript rendering in the live full-system path	proven
-Remaining live Forth Mini bug is caused by '.' not reaching the applet input path	disproven
-Typed '.' words reach Forth Mini through the live full-system path, but success-transcript assembly after output words is still corrupted	proven
 Forth Mini live output-word corruption starts at integer rendering in write_i32	proven
-Forth Mini live '.s' rendering is now correct; the remaining live output bug is specific to '.' pending-output state	proven
-The live AlphaWord key-to-char translator for the seeded typing path is 0x423c7c and not the older 0x434eea/0x4252f6 path	proven
-A Czech full-layout patch should hook inside 0x423c7c after 0x423d7a remap so it can stay layout-slot-specific	needs further investigation
-The modifier word in d7 at 0x423c7c contains enough shift-state information to generate full Czech ASCII pairs	needs further investigation
-The . command bug is caused by pending_output_kind not preserving the popped value across later tokens on the same input line	proven
-Persisting the popped value in REPL state fixes the dot command transcript bug without regressing existing Forth Mini unit behavior	proven
-The new Czech 0x423c7c hook survives a normal boot with the existing recovery seed	disproven
-The new Czech 0x423c7c hook itself is invalid and crashes even on a clean boot	proven
-The observed address error is caused by interaction with the stale recovery seed rather than the patched OS code path itself	disproven
-The Czech hook crashes because the trampoline overwrote only 8 bytes and split the original move.w 0x20(a7),d7 instruction	proven
-The second Czech hook crash is caused by using jsr at the function entry, which leaves an extra internal return address on the stack for the override rts path	proven
-The live prompt-line bug is caused by ordinary typing arriving through on_key while current Forth Mini only redraws on on_char	proven
-The current Czech hook build survives a seeded emulator boot for at least 15,000,000 steps without exception	proven
-Restoring printable and backspace handling on on_key without reclaiming Enter fixes the live prompt-line path without regressing existing tests	proven
-In the menu-launched emulator path, prompt text disappears because a later callback after keypress repaints without the current input line	needs further investigation
-Patching the startup fallback at 0x423ba2 from layout 3 to the replaced slot should keep Czech active across restart instead of falling back to QWERTY	proven
+Forth Mini live stack state updates correctly after Enter, but runtime line initialization leaves transcript buffers zero-filled	proven
+Forth Mini local command_len is corrupted across eval before transcript rendering in the live full-system path	proven
+Forth Mini local command_len remains stable across eval in the live full-system path	disproven
+Forth Mini modal loop receives raw-key prompt input correctly in full-system headless mode	proven
+Forth Mini modal on_focus keyboard loop is fighting the full OS applet input path; restoring event-driven Char/Key callbacks should fix live REPL behavior	proven
 Forth Mini prompt rendering uses the SDK text-trap display path, so an empty emulator text_screen means the draw callback did not run rather than an OCR blind spot	needs further investigation
-Alpha GUI root UI does not fill native window, so only the occupied content rect is painted and the rest remains black	proven
-Alpha GUI content is clipped by explicit viewport max/min sizing instead of root UI fill	disproven
-Alpha GUI black area is caused by OS/window compositor outside the app, not egui layout	disproven
-Tauri Android safe-area regression is caused by applying safe-area padding to the root plus header/footer, double-counting top inset and mispositioning fixed bottom nav	proven
-Correct mobile pattern is viewport-fit=cover with safe-area padding only on edge UI and content bottom reserved as nav height plus bottom inset	proven
-Tauri dialog open({ directory: true }) cannot open on Android because mobile folder picking is not implemented in tauri-plugin-dialog	proven
+Forth Mini rows 1-3 can render fixed text in full-system headless mode	proven
+Fresh full-system build->reinit still leaves Forth Mini blank after Enter	proven
+Full-system Enter for Forth Mini is delivered as a Char (0x20) callback with param 0x0d	proven
+Full-system Enter for Forth Mini is delivered as a Key (0x21) callback	disproven
+GUI emulator stopped responding because non-character GUI keys were switched from stable press/release semantics to experimental tap semantics	proven
+GUI emulator stopped responding because printable host input lost the egui Event::Text path during recent GUI keyboard refactors	proven
+Guarding the 0x434f14 hook only on RAM byte 0x423 is sufficient to limit translation to typed keyboard input	disproven
+Headless --type-at drops shifted printable symbols because matrix_key_for_char only maps unshifted keys	proven
+Headless Basic Writer left-arrow validation was failing because the validator used an all-rows tap path that this applet flow does not consume	proven
+Headless type-at/type-now drops some printable Calculator input because it uses the short tap_char pulse instead of the debug tap profile	proven
+Homebrew m68k-elf-gcc must be pinned to 68000 codegen to avoid unsupported long branch instructions on the target firmware	proven
+Homebrew packaged m68k-elf-gcc is available and should replace the failed local Betawise toolchain build	proven
+Homebrew packaged m68k-elf-gcc needs freestanding compilation to use GCC's built-in stdint headers without target libc	proven
+In the menu-launched emulator path, prompt text disappears because a later callback after keypress repaints without the current input line	needs further investigation
 Missing dialog permission prevents Android folder picker from opening	disproven
-Custom Android SAF picker plus ContentResolver writer can support real backup folders without filesystem paths	proven
-Dashboard backup path button does not open Android picker because WebView userAgent detection does not route to the Android SAF command	proven
-Backup path picker still appears inert because frontend and Android bridge convert native picker failures into silent cancellation	proven
-Android SAF picker command can hang indefinitely when activity result is lost because the blocking queue has no timeout	proven
 Mobile added-applet file support is incomplete because content:// URI reads are treated as filesystem paths	proven
-First-time Android USB permission flow is incomplete because requestPermission has no grant wait/callback path	proven
+Ordinary printable chars reach AlphaWord through 0x434eb4/0x434eb8..0x434ee8 -> 0x417d00 -> 0x417acc	proven
+Patching the generic 0x434f14 printable-byte writer will affect non-keyboard firmware text paths too	proven
+Patching the startup fallback at 0x423ba2 from layout 3 to the replaced slot should keep Czech active across restart instead of falling back to QWERTY	proven
+Persisting the popped value in REPL state fixes the dot command transcript bug without regressing existing Forth Mini unit behavior	proven
+Physical raw key 0x5c is the AlphaWord text-entry path for the stock '1' key	proven
 Picker/file-dialog errors are now surfaced through the shared progress error dialog instead of disappearing in fire-and-forget handlers	proven
-Android SAF picker failures and lost activity results are now bounded and propagated to Rust	proven
-Android content:// applet file reads are now routed through ContentResolver instead of fs::read	proven
-Android USB permission flow now waits for the permission broadcast result before continuing	proven
-Android JNI write/USB permission calls can still bypass exception clearing because call_static_method uses ? before check_exception	proven
-Android USB permission wait can race UI-thread receiver registration because background thread starts final wait before UI setup is acknowledged	proven
-Basic Writer m68k release link fails because the applet uses operations that require compiler-builtins integer helper symbols such as __mulsi3	proven
-Basic Writer can use currently known AlphaWord file traps to implement owned-file load/save/commit without more reverse engineering	disproven
-Basic Writer package fails with .got because applet code uses bounds-checked indexing that pulls in panic formatting/GOT-backed data	proven
-Basic Writer emulator validation crashes because validation applet memory at 0x7f000 overlaps the validation stack for a 4 KiB editor state	proven
-Basic Writer char validation crash is caused by the direct-message harness running too many steps after a fast callback returns into invalid validation context	proven
-Basic Writer GUI typing is broken because direct validation bypassed the real firmware matrix-key dispatch path	needs further investigation
-Basic Writer traps the Applets key because on_key returns OK for the applets logical key instead of APPLET_EXIT	needs further investigation
-Basic Writer GUI key presses appear inert because GUI matrix taps only advance 2,000 steps, too short for the firmware to poll and dispatch applet key input	needs further investigation
-Android JNI write and USB permission calls now clear Java exceptions before converting JNI call results	proven
-Android USB permission request now acknowledges UI-thread registration and cancels delayed setup after timeout	proven
-Android packaged permissions match SAF plus USB-host design without obsolete external-storage permissions	proven
-Android SAF JNI class lookup fails because the MainActivity class is absent from the APK	disproven
-Android SAF JNI class lookup fails because Rust attached threads use a class loader that cannot resolve app classes via FindClass	proven
+Real SmartApplets boot plus chooser navigation is the reliable acceptance path for validating stock Calculator in headless mode	proven
+Remaining live Forth Mini bug is caused by '.' not reaching the applet input path	disproven
+Restoring printable and backspace handling on on_key without reclaiming Enter fixes the live prompt-line path without regressing existing tests	proven
+Restoring the documented A5 + 0x300 REPL placement fixes the live Forth Mini transcript truncation	disproven
+Shifted key-event dispatch uses 0x4183a6..0x4183ae -> 0x418754..0x41878a -> 0x417ae6, separate from the printable-char send path	proven
+Shifted printable chars rejoin the ordinary printable pipeline via 0x435a20..0x435a5a before 0x434eb8..0x434ee8	proven
+Small ROM physical entry sequence is Right Shift + comma + period + slash at boot, followed by password ernie	proven
+Stock Calculator REPL printable input should use the firmware display-table character mapping rather than the HID/logical matrix mapping	disproven
+Switching Forth Mini back to event-driven on_char/on_key with plain transcript rows fixes the live blank screen	disproven
+Table 0x44c288 indexed by logical 0x38 is not the direct AlphaWord unshifted typing table for stock '1'	disproven
+Tauri Android safe-area regression is caused by applying safe-area padding to the root plus header/footer, double-counting top inset and mispositioning fixed bottom nav	proven
+Tauri dialog open({ directory: true }) cannot open on Android because mobile folder picking is not implemented in tauri-plugin-dialog	proven
+The . command bug is caused by pending_output_kind not preserving the popped value across later tokens on the same input line	proven
+The Czech hook crashes because the trampoline overwrote only 8 bytes and split the original move.w 0x20(a7),d7 instruction	proven
+The current Czech hook build survives a seeded emulator boot for at least 15,000,000 steps without exception	proven
+The current Czech patcher regression is caused by the late printable-char hook path replacing the device-proven layout-table remap	proven
+The emulator can reconstruct applet LCD text more precisely by capturing A-line text traps than by bitmap OCR	proven
+The live AlphaWord key-to-char translator for the seeded typing path is 0x423c7c and not the older 0x434eea/0x4252f6 path	proven
+The live prompt-line bug is caused by ordinary typing arriving through on_key while current Forth Mini only redraws on on_char	proven
+The modifier word in d7 at 0x423c7c contains enough shift-state information to generate full Czech ASCII pairs	needs further investigation
+The new Czech 0x423c7c hook itself is invalid and crashes even on a clean boot	proven
+The new Czech 0x423c7c hook survives a normal boot with the existing recovery seed	disproven
+The observed address error is caused by interaction with the stale recovery seed rather than the patched OS code path itself	disproven
+The second Czech hook crash is caused by using jsr at the function entry, which leaves an extra internal return address on the stack for the override rts path	proven
+Typed '.' words reach Forth Mini through the live full-system path, but success-transcript assembly after output words is still corrupted	proven
+Volatile byte access for line buffers fixes the live Forth Mini transcript truncation	disproven
+internal layout values 0,1,2 map to the three alternate layouts and likely correspond to Dvorak/Left/Right in UI order	needs further investigation
+keyboard layout handling is implemented in full OS firmware and Dvorak references point to menu strings plus layout tables	proven
+layout selection uses the Dvorak-related strings plus a logical-key remap table in full OS	proven
+layout selector byte is 0x5d36 and value 3 is the default QWERTY pass-through mode	proven
+previous HID-focused hypothesis for alphaword layout switching was the wrong layer	disproven

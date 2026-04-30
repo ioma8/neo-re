@@ -339,6 +339,16 @@ impl AlphaEmuApp {
             handled |= self.modifier_state.sync(session, input.modifiers);
             for event in &input.events {
                 match event {
+                    egui::Event::Text(text)
+                        if !input.modifiers.ctrl && !input.modifiers.mac_cmd =>
+                    {
+                        for character in text.chars() {
+                            if let Some(tap) = tap_for_text_char(character) {
+                                tap.apply_as_text(session, input.modifiers.shift);
+                                handled = true;
+                            }
+                        }
+                    }
                     egui::Event::Key {
                         key,
                         pressed,
@@ -435,6 +445,69 @@ impl MatrixTap {
             }
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TextTap {
+    character: char,
+    needs_shift: bool,
+}
+
+impl TextTap {
+    fn apply_as_text(self, session: &mut FirmwareSession, shift_already_held: bool) {
+        if self.needs_shift && !shift_already_held {
+            session.press_matrix_code(SHIFT_CODE);
+        }
+        session.tap_char(self.character);
+        if self.needs_shift && !shift_already_held {
+            session.release_matrix_code(SHIFT_CODE);
+        }
+    }
+}
+
+fn tap_for_text_char(character: char) -> Option<TextTap> {
+    let (character, needs_shift) = match character {
+        'A'..='Z' => (character.to_ascii_lowercase(), true),
+        'a'..='z'
+        | '0'..='9'
+        | '-'
+        | '='
+        | '['
+        | ']'
+        | '\\'
+        | ';'
+        | '\''
+        | '`'
+        | ','
+        | '.'
+        | '/' => (character, false),
+        '!' => ('1', true),
+        '@' => ('2', true),
+        '#' => ('3', true),
+        '$' => ('4', true),
+        '%' => ('5', true),
+        '^' => ('6', true),
+        '&' => ('7', true),
+        '*' => ('8', true),
+        '(' => ('9', true),
+        ')' => ('0', true),
+        '_' => ('-', true),
+        '+' => ('=', true),
+        '{' => ('[', true),
+        '}' => (']', true),
+        '|' => ('\\', true),
+        ':' => (';', true),
+        '"' => ('\'', true),
+        '~' => ('`', true),
+        '<' => (',', true),
+        '>' => ('.', true),
+        '?' => ('/', true),
+        _ => return None,
+    };
+    Some(TextTap {
+        character,
+        needs_shift,
+    })
 }
 
 const PLUS_CHORD: &[u8] = &[SHIFT_CODE, 0x40];
@@ -884,7 +957,7 @@ fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
 mod tests {
     use super::{
         MatrixTap, NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, PLUS_CHORD, matrix_code_for_key,
-        matrix_tap_for_key,
+        matrix_tap_for_key, tap_for_text_char,
     };
     use eframe::egui;
 
@@ -892,6 +965,51 @@ mod tests {
     use crate::lcd::{
         LcdSnapshot, cursor_blink_snapshot, probable_cursor_columns, probable_cursor_pixels,
     };
+
+    #[test]
+    fn printable_text_keys_are_covered() {
+        for character in "abcdefghijklmnopqrstuvwxyz0123456789-=[]\\;'`,./".chars() {
+            let tap = tap_for_text_char(character);
+            assert_eq!(
+                tap.map(|tap| (tap.character, tap.needs_shift)),
+                Some((character, false)),
+                "missing unshifted character {character:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn shifted_text_keys_are_covered() {
+        let expected = [
+            ('A', 'a'),
+            ('Z', 'z'),
+            ('!', '1'),
+            ('@', '2'),
+            ('#', '3'),
+            ('$', '4'),
+            ('%', '5'),
+            ('^', '6'),
+            ('&', '7'),
+            ('*', '8'),
+            ('(', '9'),
+            (')', '0'),
+            ('_', '-'),
+            ('+', '='),
+            ('{', '['),
+            ('}', ']'),
+            ('|', '\\'),
+            (':', ';'),
+            ('"', '\''),
+            ('~', '`'),
+            ('<', ','),
+            ('>', '.'),
+            ('?', '/'),
+        ];
+        for (input, base) in expected {
+            let tap = tap_for_text_char(input).expect("shifted key must be covered");
+            assert_eq!((tap.character, tap.needs_shift), (base, true));
+        }
+    }
 
     #[test]
     fn whitespace_and_editing_keys_are_covered_as_physical_keys() {

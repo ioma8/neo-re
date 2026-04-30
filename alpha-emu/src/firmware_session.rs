@@ -552,6 +552,15 @@ impl FirmwareSession {
         applet_name: &str,
         message: u32,
     ) -> Result<(), String> {
+        self.start_stock_applet_message_with_param_for_validation(applet_name, message, 0)
+    }
+
+    pub fn start_stock_applet_message_with_param_for_validation(
+        &mut self,
+        applet_name: &str,
+        message: u32,
+        param: u32,
+    ) -> Result<(), String> {
         let info = self
             .memory
             .find_applet_launch_info(applet_name)
@@ -576,8 +585,8 @@ impl FirmwareSession {
             .set_long(VALIDATION_STACK + 4, message)
             .ok_or_else(|| "failed to write validation message".to_string())?;
         self.memory
-            .set_long(VALIDATION_STACK + 8, info.entry_offset)
-            .ok_or_else(|| "failed to write validation entry offset argument".to_string())?;
+            .set_long(VALIDATION_STACK + 8, param)
+            .ok_or_else(|| "failed to write validation param".to_string())?;
         self.memory
             .set_long(VALIDATION_STACK + 12, VALIDATION_STATUS)
             .ok_or_else(|| "failed to write validation status pointer".to_string())?;
@@ -656,6 +665,10 @@ impl FirmwareSession {
 
     pub fn refresh_applet_storage_bounds(&mut self) {
         self.memory.refresh_applet_storage_bounds();
+    }
+
+    pub fn clear_keyboard_transients(&mut self) {
+        self.memory.clear_keyboard_transients();
     }
 
     #[cfg(test)]

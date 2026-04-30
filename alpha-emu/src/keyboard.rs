@@ -306,6 +306,12 @@ pub(crate) struct Keyboard {
 }
 
 impl Keyboard {
+    pub(crate) fn clear_transients(&mut self) {
+        self.script.clear();
+        self.phase = 0;
+        self.reads_in_phase = 0;
+    }
+
     pub(crate) fn press(&mut self, key: MatrixKey) {
         if !self.held.contains(&key) {
             self.held.push(key);
@@ -689,4 +695,5 @@ mod tests {
         assert_eq!(value & 0x02, 0x00);
         assert_eq!(value & 0x04, 0x00);
     }
+
 }

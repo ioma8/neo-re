@@ -166,6 +166,10 @@ impl EmuMemory {
         self.keyboard.hold_keys_exact_rows(keys, reads);
     }
 
+    pub(crate) fn clear_keyboard_transients(&mut self) {
+        self.keyboard.clear_transients();
+    }
+
     pub(crate) fn drain_mmio_accesses(&mut self) -> Vec<String> {
         std::mem::take(&mut self.mmio_accesses)
     }
