@@ -189,6 +189,18 @@ pub fn logical_key_for_matrix_code(value: u8) -> Option<u8> {
     matrix_code_to_logical(value)
 }
 
+pub struct MatrixTextKey {
+    pub shift: bool,
+    pub code: u8,
+}
+
+pub fn matrix_text_key(value: char) -> Option<MatrixTextKey> {
+    matrix_key_stroke_for_char(value).map(|stroke| MatrixTextKey {
+        shift: stroke.shift,
+        code: stroke.key.code(),
+    })
+}
+
 pub(crate) fn matrix_key_for_code(value: u8) -> Option<MatrixKey> {
     matrix_code_to_logical(value).map(|_| MatrixKey::new(value))
 }
@@ -588,6 +600,14 @@ mod tests {
         let plus = matrix_key_stroke_for_char('+').expect("plus should map");
         assert!(plus.shift);
         assert_eq!(plus.key.code(), matrix_key_for_char('=').unwrap().code());
+
+        let colon = matrix_key_stroke_for_char(':').expect("colon should map");
+        assert!(colon.shift);
+        assert_eq!(colon.key.code(), matrix_key_for_char(';').unwrap().code());
+
+        let star = matrix_key_stroke_for_char('*').expect("star should map");
+        assert!(star.shift);
+        assert_eq!(star.key.code(), matrix_key_for_char('8').unwrap().code());
 
         let uppercase = matrix_key_stroke_for_char('A').expect("uppercase should map");
         assert!(uppercase.shift);

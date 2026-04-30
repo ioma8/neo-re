@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use alpha_emu::firmware::FirmwareRuntime;
 use alpha_emu::firmware_session::FirmwareSession;
-use alpha_emu::keyboard::{logical_key_for_matrix_code, matrix_cells, matrix_key_label};
+use alpha_emu::keyboard::{logical_key_for_matrix_code, matrix_cells, matrix_key_label, matrix_text_key};
 use alpha_emu::lcd::{
     LcdSnapshot, cursor_blink_snapshot, render_snapshot_bits, scale_snapshot, visible_snapshot,
 };
@@ -320,32 +320,59 @@ fn main() -> Result<()> {
             recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
             session.run_realtime_cycles(220_000_000, 25_000_000);
             launch_forth_mini_through_menu(&mut session);
-            let lcd_before = session.lcd_snapshot();
-            for key in [0x5c, 0x69, 0x5b, 0x69, 0x40, 0x69] {
-                session.tap_matrix_code_long(key);
-                session.run_steps(300_000);
-            }
-            let lcd_after = session.lcd_snapshot();
+            bail_if_exception(&session, "Forth Mini focus")?;
+            print_ocr_checkpoint("forth_mini_focus", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            enter_forth_line_and_assert(
+                &mut session,
+                ": sq dup * ;",
+                "ok",
+                "Forth Mini define sq",
+            )?;
+            enter_forth_line_and_assert(&mut session, "7 sq .", "49", "Forth Mini sq eval 7")?;
+            enter_forth_line_and_assert(&mut session, "8 sq .", "64", "Forth Mini sq eval 8")?;
+            enter_forth_line_and_assert(&mut session, "9 sq .", "81", "Forth Mini sq eval 9")?;
+            print_ocr_checkpoint("forth_mini_after_sq", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+
+            enter_forth_line_and_assert(
+                &mut session,
+                ": ch if 11 else 22 then ;",
+                "ok",
+                "Forth Mini define ch",
+            )?;
+            enter_forth_line_and_assert(
+                &mut session,
+                "0 ch .",
+                "22",
+                "Forth Mini if/else false 1",
+            )?;
+            enter_forth_line_and_assert(
+                &mut session,
+                "1 ch .",
+                "11",
+                "Forth Mini if/else true 1",
+            )?;
+            enter_forth_line_and_assert(
+                &mut session,
+                "0 ch .",
+                "22",
+                "Forth Mini if/else false 2",
+            )?;
+            enter_forth_line_and_assert(
+                &mut session,
+                "1 ch .",
+                "11",
+                "Forth Mini if/else true 2",
+            )?;
+            print_ocr_checkpoint("forth_mini_if_else", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+
+            enter_forth_line(&mut session, ": d begin dup while dup . 1 - repeat drop ;");
+            bail_if_exception(&session, "Forth Mini define d")?;
+            enter_forth_line(&mut session, "3 d");
+            bail_if_exception(&session, "Forth Mini while/repeat")?;
+            assert_forth_screen_contains(&session, "3 2 1", "Forth Mini while/repeat")?;
+            print_ocr_checkpoint("forth_mini_while_repeat", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+
             let snapshot = session.snapshot();
-            if let Some(exception) = &snapshot.last_exception {
-                let trace = snapshot
-                    .trace
-                    .iter()
-                    .rev()
-                    .take(12)
-                    .cloned()
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join("\n  ");
-                anyhow::bail!("Forth Mini validation failed: {exception}\n  {trace}");
-            }
-            if lcd_before.pixels == lcd_after.pixels {
-                anyhow::bail!(
-                    "Forth Mini validation failed: menu-launched evaluation sequence did not change the LCD"
-                );
-            }
             println!(
                 "forth_mini_validation=ok pc=0x{:08x} steps={} exception={}",
                 snapshot.pc,
@@ -991,12 +1018,47 @@ fn print_lcd_samples(session: &mut FirmwareSession, interval_steps: usize, count
 }
 
 fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
-    for _ in 0..10 {
+    for _ in 0..19 {
         session.tap_matrix_code_long(0x15);
         session.run_steps(250_000);
     }
-    session.tap_matrix_code_long(0x69);
+    session.press_matrix_code(0x69);
+    session.run_steps(3_000_000);
+    session.release_matrix_code(0x69);
+    session.run_steps(3_000_000);
+    session.clear_keyboard_transients();
+}
+
+fn enter_forth_line(session: &mut FirmwareSession, line: &str) {
+    let _ = type_text_via_matrix(session, line);
+    session.press_matrix_code(0x69);
     session.run_steps(500_000);
+    session.release_matrix_code(0x69);
+    session.run_steps(500_000);
+}
+
+fn exit_forth_to_menu(session: &mut FirmwareSession) {
+    tap_key_now(session, 0x46);
+    session.run_steps(2_000_000);
+}
+
+fn assert_forth_screen_contains(session: &FirmwareSession, needle: &str, label: &str) -> Result<()> {
+    let text = session.snapshot().text_screen.unwrap_or_default();
+    if text.contains(needle) {
+        return Ok(());
+    }
+    anyhow::bail!("{label} failed: expected screen to contain {needle:?}, got:\n{text}");
+}
+
+fn enter_forth_line_and_assert(
+    session: &mut FirmwareSession,
+    line: &str,
+    needle: &str,
+    label: &str,
+) -> Result<()> {
+    enter_forth_line(session, line);
+    bail_if_exception(session, label)?;
+    assert_forth_screen_contains(session, needle, label)
 }
 
 fn launch_basic_writer_through_menu(session: &mut FirmwareSession, _ocr_scale: usize) -> Result<()> {
@@ -1013,10 +1075,7 @@ fn launch_basic_writer_through_menu(session: &mut FirmwareSession, _ocr_scale: u
 }
 
 fn launch_forth_mini_for_debugging(session: &mut FirmwareSession) -> Result<()> {
-    session
-        .start_applet_message_for_validation("Forth Mini", 0x19)
-        .map_err(|error| anyhow::anyhow!("failed to launch Forth Mini for debugging: {error}"))?;
-    session.run_steps(500_000);
+    focus_forth_mini_direct(session)?;
     if let Some(exception) = session.snapshot().last_exception.clone() {
         let trace = session
             .snapshot()
@@ -1031,6 +1090,14 @@ fn launch_forth_mini_for_debugging(session: &mut FirmwareSession) -> Result<()> 
             .join("\n  ");
         anyhow::bail!("Forth Mini debug launch failed: {exception}\n  {trace}");
     }
+    Ok(())
+}
+
+fn focus_forth_mini_direct(session: &mut FirmwareSession) -> Result<()> {
+    session
+        .start_applet_message_for_validation("Forth Mini", 0x19)
+        .map_err(|error| anyhow::anyhow!("failed to focus Forth Mini: {error}"))?;
+    session.run_steps(20_000);
     Ok(())
 }
 
@@ -1063,6 +1130,27 @@ fn type_text_now(session: &mut FirmwareSession, text: &str) {
     }
 }
 
+fn type_text_via_matrix(session: &mut FirmwareSession, text: &str) -> Result<()> {
+    const LEFT_SHIFT: u8 = 0x0e;
+    for value in text.chars() {
+        let key = matrix_text_key(value)
+            .ok_or_else(|| anyhow::anyhow!("no matrix key for character {value:?}"))?;
+        if key.shift {
+            session.press_matrix_code(LEFT_SHIFT);
+            session.run_steps(500_000);
+        }
+        session.press_matrix_code(key.code);
+        session.run_steps(300_000);
+        session.release_matrix_code(key.code);
+        session.run_steps(300_000);
+        if key.shift {
+            session.release_matrix_code(LEFT_SHIFT);
+            session.run_steps(300_000);
+        }
+    }
+    Ok(())
+}
+
 fn tap_key_now(session: &mut FirmwareSession, code: u8) {
     session.tap_matrix_code_debug(code);
     session.run_steps(300_000);
@@ -1077,6 +1165,18 @@ fn type_text_direct_to_forth(session: &mut FirmwareSession, text: &str) -> Resul
         if let Some(exception) = session.snapshot().last_exception {
             anyhow::bail!("Forth Mini char dispatch failed: {exception}");
         }
+    }
+    Ok(())
+}
+
+fn submit_forth_line_direct(session: &mut FirmwareSession, text: &str) -> Result<()> {
+    type_text_direct_to_forth(session, text)?;
+    session
+        .start_applet_message_with_param_for_validation("Forth Mini", 0x20, u32::from(b'\r'))
+        .map_err(|error| anyhow::anyhow!("failed to submit Forth Mini line: {error}"))?;
+    session.run_steps(20_000);
+    if let Some(exception) = session.snapshot().last_exception {
+        anyhow::bail!("Forth Mini submit failed: {exception}");
     }
     Ok(())
 }

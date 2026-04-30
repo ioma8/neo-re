@@ -544,7 +544,7 @@ impl FirmwareSession {
         applet_name: &str,
         message: u32,
     ) -> Result<(), String> {
-        self.start_applet_message_with_param_for_validation(applet_name, message, 0)
+        self.start_applet_message_with_param_for_validation_and_launch_info(applet_name, message, 0)
     }
 
     pub fn start_stock_applet_message_for_validation(
@@ -556,6 +556,15 @@ impl FirmwareSession {
     }
 
     pub fn start_stock_applet_message_with_param_for_validation(
+        &mut self,
+        applet_name: &str,
+        message: u32,
+        param: u32,
+    ) -> Result<(), String> {
+        self.start_applet_message_with_param_for_validation_and_launch_info(applet_name, message, param)
+    }
+
+    fn start_applet_message_with_param_for_validation_and_launch_info(
         &mut self,
         applet_name: &str,
         message: u32,
@@ -611,30 +620,7 @@ impl FirmwareSession {
         message: u32,
         param: u32,
     ) -> Result<(), String> {
-        let entry = self
-            .memory
-            .find_applet_entry(applet_name)
-            .ok_or_else(|| format!("applet not found: {applet_name}"))?;
-        const VALIDATION_STACK: u32 = 0x0007_fb00;
-        const VALIDATION_STATUS: u32 = 0x0000_1200;
-        const VALIDATION_APPLET_MEMORY: u32 = 0x0007_8000;
-        self.cpu.regs.pc = Wrapping(entry);
-        self.cpu.regs.ssp = Wrapping(VALIDATION_STACK);
-        self.cpu.regs.a[5] = Wrapping(VALIDATION_APPLET_MEMORY);
-        self.last_exception = None;
-        self.memory
-            .set_long(VALIDATION_STACK, 0x0042_6752)
-            .ok_or_else(|| "failed to write validation return address".to_string())?;
-        self.memory
-            .set_long(VALIDATION_STACK + 4, message)
-            .ok_or_else(|| "failed to write validation message".to_string())?;
-        self.memory
-            .set_long(VALIDATION_STACK + 8, param)
-            .ok_or_else(|| "failed to write validation param".to_string())?;
-        self.memory
-            .set_long(VALIDATION_STACK + 12, VALIDATION_STATUS)
-            .ok_or_else(|| "failed to write validation status pointer".to_string())?;
-        Ok(())
+        self.start_applet_message_with_param_for_validation_and_launch_info(applet_name, message, param)
     }
 
     #[must_use]
@@ -1060,12 +1046,15 @@ mod tests {
     }
 
     fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
-        for _ in 0..10 {
+        for _ in 0..19 {
             session.tap_matrix_code_long(0x15);
             session.run_steps(250_000);
         }
-        session.tap_matrix_code_long(0x69);
-        session.run_steps(500_000);
+        session.press_matrix_code(0x69);
+        session.run_steps(3_000_000);
+        session.release_matrix_code(0x69);
+        session.run_steps(3_000_000);
+        session.clear_keyboard_transients();
     }
 
 }
