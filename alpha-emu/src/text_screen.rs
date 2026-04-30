@@ -4,6 +4,7 @@ pub struct TextScreen {
     row: usize,
     col: usize,
     active: bool,
+    cursor_visible: bool,
 }
 
 impl Default for TextScreen {
@@ -13,6 +14,7 @@ impl Default for TextScreen {
             row: 0,
             col: 0,
             active: false,
+            cursor_visible: false,
         }
     }
 }
@@ -23,12 +25,18 @@ impl TextScreen {
         self.row = 0;
         self.col = 0;
         self.active = true;
+        self.cursor_visible = false;
     }
 
     pub fn set_cursor(&mut self, row: u32, col: u32, _width: u32) {
         self.row = row.saturating_sub(1) as usize;
         self.col = col.saturating_sub(1) as usize;
         self.active = true;
+    }
+
+    pub fn set_cursor_mode(&mut self, mode: u32) {
+        self.active = true;
+        self.cursor_visible = mode == 0x0f;
     }
 
     pub fn draw_char(&mut self, byte: u8) {
@@ -72,5 +80,17 @@ impl TextScreen {
             .collect::<Vec<_>>();
         let last_nonempty = lines.iter().rposition(|line| !line.is_empty()).unwrap_or(0);
         Some(lines[..=last_nonempty].join("\n"))
+    }
+
+    pub fn cursor_visible(&self) -> bool {
+        self.cursor_visible
+    }
+
+    pub fn cursor_row(&self) -> usize {
+        self.row
+    }
+
+    pub fn cursor_col(&self) -> usize {
+        self.col
     }
 }

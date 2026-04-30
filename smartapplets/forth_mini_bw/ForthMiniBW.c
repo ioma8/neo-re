@@ -113,9 +113,13 @@ static void DrawLine(uint8_t row, const uint8_t* line) {
 
 static void Draw(Repl_t* repl) {
     uint8_t prompt[LINE_WIDTH];
+    uint32_t cursor_col = repl->input_len + 1;
     ClearLine(prompt);
     for(uint32_t i = 0; i < repl->input_len && i < LINE_WIDTH; i++) {
         prompt[i] = repl->input[i];
+    }
+    if(cursor_col > LINE_WIDTH) {
+        cursor_col = LINE_WIDTH;
     }
     _OS3K_ClearScreen();
     SetCursorMode(CURSOR_MODE_HIDE);
@@ -123,6 +127,8 @@ static void Draw(Repl_t* repl) {
     DrawLine(2, repl->transcript_2);
     DrawLine(3, repl->transcript_3);
     DrawLine(4, prompt);
+    _OS3K_SetCursor(4, (uint8_t)cursor_col, CURSOR_MODE_SHOW);
+    SetCursorMode(CURSOR_MODE_SHOW);
 }
 
 static uint32_t WriteU32(uint8_t* line, uint32_t offset, uint32_t value) {

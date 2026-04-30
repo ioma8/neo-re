@@ -813,6 +813,12 @@ impl FirmwareSession {
                 }
                 self.text_screen.draw_c_string(&bytes);
             }
+            0xa018 => {
+                let Some(mode) = self.memory.peek_long(sp + 4) else {
+                    return;
+                };
+                self.text_screen.set_cursor_mode(mode);
+            }
             _ => {}
         }
     }
@@ -1020,6 +1026,23 @@ mod tests {
 
         let snapshot = session.snapshot();
         assert!(snapshot.last_exception.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn forth_mini_shows_visible_cursor_on_prompt_when_launched_through_menu()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = boot_full_system_smartapplets_for_forth_validation()?;
+        launch_forth_mini_through_menu(&mut session);
+
+        let snapshot = session.snapshot();
+        assert!(snapshot.last_exception.is_none());
+        let columns = crate::lcd::probable_cursor_columns(
+            &snapshot.lcd,
+            crate::lcd::NEO_VISIBLE_LCD_WIDTH,
+            crate::lcd::NEO_VISIBLE_LCD_HEIGHT,
+        );
+        assert!(columns.into_iter().any(|active| active));
         Ok(())
     }
 
