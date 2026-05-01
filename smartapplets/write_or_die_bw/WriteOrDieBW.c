@@ -25,19 +25,23 @@ static void ClampState(WodAppState_t* state) {
     if(state->word_goal < WOD_MIN_WORD_GOAL) state->word_goal = WOD_DEFAULT_WORD_GOAL;
     if(state->time_goal_seconds < WOD_MIN_TIME_SECONDS) state->time_goal_seconds = WOD_DEFAULT_TIME_SECONDS;
     if(state->grace_seconds < WOD_MIN_GRACE_SECONDS) state->grace_seconds = WOD_DEFAULT_GRACE_SECONDS;
+    if(state->display_pressure > WOD_PRESSURE_PENALTY) state->display_pressure = WOD_PRESSURE_SAFE;
     if(state->editor.len > WOD_MAX_TEXT_BYTES) state->editor.len = WOD_MAX_TEXT_BYTES;
     if(state->editor.cursor > state->editor.len) state->editor.cursor = state->editor.len;
 }
 
 static void StartChallenge(WodAppState_t* state) {
     uint32_t now = GetUptimeMilliseconds();
+    memset(&state->editor, 0, sizeof(state->editor));
     state->phase = WOD_PHASE_RUNNING;
     state->start_ms = now;
     state->last_activity_ms = now;
     state->last_penalty_ms = now;
+    state->final_word_count = 0;
     state->dirty = 1;
     storage_save(state);
     state->display_remaining_seconds = state->time_goal_seconds;
+    state->display_pressure = WOD_PRESSURE_SAFE;
     ui_draw_challenge(state, WOD_PRESSURE_SAFE, state->time_goal_seconds);
 }
 
@@ -50,6 +54,7 @@ static uint32_t RemainingSeconds(const WodAppState_t* state, uint32_t now) {
 
 static void DrawChallenge(WodAppState_t* state, WodPressure_t pressure, uint32_t remaining_seconds) {
     state->display_remaining_seconds = remaining_seconds;
+    state->display_pressure = pressure;
     ui_draw_challenge(state, pressure, remaining_seconds);
 }
 
@@ -190,17 +195,22 @@ static void HandleRunningIdle(WodAppState_t* state) {
     uint32_t now = GetUptimeMilliseconds();
     uint32_t idle = now - state->last_activity_ms;
     WodPressure_t pressure = challenge_pressure(idle, state->grace_seconds);
+    bool changed = false;
     if(pressure == WOD_PRESSURE_PENALTY &&
        now - state->last_penalty_ms >= challenge_penalty_interval_ms(state->grace_seconds)) {
         if(editor_delete_last_word(&state->editor)) {
             state->dirty = 1;
             storage_save(state);
+            changed = true;
         }
         state->last_penalty_ms = now;
     }
     CheckCompletion(state, now);
     if(state->phase == WOD_PHASE_RUNNING) {
-        DrawChallenge(state, pressure, RemainingSeconds(state, now));
+        uint32_t remaining = RemainingSeconds(state, now);
+        if(changed || pressure != state->display_pressure || remaining != state->display_remaining_seconds) {
+            DrawChallenge(state, pressure, remaining);
+        }
     }
 }
 

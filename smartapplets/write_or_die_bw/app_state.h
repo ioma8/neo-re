@@ -52,6 +52,7 @@ typedef struct {
     uint32_t final_word_count;
     uint32_t dirty;
     uint32_t display_remaining_seconds;
+    uint32_t display_pressure;
 } WodAppState_t;
 
 #endif

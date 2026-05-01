@@ -502,10 +502,11 @@ fn main() -> Result<()> {
             wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 2)?;
             press_key_now(&mut session, 0x69);
             wait_for_write_or_die_state(&mut session, |state| state.phase == 1)?;
-            type_text_via_matrix(&mut session, " four five six")?;
+            wait_for_write_or_die_state(&mut session, |state| state.len == 0 && state.cursor == 0)?;
+            type_text_via_matrix(&mut session, "one two three four five")?;
             wait_for_write_or_die_state(&mut session, |state| state.phase == 2)?;
             print_ocr_checkpoint("write_or_die_completed", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
-            assert_write_or_die_text_prefix(&session, "onentwo", "WriteOrDie completed text")?;
+            assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie completed text")?;
 
             exit_write_or_die_to_menu(&mut session);
             bail_if_exception(&session, "WriteOrDie exit to menu")?;
@@ -513,7 +514,7 @@ fn main() -> Result<()> {
             session.run_steps(1_500_000);
             bail_if_exception(&session, "WriteOrDie relaunch")?;
             assert_write_or_die_phase(&session, 2, "WriteOrDie persisted completed phase")?;
-            assert_write_or_die_text_prefix(&session, "onentwo", "WriteOrDie persisted text")?;
+            assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie persisted text")?;
 
             press_key_now(&mut session, 0x69);
             wait_for_write_or_die_state(&mut session, |state| state.phase == 0)?;
@@ -525,6 +526,7 @@ fn main() -> Result<()> {
             wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 2)?;
             press_key_now(&mut session, 0x69);
             wait_for_write_or_die_state(&mut session, |state| state.phase == 1 && state.goal_mode == 1)?;
+            wait_for_write_or_die_state(&mut session, |state| state.len == 0 && state.cursor == 0)?;
             let initial_remaining = write_or_die_state(&session).remaining_seconds_estimate;
             session.run_steps(2_500_000);
             let later_remaining = write_or_die_state(&session).remaining_seconds_estimate;
