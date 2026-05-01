@@ -1,5 +1,7 @@
 #include "../betawise-sdk/applet.h"
 #include "app_state.h"
+#include "challenge.h"
+#include "editor.h"
 #include "os3k.h"
 #include "ui.h"
 
@@ -22,6 +24,33 @@ static void StartChallenge(WodAppState_t* state) {
     state->last_activity_ms = now;
     state->last_penalty_ms = now;
     ui_draw_challenge(state, WOD_PRESSURE_SAFE, state->time_goal_seconds);
+}
+
+static uint32_t RemainingSeconds(const WodAppState_t* state, uint32_t now) {
+    if(state->goal_mode == WOD_GOAL_TIME) {
+        return challenge_remaining_seconds(now, state->start_ms, state->time_goal_seconds);
+    }
+    return state->time_goal_seconds;
+}
+
+static void CompleteChallenge(WodAppState_t* state) {
+    state->phase = WOD_PHASE_COMPLETED;
+    state->final_word_count = editor_word_count(&state->editor);
+    state->dirty = 1;
+    ui_draw_completed(state);
+}
+
+static void CheckCompletion(WodAppState_t* state, uint32_t now) {
+    if(state->phase != WOD_PHASE_RUNNING) {
+        return;
+    }
+    if(state->goal_mode == WOD_GOAL_WORDS &&
+       challenge_words_complete(editor_word_count(&state->editor), state->word_goal)) {
+        CompleteChallenge(state);
+    } else if(state->goal_mode == WOD_GOAL_TIME &&
+              challenge_time_complete(now, state->start_ms, state->time_goal_seconds)) {
+        CompleteChallenge(state);
+    }
 }
 
 static void AdjustSetup(WodAppState_t* state, int8_t delta) {
@@ -69,6 +98,81 @@ static void HandleSetupKey(WodAppState_t* state, uint32_t key, uint32_t* status)
     }
 }
 
+static bool ApplyChar(WodAppState_t* state, uint8_t byte) {
+    if(byte == '\r' || byte == '\n') {
+        return editor_insert_byte(&state->editor, '\n');
+    }
+    if(byte == 0x08 || byte == 0x7f) {
+        return editor_backspace(&state->editor);
+    }
+    if(byte >= ' ' && byte <= '~') {
+        return editor_insert_byte(&state->editor, (char)byte);
+    }
+    return false;
+}
+
+static void MarkActivity(WodAppState_t* state, uint32_t now) {
+    state->last_activity_ms = now;
+    state->last_penalty_ms = now;
+    state->dirty = 1;
+}
+
+static void HandleRunningChar(WodAppState_t* state, uint32_t param) {
+    uint32_t now = GetUptimeMilliseconds();
+    if(ApplyChar(state, param & 0xff)) {
+        MarkActivity(state, now);
+    }
+    CheckCompletion(state, now);
+    if(state->phase == WOD_PHASE_RUNNING) {
+        ui_draw_challenge(state, WOD_PRESSURE_SAFE, RemainingSeconds(state, now));
+    }
+}
+
+static void HandleRunningKey(WodAppState_t* state, uint32_t key, uint32_t* status) {
+    switch(key) {
+        case KEY_LEFT: editor_move_left(&state->editor); break;
+        case KEY_RIGHT: editor_move_right(&state->editor); break;
+        case KEY_UP: editor_move_up(&state->editor); break;
+        case KEY_DOWN: editor_move_down(&state->editor); break;
+        case KEY_BACKSPACE:
+            if(editor_backspace(&state->editor)) {
+                MarkActivity(state, GetUptimeMilliseconds());
+            }
+            break;
+        case KEY_APPLETS:
+        case KEY_ESC:
+            *status = APPLET_EXIT_STATUS;
+            break;
+        default:
+            break;
+    }
+    if(*status == 0) {
+        uint32_t now = GetUptimeMilliseconds();
+        CheckCompletion(state, now);
+        if(state->phase == WOD_PHASE_RUNNING) {
+            uint32_t idle = now - state->last_activity_ms;
+            ui_draw_challenge(state, challenge_pressure(idle, state->grace_seconds), RemainingSeconds(state, now));
+        }
+    }
+}
+
+static void HandleRunningIdle(WodAppState_t* state) {
+    uint32_t now = GetUptimeMilliseconds();
+    uint32_t idle = now - state->last_activity_ms;
+    WodPressure_t pressure = challenge_pressure(idle, state->grace_seconds);
+    if(pressure == WOD_PRESSURE_PENALTY &&
+       now - state->last_penalty_ms >= challenge_penalty_interval_ms(state->grace_seconds)) {
+        if(editor_delete_last_word(&state->editor)) {
+            state->dirty = 1;
+        }
+        state->last_penalty_ms = now;
+    }
+    CheckCompletion(state, now);
+    if(state->phase == WOD_PHASE_RUNNING) {
+        ui_draw_challenge(state, pressure, RemainingSeconds(state, now));
+    }
+}
+
 void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* status) {
     WodAppState_t* state = State();
     *status = 0;
@@ -77,8 +181,24 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
             SetDefaults(state);
             ui_draw_setup(state);
             break;
+        case MSG_CHAR:
+            if(state->phase == WOD_PHASE_RUNNING) {
+                HandleRunningChar(state, param);
+            }
+            break;
         case MSG_KEY:
-            HandleSetupKey(state, param & 0xff, status);
+            if(state->phase == WOD_PHASE_SETUP) {
+                HandleSetupKey(state, param & 0xff, status);
+            } else if(state->phase == WOD_PHASE_RUNNING) {
+                HandleRunningKey(state, param & 0xff, status);
+            } else if((param & 0xff) == KEY_APPLETS || (param & 0xff) == KEY_ESC) {
+                *status = APPLET_EXIT_STATUS;
+            }
+            break;
+        case MSG_IDLE:
+            if(state->phase == WOD_PHASE_RUNNING) {
+                HandleRunningIdle(state);
+            }
             break;
         default:
             *status = APPLET_UNHANDLED_STATUS;
