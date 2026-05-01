@@ -4,7 +4,7 @@ LD = m68k-elf-ld
 CFLAGS = -m68000 -mpcrel -fomit-frame-pointer -ffixed-a5 -ffixed-d7 -fshort-enums
 CFLAGS += -O1 -fno-inline -fno-optimize-sibling-calls -I"../betawise-sdk" -ffunction-sections -fdata-sections -ffreestanding
 LDFLAGS = -static -T WriteOrDieBW.lds --gc-sections
-OBJ = WriteOrDieBW.o syscall.o
+OBJ = WriteOrDieBW.o editor.o syscall.o
 TARGET = WriteOrDieBW.elf
 
 all: $(TARGET)
@@ -19,4 +19,4 @@ $(TARGET): $(OBJ) WriteOrDieBW.lds
 	$(LD) $(OBJ) $(LDFLAGS) -o $@
 
 clean:
-	rm -f WriteOrDieBW.o syscall.o WriteOrDieBW.elf
+	rm -f WriteOrDieBW.o editor.o syscall.o WriteOrDieBW.elf
