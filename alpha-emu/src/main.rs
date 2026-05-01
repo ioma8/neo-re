@@ -478,15 +478,34 @@ fn main() -> Result<()> {
             wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 2)?;
             press_key_now(&mut session, 0x69);
             wait_for_write_or_die_state(&mut session, |state| state.phase == 1)?;
-            type_text_via_matrix(&mut session, "one two three")?;
+            type_text_via_matrix(&mut session, "one")?;
+            press_key_now(&mut session, 0x69);
+            wait_for_write_or_die_state(&mut session, |state| state.len >= 4)?;
+            type_text_via_matrix(&mut session, "two three")?;
             wait_for_write_or_die_state(&mut session, |state| state.len >= 13)?;
+            assert_write_or_die_text_prefix(&session, "onentwo", "WriteOrDie newline text state")?;
+            assert_write_or_die_screen_contains(&session, "two", "WriteOrDie newline second line")?;
             let before_penalty = write_or_die_state(&session);
             session.run_steps(9_000_000);
             wait_for_write_or_die_state(&mut session, |state| state.len < before_penalty.len)?;
+            assert_write_or_die_screen_contains(&session, "DELETE", "WriteOrDie pressure display")?;
+            exit_write_or_die_to_menu(&mut session);
+            bail_if_exception(&session, "WriteOrDie partial exit")?;
+            relaunch_current_menu_item(&mut session);
+            session.run_steps(1_500_000);
+            bail_if_exception(&session, "WriteOrDie partial relaunch")?;
+            assert_write_or_die_phase(&session, 0, "WriteOrDie partial draft relaunch phase")?;
+            assert_write_or_die_text_prefix(&session, "onentwo", "WriteOrDie partial draft text")?;
+            press_key_now(&mut session, 0x15);
+            wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 1)?;
+            press_key_now(&mut session, 0x15);
+            wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 2)?;
+            press_key_now(&mut session, 0x69);
+            wait_for_write_or_die_state(&mut session, |state| state.phase == 1)?;
             type_text_via_matrix(&mut session, " four five six")?;
             wait_for_write_or_die_state(&mut session, |state| state.phase == 2)?;
             print_ocr_checkpoint("write_or_die_completed", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
-            assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie completed text")?;
+            assert_write_or_die_text_prefix(&session, "onentwo", "WriteOrDie completed text")?;
 
             exit_write_or_die_to_menu(&mut session);
             bail_if_exception(&session, "WriteOrDie exit to menu")?;
@@ -494,7 +513,7 @@ fn main() -> Result<()> {
             session.run_steps(1_500_000);
             bail_if_exception(&session, "WriteOrDie relaunch")?;
             assert_write_or_die_phase(&session, 2, "WriteOrDie persisted completed phase")?;
-            assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie persisted text")?;
+            assert_write_or_die_text_prefix(&session, "onentwo", "WriteOrDie persisted text")?;
 
             press_key_now(&mut session, 0x69);
             wait_for_write_or_die_state(&mut session, |state| state.phase == 0)?;
@@ -1045,6 +1064,14 @@ fn assert_write_or_die_text_prefix(session: &FirmwareSession, preview: &str, lab
     let state = write_or_die_state(session);
     if !state.preview.starts_with(preview) {
         anyhow::bail!("{label}: expected preview prefix {preview:?}, got {:?}", state.preview);
+    }
+    Ok(())
+}
+
+fn assert_write_or_die_screen_contains(session: &FirmwareSession, needle: &str, label: &str) -> Result<()> {
+    let text = session.snapshot().text_screen.unwrap_or_default();
+    if !text.contains(needle) {
+        anyhow::bail!("{label}: expected screen to contain {needle:?}, got {text:?}");
     }
     Ok(())
 }

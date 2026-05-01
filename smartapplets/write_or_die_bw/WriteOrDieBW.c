@@ -116,6 +116,7 @@ static void HandleSetupKey(WodAppState_t* state, uint32_t key, uint32_t* status)
             break;
     }
     if(*status == 0) {
+        storage_save(state);
         ui_draw_setup(state);
     }
 }
@@ -142,6 +143,7 @@ static void MarkActivity(WodAppState_t* state, uint32_t now) {
     state->last_activity_ms = now;
     state->last_penalty_ms = now;
     state->dirty = 1;
+    storage_save(state);
 }
 
 static void HandleRunningChar(WodAppState_t* state, uint32_t param) {
@@ -248,6 +250,9 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
             if(state->phase == WOD_PHASE_RUNNING) {
                 HandleRunningIdle(state);
             }
+            break;
+        case MSG_KILLFOCUS:
+            storage_save(state);
             break;
         default:
             *status = APPLET_UNHANDLED_STATUS;
