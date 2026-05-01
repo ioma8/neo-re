@@ -1,5 +1,5 @@
 pub const FILE_COUNT: usize = 8;
-pub const MAX_FILE_BYTES: usize = 4096;
+pub const MAX_FILE_BYTES: usize = 256;
 pub const SCREEN_ROWS: usize = 4;
 pub const SCREEN_COLS: usize = 28;
 
@@ -11,6 +11,7 @@ pub struct Viewport {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(not(test), allow(dead_code, reason = "navigation snapshots are exercised by host tests and reserved for file-slot resume behavior"))]
 struct NavigationState {
     cursor: usize,
     viewport: Viewport,
@@ -18,12 +19,14 @@ struct NavigationState {
 }
 
 #[repr(C)]
+#[cfg_attr(not(test), allow(dead_code, reason = "navigation snapshots are exercised by host tests and reserved for file-slot resume behavior"))]
 pub struct SlotNavigation {
     states: [NavigationState; FILE_COUNT],
 }
 
 impl SlotNavigation {
     #[must_use]
+    #[cfg_attr(not(test), allow(dead_code, reason = "navigation snapshots are exercised by host tests and reserved for file-slot resume behavior"))]
     pub const fn new() -> Self {
         const EMPTY: NavigationState = NavigationState {
             cursor: 0,
@@ -35,6 +38,7 @@ impl SlotNavigation {
         }
     }
 
+    #[cfg_attr(not(test), allow(dead_code, reason = "navigation snapshots are exercised by host tests and reserved for file-slot resume behavior"))]
     pub fn store(&mut self, slot: usize, cursor: usize, viewport: Viewport) {
         if (1..=FILE_COUNT).contains(&slot) {
             // SAFETY: Slot range was checked above and maps to 0..FILE_COUNT.
@@ -49,6 +53,7 @@ impl SlotNavigation {
     }
 
     #[must_use]
+    #[cfg_attr(not(test), allow(dead_code, reason = "navigation snapshots are exercised by host tests and reserved for file-slot resume behavior"))]
     pub fn restore(&self, slot: usize) -> Option<(usize, Viewport)> {
         if !(1..=FILE_COUNT).contains(&slot) {
             return None;
@@ -64,6 +69,7 @@ impl SlotNavigation {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct Document {
     bytes: [u8; MAX_FILE_BYTES],
     len: usize,
@@ -117,6 +123,13 @@ impl Document {
         self.viewport
     }
 
+    #[must_use]
+    #[cfg_attr(not(test), allow(dead_code, reason = "cursor-to-screen mapping is reserved for future firmware cursor integration"))]
+    pub fn screen_cursor(&self) -> (usize, usize) {
+        let position = self.visual_position(self.cursor);
+        (position.row.saturating_sub(self.viewport.row), position.col)
+    }
+
     pub fn set_cursor(&mut self, cursor: usize) {
         self.cursor = cursor.min(self.len);
         self.ensure_cursor_visible();
@@ -150,6 +163,7 @@ impl Document {
         true
     }
 
+    #[cfg_attr(not(test), allow(dead_code, reason = "backspace remains part of the editor surface even while the firmware textbox owns deletion"))]
     pub fn backspace(&mut self) -> bool {
         if self.cursor == 0 {
             return false;

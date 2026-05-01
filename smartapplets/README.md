@@ -53,11 +53,36 @@ Use these rules. They come directly from the working path:
 In practice that means:
 
 - include `smartapplets/betawise-sdk/os3k.h`
+- include `smartapplets/betawise-sdk/applet.h` for the entry shim, state macro,
+  and shared applet status constants
+- include `smartapplets/betawise-sdk/file_store.h` for the validated one-file
+  snapshot persistence path
 - link `smartapplets/betawise-sdk/syscall.c`
+- link `smartapplets/betawise-sdk/file_store.c` if the applet persists state
 - provide your own entry shim in `.text.alpha_usb_entry`
 - dispatch `MSG_SETFOCUS`, `MSG_CHAR`, and `MSG_KEY` yourself
 - do not rely on writable global C variables
 - keep the linker script simple and discard `.bss`, `.data`, `.got`, `.rela`, `.rel`
+
+## Shared SDK pieces
+
+The repo-owned Betawise-side SDK now exposes these validated low-level helpers:
+
+- `applet.h`
+  - `APPLET_ENTRY(handler)`
+  - `APPLET_STATE(Type)`
+  - `APPLET_EXIT_STATUS`
+  - `APPLET_UNHANDLED_STATUS`
+- `file_store.h` / `file_store.c`
+  - `applet_load_snapshot(...)`
+  - `applet_save_snapshot(...)`
+
+This means applet code no longer needs to carry:
+
+- the raw `alpha_usb_entry` assembly shim
+- direct `A5 + 0x300` pointer boilerplate
+- direct `A2DC -> A2EC/A2FC -> A190 -> FileReadBuffer/FileWriteBuffer -> FileClose`
+  choreography for one-file snapshot persistence
 
 For the currently validated one-file persistence path used by `forth_mini_bw`:
 

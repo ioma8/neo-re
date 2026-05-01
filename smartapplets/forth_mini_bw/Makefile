@@ -4,7 +4,7 @@ LD = m68k-elf-ld
 CFLAGS = -m68000 -mpcrel -fomit-frame-pointer -ffixed-a5 -ffixed-d7 -fshort-enums
 CFLAGS += -O1 -fno-inline -fno-optimize-sibling-calls -I"../betawise-sdk" -ffunction-sections -fdata-sections -ffreestanding
 LDFLAGS = -static -T ForthMiniBW.lds --gc-sections
-OBJ = ForthMiniBW.o app_ui.o app_storage.o syscall.o forth_core.o forth_dict.o forth_vm.o forth_compile.o forth_util.o
+OBJ = ForthMiniBW.o app_ui.o app_storage.o syscall.o file_store.o forth_core.o forth_dict.o forth_vm.o forth_compile.o forth_util.o
 TARGET = ForthMiniBW.elf
 
 all: $(TARGET)
@@ -13,6 +13,9 @@ all: $(TARGET)
 	$(CC) $(CFLAGS) -c $<
 
 syscall.o: ../betawise-sdk/syscall.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
+file_store.o: ../betawise-sdk/file_store.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 forth_core.o: src/forth_core.c
@@ -34,4 +37,4 @@ $(TARGET): $(OBJ) ForthMiniBW.lds
 	$(LD) $(OBJ) $(LDFLAGS) -o $@
 
 clean:
-	rm -f ForthMiniBW.o app_ui.o app_storage.o syscall.o forth_core.o forth_dict.o forth_vm.o forth_compile.o forth_util.o ForthMiniBW.elf
+	rm -f ForthMiniBW.o app_ui.o app_storage.o syscall.o file_store.o forth_core.o forth_dict.o forth_vm.o forth_compile.o forth_util.o ForthMiniBW.elf

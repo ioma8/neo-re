@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.nio.charset.StandardCharsets
 
 plugins {
     id("com.android.application")
@@ -69,3 +70,19 @@ dependencies {
 }
 
 apply(from = "tauri.build.gradle.kts")
+
+tasks.matching { task ->
+    task.name.startsWith("merge") && task.name.endsWith("Assets")
+}.configureEach {
+    doLast {
+        val tauriConfig = outputs.files.asFileTree.matching { include("**/tauri.conf.json") }.files.singleOrNull()
+            ?: return@doLast
+        val original = tauriConfig.readText(StandardCharsets.UTF_8)
+        val rewritten = original.replace(Regex("""\s*"devUrl"\s*:\s*"[^"]*",?"""), "")
+            .replace(",\"frontendDist\"", "\"frontendDist\"")
+            .replace("{,", "{")
+        if (rewritten != original) {
+            tauriConfig.writeText(rewritten, StandardCharsets.UTF_8)
+        }
+    }
+}

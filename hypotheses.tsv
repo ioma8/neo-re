@@ -155,3 +155,15 @@ Forth Mini relaunch crash is caused by compiling malformed bytes returned by sto
 Forth Mini applet-owned runtime file handle is 1 for durable source persistence	proven
 ForthResult becomes byte-aligned under -fshort-enums, and GCC then emits odd stack slots that are illegal for some m68k struct copies	proven
 Forth Mini one-file persistence is reliable if the applet saves and restores a binary ForthMachine snapshot on handle 1 instead of replaying source on target	proven
+Basic Writer idle autosave timing is the primary cause of the first crash	disproven
+Basic Writer first crash is caused by applet_load_snapshot reading an empty newly-initialized workspace file	disproven
+AlphaWord workspace traps A2DC/A2EC/A2FC are the wrong layer for Betawise applet-owned slot snapshots in Basic Writer	proven
+Basic Writer multi-file slot snapshots use distinct runtime handles 1..8	disproven
+Basic Writer multi-file slot snapshots use runtime handle 1, while physical file keys rebind the current firmware file context	disproven
+Basic Writer multi-file slot snapshots use low-byte runtime handles 0x11..0x18 matching metadata keys 0x8011..0x8018	needs further investigation
+Basic Writer slot 1 uses runtime handle 1, while slots 2..8 use low-byte handles 0x12..0x18	disproven
+Basic Writer non-primary slot snapshots need a post-write A2BC/A2C0 finalize step when using raw A190/FileWriteBuffer I/O	disproven
+Pressing physical File1..File8 in a multi-file applet updates firmware current-file identity as observed by SYS_A1A0	disproven
+Basic Writer multi-file persistence failed because alpha-neo-pack emitted the applet with file_count=1 instead of 8	proven
+Basic Writer can use distinct runtime handles 1..8 for slot snapshots once the packaged applet really declares file_count=8	proven
+Basic Writer FILE key MSG_KEY param carries hidden 0x8011..0x8018 metadata identity beyond the low key byte	disproven

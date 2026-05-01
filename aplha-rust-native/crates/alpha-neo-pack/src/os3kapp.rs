@@ -61,7 +61,7 @@ pub fn build_image(manifest: &AppletManifest, entry_code: &[u8]) -> Result<Vec<u
     payload.extend_from_slice(&2_u32.to_be_bytes());
     payload.extend_from_slice(entry_code);
 
-    let info_table = build_info_table(manifest.alphaword_write_metadata);
+    let info_table = build_info_table(manifest.file_count, manifest.alphaword_write_metadata);
     let info_table_len = info_table.len();
     let file_size = HEADER_SIZE + payload.len() + info_table_len;
     let file_size_u32 =
@@ -114,18 +114,40 @@ fn write_ascii_field(target: &mut [u8], offset: usize, size: usize, value: &str)
     target[offset..offset + copy_len].copy_from_slice(&bytes[..copy_len]);
 }
 
-fn build_alphaword_write_info_table() -> Vec<u8> {
+fn build_alphaword_write_info_table(file_count: u8) -> Vec<u8> {
     let mut records = Vec::new();
+    if file_count != 0 {
+        records.extend_from_slice(&build_info_record(0x0103, 0x8002, &[0x10, 0x02, 0x10, 0x01, 0x10, 0x02]));
+    }
     records.extend_from_slice(&build_info_record(0x0105, 0x100B, b"write\0"));
-    for key in 0x8011..=0x8018 {
+    for key in 0x8011..=(0x8010 + u16::from(file_count)) {
         records.extend_from_slice(&build_info_record(0xC001, key, b"write\0"));
+    }
+    if file_count != 0 {
+        records.extend_from_slice(&build_info_record(
+            0x0102,
+            0x1010,
+            &[0x00, 0x00, 0xC8, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x01, 0x90, 0x00],
+        ));
+        records.extend_from_slice(&build_info_record(
+            0x0102,
+            0x1011,
+            &[0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x64, 0x00],
+        ));
+        records.extend_from_slice(&build_info_record(
+            0x0106,
+            0x8004,
+            b"(one page equals 2048 characters)\0",
+        ));
+        records.extend_from_slice(&build_info_record(0x0103, 0x100F, &[0x10, 0x02, 0x10, 0x01, 0x10, 0x02]));
+        records.extend_from_slice(&build_info_record(0x0103, 0x8003, &[0x10, 0x02, 0x10, 0x01, 0x10, 0x02]));
     }
     records
 }
 
-fn build_info_table(alphaword_write_metadata: bool) -> Vec<u8> {
+fn build_info_table(file_count: u8, alphaword_write_metadata: bool) -> Vec<u8> {
     let mut records = if alphaword_write_metadata {
-        build_alphaword_write_info_table()
+        build_alphaword_write_info_table(file_count)
     } else {
         Vec::new()
     };
@@ -181,21 +203,26 @@ mod tests {
         let manifest = AppletManifest {
             id: 0xA131,
             name: "Forth Mini",
-            version: Version::decimal(0, 1),
+            version: Version::decimal(0, 2),
             flags: 0xFF00_00CE,
-            base_memory_size: 0x400,
+            base_memory_size: 0x4000,
             extra_memory_size: 0x2000,
-            copyright: "neo-re native Rust SmartApplet",
-            file_count: 0,
-            alphaword_write_metadata: false,
+            copyright: "neo-re Betawise Forth SmartApplet",
+            file_count: 1,
+            alphaword_write_metadata: true,
         };
         let image = build_image(&manifest, &[0x4E, 0x75])?;
+        let slot_1 = [
+            0xC0, 0x01, 0x80, 0x11, 0x00, 0x06, b'w', b'r', b'i', b't', b'e', 0x00,
+        ];
 
         assert_eq!(&image[0x00..0x04], &[0xC0, 0xFF, 0xEE, 0xAD]);
-        assert_eq!(&image[0x14..0x18], &[0xA1, 0x31, 0x01, 0x00]);
-        assert_eq!(&image[0x3C..0x40], &[0x00, 0x01, 0x00, 0x01]);
+        assert_eq!(&image[0x14..0x16], &[0xA1, 0x31]);
+        assert_eq!(image[0x17], 1);
+        assert_eq!(&image[0x3C..0x40], &[0x00, 0x02, 0x00, 0x01]);
         assert_eq!(&image[0x94..0x96], &[0x4E, 0x75]);
         assert_eq!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);
+        assert!(image.windows(slot_1.len()).any(|window| window == slot_1));
         validate_image(&image)?;
         Ok(())
     }
@@ -207,9 +234,9 @@ mod tests {
             name: "Basic Writer",
             version: Version::decimal(0, 1),
             flags: 0xFF00_00CE,
-            base_memory_size: 0x2000,
+            base_memory_size: 0x4000,
             extra_memory_size: 0x2000,
-            copyright: "neo-re native Rust SmartApplet",
+            copyright: "neo-re Betawise Basic Writer SmartApplet",
             file_count: 8,
             alphaword_write_metadata: true,
         };
@@ -238,6 +265,34 @@ mod tests {
             ];
             assert!(image.windows(record.len()).any(|window| window == record));
         }
+        validate_image(&image)?;
+        Ok(())
+    }
+
+    #[test]
+    fn packages_single_owned_file_shape() -> Result<(), Box<dyn Error>> {
+        let manifest = AppletManifest {
+            id: 0xA131,
+            name: "Forth Mini",
+            version: Version::decimal(0, 2),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x800,
+            extra_memory_size: 0x2000,
+            copyright: "neo-re native Rust SmartApplet",
+            file_count: 1,
+            alphaword_write_metadata: true,
+        };
+        let image = build_image(&manifest, &[0x4E, 0x75])?;
+        let slot_1 = [
+            0xC0, 0x01, 0x80, 0x11, 0x00, 0x06, b'w', b'r', b'i', b't', b'e', 0x00,
+        ];
+        let slot_2 = [
+            0xC0, 0x01, 0x80, 0x12, 0x00, 0x06, b'w', b'r', b'i', b't', b'e', 0x00,
+        ];
+
+        assert_eq!(&image[0x14..0x18], &[0xA1, 0x31, 0x01, 0x01]);
+        assert!(image.windows(slot_1.len()).any(|window| window == slot_1));
+        assert!(!image.windows(slot_2.len()).any(|window| window == slot_2));
         validate_image(&image)?;
         Ok(())
     }

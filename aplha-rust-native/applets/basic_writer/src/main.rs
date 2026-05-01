@@ -38,6 +38,7 @@ impl Applet for BasicWriter {
         with_state(|state| {
             *state = AppState::new();
             let _ = storage::load_slot(state.active_slot, &mut state.document);
+            ctx.screen().clear();
             draw_document(ctx, &state.document);
         });
         Status::OK
@@ -157,7 +158,7 @@ fn apply_action(state: &mut AppState, action: InputAction) -> bool {
 }
 
 fn with_state(callback: impl FnOnce(&mut AppState)) {
-    // SAFETY: SmartApplet callbacks are single-threaded and the applet owns this memory block.
+    // SAFETY: The applet owns a single state block and firmware dispatch is single-threaded.
     unsafe {
         callback(&mut *state_ptr());
     }
@@ -165,7 +166,7 @@ fn with_state(callback: impl FnOnce(&mut AppState)) {
 
 #[cfg(target_arch = "m68k")]
 fn state_ptr() -> *mut AppState {
-    // SAFETY: Returns applet-owned writable memory reserved by firmware for this applet.
+    // SAFETY: Returns the applet-owned writable memory block reserved by the firmware.
     unsafe { alpha_neo_applet_memory_base() }
 }
 
@@ -266,4 +267,36 @@ pub extern "C" fn __mulsi3(lhs: i32, rhs: i32) -> i32 {
     } else {
         result.cast_signed()
     }
+}
+
+#[cfg(target_arch = "m68k")]
+fn udivmod32(numerator: u32, denominator: u32) -> (u32, u32) {
+    if denominator == 0 {
+        return (0, numerator);
+    }
+    let mut quotient = 0u32;
+    let mut remainder = 0u32;
+    let mut bit = 32u32;
+    while bit != 0 {
+        bit -= 1;
+        remainder = remainder.wrapping_shl(1);
+        remainder |= (numerator >> bit) & 1;
+        if remainder >= denominator {
+            remainder = remainder.wrapping_sub(denominator);
+            quotient |= 1u32 << bit;
+        }
+    }
+    (quotient, remainder)
+}
+
+#[cfg(target_arch = "m68k")]
+#[unsafe(no_mangle)]
+pub extern "C" fn __udivsi3(numerator: u32, denominator: u32) -> u32 {
+    udivmod32(numerator, denominator).0
+}
+
+#[cfg(target_arch = "m68k")]
+#[unsafe(no_mangle)]
+pub extern "C" fn __umodsi3(numerator: u32, denominator: u32) -> u32 {
+    udivmod32(numerator, denominator).1
 }

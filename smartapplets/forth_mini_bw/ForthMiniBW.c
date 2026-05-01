@@ -2,18 +2,7 @@
 #include "app_storage.h"
 #include "src/forth_util.h"
 
-asm(
-    ".section .text.alpha_usb_entry,\"ax\"\n"
-    ".global alpha_usb_entry\n"
-    "alpha_usb_entry:\n"
-    "move.l 12(%sp),-(%sp)\n"
-    "move.l 12(%sp),-(%sp)\n"
-    "move.l 12(%sp),-(%sp)\n"
-    "bsr alpha_neo_process_message\n"
-    "lea 12(%sp),%sp\n"
-    "rts\n"
-    ".text\n"
-);
+APPLET_ENTRY(alpha_neo_process_message);
 
 static void accept_printable(AppState* state, uint32_t param) {
     char byte = (char)(param & 0xff);
@@ -70,7 +59,7 @@ static void handle_char(AppState* state, uint32_t param) {
 static void handle_key(AppState* state, uint32_t param, uint32_t* status) {
     switch(param & 0xff) {
         case KEY_APPLETS:
-            *status = 0x07;
+            *status = APPLET_EXIT_STATUS;
             break;
         case KEY_BACKSPACE:
             backspace(state);
@@ -97,7 +86,7 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
             if(*status == 0) app_draw(state);
             break;
         default:
-            *status = 0x04;
+            *status = APPLET_UNHANDLED_STATUS;
             break;
     }
 }

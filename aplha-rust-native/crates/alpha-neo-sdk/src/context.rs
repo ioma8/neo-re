@@ -91,6 +91,15 @@ impl Screen {
 
     #[allow(
         clippy::inline_always,
+        reason = "required to resume firmware textbox editing at a stable screen cursor"
+    )]
+    #[inline(always)]
+    pub fn set_cursor(self, row: u8, col: u8, width: usize) {
+        display::set_cursor(row, col, width);
+    }
+
+    #[allow(
+        clippy::inline_always,
         reason = "required to keep applet rendering as direct trap calls"
     )]
     #[inline(always)]
@@ -141,6 +150,13 @@ impl Keyboard {
 
     pub fn pump_events(self) {
         keyboard::pump_events();
+    }
+
+    pub fn drain(self) {
+        keyboard::pump_events();
+        while keyboard::is_ready() {
+            let _ = keyboard::read_key();
+        }
     }
 }
 

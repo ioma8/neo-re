@@ -26,6 +26,7 @@ brew install m68k-elf-binutils
 cd aplha-rust-native
 ./build.sh alpha_usb
 ./build.sh forth_mini
+./build.sh basic_writer
 ```
 
 Outputs:
@@ -33,6 +34,7 @@ Outputs:
 ```text
 ../exports/applets/alpha-usb-native.os3kapp
 ../exports/applets/forth-mini.os3kapp
+../exports/applets/basic-writer.os3kapp
 ```
 
 The wrapper runs:
@@ -48,6 +50,7 @@ Release mode is intentional. The tested 2026-03-25 nightly segfaulted while comp
 - `crates/alpha-neo-pack`: host-side ELF-to-OS3KApp packer.
 - `applets/alpha_usb`: native Cargo-built Alpha USB applet authored as Rust callbacks.
 - `applets/forth_mini`: experimental minimal Forth REPL applet.
+- `applets/basic_writer`: minimal AlphaWord-style text editor with 8 file keys.
 
 ## Applet Authoring
 
@@ -133,6 +136,8 @@ ctx.usb().switch_to_direct();        // run the validated direct-USB OS path
 ctx.keyboard().is_ready();           // non-blocking keyboard poll
 ctx.keyboard().read_key();           // read one pending firmware logical key code
 ctx.keyboard().read_byte();          // read and decode one pending printable/control byte
+ctx.keyboard().drain();              // clear stale queued keys before a modal session
+ctx.screen().set_cursor(1, 1, 28);   // place the firmware textbox cursor
 ```
 
 `A094` / `read_key()` returns the NEO firmware logical key code, not ASCII.
@@ -152,6 +157,44 @@ Status::raw(0x1234) // escape hatch for newly discovered statuses
 
 Prefer the named statuses in applet code. Use `Status::raw` only when a new
 status has been identified and is not yet represented by the SDK.
+
+### Validated Text Editing Path
+
+For AlphaWord-like text entry, the validated path is firmware-owned editing via
+`A084` / `alpha_neo_sdk::keyboard::text_box`, not a custom polling loop copied
+from `forth_mini`.
+
+The reusable SDK pieces for that flow are:
+
+```rust
+let exit_keys = alpha_neo_sdk::keyboard::textbox_exit_keys();
+ctx.keyboard().drain();
+ctx.screen().set_cursor(row, col, width);
+let exit = alpha_neo_sdk::keyboard::normalize_textbox_exit(
+    alpha_neo_sdk::keyboard::text_box(
+        &mut buffer,
+        &mut len,
+        max_len,
+        &exit_keys,
+        false,
+    ),
+);
+if let Some(slot) = alpha_neo_sdk::keyboard::file_slot_for_exit_key(exit) {
+    // File 1..8 switch
+}
+```
+
+Validated behavior behind those helpers:
+
+- `text_box` owns printable typing, deletion, and basic in-line editing.
+- the exit key list must include arrows, file keys, and `Esc` to match the
+  observed AlphaWord-style flow.
+- the raw textbox return value can carry modifier bits such as Caps Lock; strip
+  them with `normalize_textbox_exit` before comparing key codes.
+- stale chooser/menu keys should be drained before entering a textbox session.
+- use stack-local arrays or SDK helpers that return arrays by value for static
+  key tables; borrowed global slices can reintroduce forbidden `.got` sections
+  into packaged applets.
 
 ### Text And Data Rules
 
@@ -262,6 +305,24 @@ Build:
 
 ```sh
 ./build.sh forth_mini
+```
+
+### Basic Writer
+
+`Basic Writer` is the current reference applet for AlphaWord-style text entry.
+It uses the firmware textbox control for continuous typing, local Rust editor
+state for cursor/view restoration, direct file-key switching across 8 slots,
+and the shared SDK entry macro.
+
+The important constraint is architectural: use `Forth Mini` only as a small
+event-driven callback example. Do not use its interactive input flow as the
+reference for text-editor applets. The validated editor path is the firmware
+textbox flow captured in `Basic Writer`.
+
+Build:
+
+```sh
+./build.sh basic_writer
 ```
 
 ## Adding Another Applet

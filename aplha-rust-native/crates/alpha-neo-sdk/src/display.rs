@@ -214,6 +214,23 @@ fn set_row(row: u8) {
 
 #[allow(
     clippy::inline_always,
+    reason = "required so textbox sessions can resume at a precise cursor position"
+)]
+#[inline(always)]
+pub fn set_cursor(row: u8, col: u8, width: usize) {
+    #[cfg(not(target_arch = "m68k"))]
+    let _ = (row, col, width);
+    #[cfg(target_arch = "m68k")]
+    // SAFETY: Calls the NEO OS row-selection trap with scalar cursor arguments.
+    unsafe {
+        alpha_neo_set_text_row(u32::from(row), u32::from(col), width.min(28) as u32);
+    };
+    #[cfg(target_arch = "m68k")]
+    compiler_fence(Ordering::SeqCst);
+}
+
+#[allow(
+    clippy::inline_always,
     reason = "required so row setup uses the caller's stack frame directly"
 )]
 #[inline(always)]

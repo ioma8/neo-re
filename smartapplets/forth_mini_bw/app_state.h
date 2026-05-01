@@ -1,6 +1,7 @@
 #ifndef FORTH_MINI_APP_STATE_H
 #define FORTH_MINI_APP_STATE_H
 
+#include "../betawise-sdk/applet.h"
 #include "os3k.h"
 #include "src/forth_core.h"
 
@@ -14,10 +15,7 @@ typedef struct {
     char transcript[OUTPUT_LINES][LINE_WIDTH + 1];
 } AppState;
 
-static inline AppState* State(void) {
-    register char* a5 __asm__("a5");
-    return (AppState*)(a5 + 0x300);
-}
+APPLET_STATE(AppState);
 
 void app_reset(AppState* state);
 void app_draw(const AppState* state);
