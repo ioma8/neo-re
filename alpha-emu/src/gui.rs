@@ -334,9 +334,8 @@ impl AlphaEmuApp {
         let Some(session) = self.session.as_mut() else {
             return;
         };
-        let mut handled = false;
         ctx.input(|input| {
-            handled |= self.modifier_state.sync(session, input.modifiers);
+            self.modifier_state.sync(session, input.modifiers);
             for event in &input.events {
                 match event {
                     egui::Event::Text(text)
@@ -344,8 +343,7 @@ impl AlphaEmuApp {
                     {
                         for character in text.chars() {
                             if let Some(tap) = tap_for_text_char(character) {
-                                tap.apply_as_text(session, input.modifiers.shift);
-                                handled = true;
+                                tap.apply_as_text(session);
                             }
                         }
                     }
@@ -356,25 +354,81 @@ impl AlphaEmuApp {
                         modifiers,
                         ..
                     } => {
-                        handled |= self.modifier_state.sync(session, *modifiers);
-                        if let Some(tap) = matrix_tap_for_key(*key) {
-                            if *pressed {
-                                tap.press(session);
-                            } else {
-                                tap.release(session);
-                            }
-                            session.run_realtime_steps(GUI_KEY_SETTLE_STEPS);
-                            handled = true;
+                        self.modifier_state.sync(session, *modifiers);
+                        let text_event_will_handle =
+                            !modifiers.ctrl && !modifiers.mac_cmd && is_printable_text_key(*key);
+                        if *pressed
+                            && !text_event_will_handle
+                            && let Some(tap) = matrix_tap_for_key(*key)
+                        {
+                            tap.apply(session);
                         }
                     }
                     _ => {}
                 }
             }
         });
-        if handled {
-            session.run_realtime_steps(GUI_KEY_SETTLE_STEPS);
-        }
     }
+}
+
+fn is_printable_text_key(key: egui::Key) -> bool {
+    matches!(
+        key,
+        egui::Key::A
+            | egui::Key::B
+            | egui::Key::C
+            | egui::Key::D
+            | egui::Key::E
+            | egui::Key::F
+            | egui::Key::G
+            | egui::Key::H
+            | egui::Key::I
+            | egui::Key::J
+            | egui::Key::K
+            | egui::Key::L
+            | egui::Key::M
+            | egui::Key::N
+            | egui::Key::O
+            | egui::Key::P
+            | egui::Key::Q
+            | egui::Key::R
+            | egui::Key::S
+            | egui::Key::T
+            | egui::Key::U
+            | egui::Key::V
+            | egui::Key::W
+            | egui::Key::X
+            | egui::Key::Y
+            | egui::Key::Z
+            | egui::Key::Num0
+            | egui::Key::Num1
+            | egui::Key::Num2
+            | egui::Key::Num3
+            | egui::Key::Num4
+            | egui::Key::Num5
+            | egui::Key::Num6
+            | egui::Key::Num7
+            | egui::Key::Num8
+            | egui::Key::Num9
+            | egui::Key::Exclamationmark
+            | egui::Key::OpenBracket
+            | egui::Key::OpenCurlyBracket
+            | egui::Key::CloseBracket
+            | egui::Key::CloseCurlyBracket
+            | egui::Key::Backslash
+            | egui::Key::Pipe
+            | egui::Key::Semicolon
+            | egui::Key::Colon
+            | egui::Key::Quote
+            | egui::Key::Backtick
+            | egui::Key::Comma
+            | egui::Key::Period
+            | egui::Key::Slash
+            | egui::Key::Questionmark
+            | egui::Key::Minus
+            | egui::Key::Equals
+            | egui::Key::Plus
+    )
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -424,25 +478,10 @@ enum MatrixTap {
 }
 
 impl MatrixTap {
-    fn press(self, session: &mut FirmwareSession) {
+    fn apply(self, session: &mut FirmwareSession) {
         match self {
-            Self::Key(code) => session.press_matrix_code(code),
-            Self::Chord(codes) => {
-                for code in codes {
-                    session.press_matrix_code(*code);
-                }
-            }
-        }
-    }
-
-    fn release(self, session: &mut FirmwareSession) {
-        match self {
-            Self::Key(code) => session.release_matrix_code(code),
-            Self::Chord(codes) => {
-                for code in codes {
-                    session.release_matrix_code(*code);
-                }
-            }
+            Self::Key(code) => session.tap_matrix_code(code),
+            Self::Chord(codes) => session.tap_matrix_chord(codes),
         }
     }
 }
@@ -450,25 +489,18 @@ impl MatrixTap {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct TextTap {
     character: char,
-    needs_shift: bool,
 }
 
 impl TextTap {
-    fn apply_as_text(self, session: &mut FirmwareSession, shift_already_held: bool) {
-        if self.needs_shift && !shift_already_held {
-            session.press_matrix_code(SHIFT_CODE);
-        }
+    fn apply_as_text(self, session: &mut FirmwareSession) {
         session.tap_char(self.character);
-        if self.needs_shift && !shift_already_held {
-            session.release_matrix_code(SHIFT_CODE);
-        }
     }
 }
 
 fn tap_for_text_char(character: char) -> Option<TextTap> {
-    let (character, needs_shift) = match character {
-        'A'..='Z' => (character.to_ascii_lowercase(), true),
-        'a'..='z'
+    match character {
+        'A'..='Z'
+        | 'a'..='z'
         | '0'..='9'
         | '-'
         | '='
@@ -480,34 +512,30 @@ fn tap_for_text_char(character: char) -> Option<TextTap> {
         | '`'
         | ','
         | '.'
-        | '/' => (character, false),
-        '!' => ('1', true),
-        '@' => ('2', true),
-        '#' => ('3', true),
-        '$' => ('4', true),
-        '%' => ('5', true),
-        '^' => ('6', true),
-        '&' => ('7', true),
-        '*' => ('8', true),
-        '(' => ('9', true),
-        ')' => ('0', true),
-        '_' => ('-', true),
-        '+' => ('=', true),
-        '{' => ('[', true),
-        '}' => (']', true),
-        '|' => ('\\', true),
-        ':' => (';', true),
-        '"' => ('\'', true),
-        '~' => ('`', true),
-        '<' => (',', true),
-        '>' => ('.', true),
-        '?' => ('/', true),
-        _ => return None,
-    };
-    Some(TextTap {
-        character,
-        needs_shift,
-    })
+        | '/'
+        | '!'
+        | '@'
+        | '#'
+        | '$'
+        | '%'
+        | '^'
+        | '&'
+        | '*'
+        | '('
+        | ')'
+        | '_'
+        | '+'
+        | '{'
+        | '}'
+        | '|'
+        | ':'
+        | '"'
+        | '~'
+        | '<'
+        | '>'
+        | '?' => Some(TextTap { character }),
+        _ => None,
+    }
 }
 
 const PLUS_CHORD: &[u8] = &[SHIFT_CODE, 0x40];
@@ -971,8 +999,8 @@ mod tests {
         for character in "abcdefghijklmnopqrstuvwxyz0123456789-=[]\\;'`,./".chars() {
             let tap = tap_for_text_char(character);
             assert_eq!(
-                tap.map(|tap| (tap.character, tap.needs_shift)),
-                Some((character, false)),
+                tap.map(|tap| tap.character),
+                Some(character),
                 "missing unshifted character {character:?}"
             );
         }
@@ -1005,9 +1033,9 @@ mod tests {
             ('>', '.'),
             ('?', '/'),
         ];
-        for (input, base) in expected {
+        for (input, _base) in expected {
             let tap = tap_for_text_char(input).expect("shifted key must be covered");
-            assert_eq!((tap.character, tap.needs_shift), (base, true));
+            assert_eq!(tap.character, input);
         }
     }
 

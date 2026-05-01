@@ -520,6 +520,10 @@ fn main() -> Result<()> {
             wait_for_write_or_die_state(&mut session, |state| state.phase == 0)?;
             press_key_now(&mut session, 0x69);
             wait_for_write_or_die_state(&mut session, |state| state.goal_mode == 1)?;
+            for _ in 0..9 {
+                press_key_now(&mut session, 0x75);
+            }
+            wait_for_write_or_die_state(&mut session, |state| state.time_goal_seconds == 60)?;
             press_key_now(&mut session, 0x15);
             wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 1)?;
             press_key_now(&mut session, 0x15);
@@ -528,12 +532,23 @@ fn main() -> Result<()> {
             wait_for_write_or_die_state(&mut session, |state| state.phase == 1 && state.goal_mode == 1)?;
             wait_for_write_or_die_state(&mut session, |state| state.len == 0 && state.cursor == 0)?;
             let initial_remaining = write_or_die_state(&session).remaining_seconds_estimate;
-            session.run_steps(2_500_000);
+            type_text_like_gui(&mut session, "abcdefghij");
+            wait_for_write_or_die_state(&mut session, |state| state.len == 10)?;
+            assert_write_or_die_phase(&session, 1, "WriteOrDie one-minute challenge remains running after typing")?;
+            let after_burst_remaining = write_or_die_state(&session).remaining_seconds_estimate;
+            if initial_remaining.saturating_sub(after_burst_remaining) > 8 {
+                anyhow::bail!(
+                    "WriteOrDie time remaining dropped too fast during typing: initial={} after_burst={}",
+                    initial_remaining,
+                    after_burst_remaining
+                );
+            }
+            session.run_realtime_cycles(66_000_000, 10_000_000);
             let later_remaining = write_or_die_state(&session).remaining_seconds_estimate;
-            if later_remaining >= initial_remaining {
+            if later_remaining >= after_burst_remaining {
                 anyhow::bail!(
                     "WriteOrDie time remaining did not decrease: initial={} later={}",
-                    initial_remaining,
+                    after_burst_remaining,
                     later_remaining
                 );
             }
@@ -1464,6 +1479,13 @@ fn type_text_via_matrix(session: &mut FirmwareSession, text: &str) -> Result<()>
         }
     }
     Ok(())
+}
+
+fn type_text_like_gui(session: &mut FirmwareSession, text: &str) {
+    for value in text.chars() {
+        session.tap_char(value);
+    }
+    session.run_realtime_steps(300_000);
 }
 
 fn tap_key_now(session: &mut FirmwareSession, code: u8) {

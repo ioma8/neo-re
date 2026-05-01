@@ -90,6 +90,9 @@ Basic Writer regression after adding WriteOrDie is caused by its hardcoded apple
 WriteOrDie newline OCR check fails because the visible cursor can mask the first character even when the editor state contains the expected text	proven
 WriteOrDie autosave is incomplete if typing only marks dirty and does not save until exit/completion/penalty	proven
 WriteOrDie running-state flicker is caused by MSG_IDLE clearing and redrawing the whole challenge screen on every idle callback	proven
+WriteOrDie countdown drops one second per typed key because GetUptimeMilliseconds is not reliable for challenge elapsed time under key callbacks	disproven
+WriteOrDie GUI countdown drops on keypress because GUI key handling runs a large realtime settle after every host key event	proven
+WriteOrDie real-device timer jumps because the applet reads low-level 0xfffff608 instead of firmware uptime	proven
 Forth Mini prompt rendering uses the SDK text-trap display path, so an empty emulator text_screen means the draw callback did not run rather than an OCR blind spot	needs further investigation
 Forth Mini rows 1-3 can render fixed text in full-system headless mode	proven
 Fresh full-system build->reinit still leaves Forth Mini blank after Enter	proven
