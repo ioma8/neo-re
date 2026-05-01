@@ -76,6 +76,17 @@ fn manifest_for(applet: AppletName) -> AppletManifest {
             file_count: 8,
             alphaword_write_metadata: true,
         },
+        AppletName::WriteOrDie => AppletManifest {
+            id: 0xA133,
+            name: "WriteOrDie",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x4000,
+            extra_memory_size: 0x2000,
+            copyright: "neo-re Betawise WriteOrDie SmartApplet",
+            file_count: 1,
+            alphaword_write_metadata: true,
+        },
     }
 }
 
@@ -90,6 +101,7 @@ enum AppletName {
     AlphaUsb,
     ForthMini,
     BasicWriter,
+    WriteOrDie,
 }
 
 impl AppletName {
@@ -98,6 +110,7 @@ impl AppletName {
             "alpha-usb" => Some(Self::AlphaUsb),
             "forth-mini" => Some(Self::ForthMini),
             "basic-writer" => Some(Self::BasicWriter),
+            "write-or-die" => Some(Self::WriteOrDie),
             _ => None,
         }
     }
@@ -113,7 +126,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Usage => f.write_str(
-                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer> <input-elf-or-a> <output.os3kapp>",
+                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die> <input-elf-or-a> <output.os3kapp>",
             ),
             Self::UnknownApplet(name) => write!(f, "unknown applet: {name}"),
         }

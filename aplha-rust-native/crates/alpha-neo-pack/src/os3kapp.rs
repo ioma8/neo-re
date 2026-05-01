@@ -296,4 +296,29 @@ mod tests {
         validate_image(&image)?;
         Ok(())
     }
+
+    #[test]
+    fn packages_write_or_die_shape() -> Result<(), Box<dyn Error>> {
+        let manifest = AppletManifest {
+            id: 0xA133,
+            name: "WriteOrDie",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x4000,
+            extra_memory_size: 0x2000,
+            copyright: "neo-re Betawise WriteOrDie SmartApplet",
+            file_count: 1,
+            alphaword_write_metadata: true,
+        };
+        let image = build_image(&manifest, &[0x4E, 0x75])?;
+        let slot_1 = [
+            0xC0, 0x01, 0x80, 0x11, 0x00, 0x06, b'w', b'r', b'i', b't', b'e', 0x00,
+        ];
+
+        assert_eq!(&image[0x14..0x16], &[0xA1, 0x33]);
+        assert_eq!(image[0x17], 1);
+        assert!(image.windows(slot_1.len()).any(|window| window == slot_1));
+        validate_image(&image)?;
+        Ok(())
+    }
 }
