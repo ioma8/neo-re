@@ -84,6 +84,9 @@ Forth Mini local command_len is corrupted across eval before transcript renderin
 Forth Mini local command_len remains stable across eval in the live full-system path	disproven
 Forth Mini modal loop receives raw-key prompt input correctly in full-system headless mode	proven
 Forth Mini modal on_focus keyboard loop is fighting the full OS applet input path; restoring event-driven Char/Key callbacks should fix live REPL behavior	proven
+WriteOrDie setup Start fails because full-system Enter is delivered as MSG_CHAR 0x0d, while setup only handles KEY_ENTER in MSG_KEY	proven
+WriteOrDie word-goal validation fails because setup focus can open on the Grace row after menu navigation, so left taps adjust grace instead of words	proven
+Basic Writer regression after adding WriteOrDie is caused by its hardcoded applet-menu down count landing on WriteOrDie	proven
 Forth Mini prompt rendering uses the SDK text-trap display path, so an empty emulator text_screen means the draw callback did not run rather than an OCR blind spot	needs further investigation
 Forth Mini rows 1-3 can render fixed text in full-system headless mode	proven
 Fresh full-system build->reinit still leaves Forth Mini blank after Enter	proven

@@ -30,6 +30,12 @@ To skip validation:
 ./scripts/build-smartapplet.sh basic_writer_bw --no-validate
 ```
 
+The same workflow applies to every applet with an `applet.env`, for example:
+
+```sh
+./scripts/build-smartapplet.sh write_or_die_bw
+```
+
 ## Tool requirements
 
 On macOS with Homebrew:
@@ -61,6 +67,9 @@ In practice that means:
 - link `smartapplets/betawise-sdk/file_store.c` if the applet persists state
 - provide your own entry shim in `.text.alpha_usb_entry`
 - dispatch `MSG_SETFOCUS`, `MSG_CHAR`, and `MSG_KEY` yourself
+- handle Enter as `MSG_CHAR` byte `0x0d`/`0x0a` where the screen flow expects
+  a confirmation key; under full firmware dispatch it is not guaranteed to
+  arrive as `MSG_KEY KEY_ENTER`
 - do not rely on writable global C variables
 - keep the linker script simple and discard `.bss`, `.data`, `.got`, `.rela`, `.rel`
 
@@ -159,3 +168,6 @@ Everything mutable should hang off that state block.
 - `smartapplets/basic_writer_bw`: simple editor applet, good default template
 - `smartapplets/forth_mini_bw`: more complex REPL applet, reference for the
   conservative compiler profile
+- `smartapplets/write_or_die_bw`: challenge editor applet, reference for setup
+  menus, live timers, pressure states, one-file autosave, and full-system
+  headless validation of completion plus persistence

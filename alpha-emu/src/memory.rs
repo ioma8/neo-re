@@ -28,6 +28,7 @@ const EXTRA_APPLET_PATHS: &[&str] = &[
     "../exports/applets/alpha-usb-native.os3kapp",
     "../exports/applets/forth-mini.os3kapp",
     "../exports/applets/basic-writer.os3kapp",
+    "../exports/applets/write-or-die.os3kapp",
 ];
 
 #[derive(Debug, Error)]

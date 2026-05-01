@@ -45,6 +45,7 @@ fn main() -> Result<()> {
     let mut validate_alpha_usb_native = false;
     let mut validate_forth_mini = false;
     let mut validate_basic_writer = false;
+    let mut validate_write_or_die = false;
     let mut probe_basic_writer_key = None;
     let mut load_memory = None;
     let mut dump_memory_start = None;
@@ -97,6 +98,8 @@ fn main() -> Result<()> {
             validate_forth_mini = true;
         } else if arg == "--validate-basic-writer" {
             validate_basic_writer = true;
+        } else if arg == "--validate-write-or-die" {
+            validate_write_or_die = true;
         } else if let Some(value) = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix("--probe-basic-writer-key="))
@@ -222,6 +225,7 @@ fn main() -> Result<()> {
     headless |= validate_alpha_usb_native
         || validate_forth_mini
         || validate_basic_writer
+        || validate_write_or_die
         || probe_basic_writer_key.is_some()
         || lcd_ascii
         || lcd_visible_ascii
@@ -437,6 +441,86 @@ fn main() -> Result<()> {
             let snapshot = session.snapshot();
             println!(
                 "basic_writer_validation=ok pc=0x{:08x} steps={} exception={}",
+                snapshot.pc,
+                snapshot.steps,
+                snapshot.last_exception.as_deref().unwrap_or("none")
+            );
+            return Ok(());
+        }
+        if validate_write_or_die {
+            if !is_full_system {
+                anyhow::bail!("WriteOrDie validation requires the full NEO system firmware image");
+            }
+            let firmware = FirmwareRuntime::load_small_rom(&path)?;
+            let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+            recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            launch_write_or_die_through_menu(&mut session)?;
+            session.run_steps(1_500_000);
+            bail_if_exception(&session, "WriteOrDie focus")?;
+            print_ocr_checkpoint("write_or_die_setup", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            assert_write_or_die_state(&session, 0, 0, 500, 600, 10, "", "WriteOrDie defaults")?;
+
+            press_key_now(&mut session, 0x77);
+            press_key_now(&mut session, 0x77);
+            wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 0)?;
+            for _ in 0..10 {
+                press_key_now(&mut session, 0x75);
+            }
+            wait_for_write_or_die_state(&mut session, |state| state.word_goal == 5)?;
+            press_key_now(&mut session, 0x15);
+            wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 1)?;
+            for _ in 0..8 {
+                press_key_now(&mut session, 0x75);
+            }
+            wait_for_write_or_die_state(&mut session, |state| state.grace_seconds == 2)?;
+            press_key_now(&mut session, 0x15);
+            wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 2)?;
+            press_key_now(&mut session, 0x69);
+            wait_for_write_or_die_state(&mut session, |state| state.phase == 1)?;
+            type_text_via_matrix(&mut session, "one two three")?;
+            wait_for_write_or_die_state(&mut session, |state| state.len >= 13)?;
+            let before_penalty = write_or_die_state(&session);
+            session.run_steps(9_000_000);
+            wait_for_write_or_die_state(&mut session, |state| state.len < before_penalty.len)?;
+            type_text_via_matrix(&mut session, " four five six")?;
+            wait_for_write_or_die_state(&mut session, |state| state.phase == 2)?;
+            print_ocr_checkpoint("write_or_die_completed", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie completed text")?;
+
+            exit_write_or_die_to_menu(&mut session);
+            bail_if_exception(&session, "WriteOrDie exit to menu")?;
+            relaunch_current_menu_item(&mut session);
+            session.run_steps(1_500_000);
+            bail_if_exception(&session, "WriteOrDie relaunch")?;
+            assert_write_or_die_phase(&session, 2, "WriteOrDie persisted completed phase")?;
+            assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie persisted text")?;
+
+            press_key_now(&mut session, 0x69);
+            wait_for_write_or_die_state(&mut session, |state| state.phase == 0)?;
+            press_key_now(&mut session, 0x69);
+            wait_for_write_or_die_state(&mut session, |state| state.goal_mode == 1)?;
+            press_key_now(&mut session, 0x15);
+            wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 1)?;
+            press_key_now(&mut session, 0x15);
+            wait_for_write_or_die_state(&mut session, |state| state.selected_setup_row == 2)?;
+            press_key_now(&mut session, 0x69);
+            wait_for_write_or_die_state(&mut session, |state| state.phase == 1 && state.goal_mode == 1)?;
+            let initial_remaining = write_or_die_state(&session).remaining_seconds_estimate;
+            session.run_steps(2_500_000);
+            let later_remaining = write_or_die_state(&session).remaining_seconds_estimate;
+            if later_remaining >= initial_remaining {
+                anyhow::bail!(
+                    "WriteOrDie time remaining did not decrease: initial={} later={}",
+                    initial_remaining,
+                    later_remaining
+                );
+            }
+            print_ocr_checkpoint("write_or_die_time_mode", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+
+            let snapshot = session.snapshot();
+            println!(
+                "write_or_die_validation=ok pc=0x{:08x} steps={} exception={}",
                 snapshot.pc,
                 snapshot.steps,
                 snapshot.last_exception.as_deref().unwrap_or("none")
@@ -860,6 +944,126 @@ fn assert_basic_writer_banner(session: &FirmwareSession, slot: u32, label: &str)
     Ok(())
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct WriteOrDieState {
+    phase: u32,
+    selected_setup_row: u32,
+    goal_mode: u32,
+    word_goal: u32,
+    time_goal_seconds: u32,
+    grace_seconds: u32,
+    len: u32,
+    cursor: u32,
+    viewport: u32,
+    preview: String,
+    start_ms: u32,
+    last_activity_ms: u32,
+    final_word_count: u32,
+    remaining_seconds_estimate: u32,
+}
+
+fn write_or_die_state(session: &FirmwareSession) -> WriteOrDieState {
+    let snapshot = session.snapshot();
+    let a5 = snapshot.a[5];
+    let base = a5.saturating_add(0x300) as usize;
+    let bytes = session.memory_bytes();
+    let read_u32 = |offset: usize| -> u32 {
+        bytes
+            .get(base + offset..base + offset + 4)
+            .map(|chunk| u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+            .unwrap_or_default()
+    };
+    let text_base = base + 36;
+    let preview = bytes
+        .get(text_base..text_base + 24)
+        .unwrap_or(&[])
+        .iter()
+        .map(|byte| match *byte {
+            b' '..=b'~' => *byte as char,
+            b'\n' => 'n',
+            _ => '.',
+        })
+        .collect::<String>();
+    WriteOrDieState {
+        phase: read_u32(0),
+        selected_setup_row: read_u32(4),
+        goal_mode: read_u32(8),
+        word_goal: read_u32(12),
+        time_goal_seconds: read_u32(16),
+        grace_seconds: read_u32(20),
+        len: read_u32(24),
+        cursor: read_u32(28),
+        viewport: read_u32(32),
+        preview,
+        start_ms: read_u32(804),
+        last_activity_ms: read_u32(808),
+        final_word_count: read_u32(816),
+        remaining_seconds_estimate: read_u32(824),
+    }
+}
+
+fn assert_write_or_die_state(
+    session: &FirmwareSession,
+    phase: u32,
+    goal_mode: u32,
+    word_goal: u32,
+    time_goal_seconds: u32,
+    grace_seconds: u32,
+    preview: &str,
+    label: &str,
+) -> Result<()> {
+    let state = write_or_die_state(session);
+    if state.phase != phase
+        || state.goal_mode != goal_mode
+        || state.word_goal != word_goal
+        || state.time_goal_seconds != time_goal_seconds
+        || state.grace_seconds != grace_seconds
+        || !state.preview.starts_with(preview)
+    {
+        anyhow::bail!(
+            "{label}: got phase={} mode={} word_goal={} time_goal={} grace={} preview={:?}",
+            state.phase,
+            state.goal_mode,
+            state.word_goal,
+            state.time_goal_seconds,
+            state.grace_seconds,
+            state.preview
+        );
+    }
+    Ok(())
+}
+
+fn assert_write_or_die_phase(session: &FirmwareSession, phase: u32, label: &str) -> Result<()> {
+    let state = write_or_die_state(session);
+    if state.phase != phase {
+        anyhow::bail!("{label}: expected phase {phase}, got {}", state.phase);
+    }
+    Ok(())
+}
+
+fn assert_write_or_die_text_prefix(session: &FirmwareSession, preview: &str, label: &str) -> Result<()> {
+    let state = write_or_die_state(session);
+    if !state.preview.starts_with(preview) {
+        anyhow::bail!("{label}: expected preview prefix {preview:?}, got {:?}", state.preview);
+    }
+    Ok(())
+}
+
+fn wait_for_write_or_die_state(
+    session: &mut FirmwareSession,
+    predicate: impl Fn(&WriteOrDieState) -> bool,
+) -> Result<()> {
+    for _ in 0..80 {
+        session.run_steps(250_000);
+        bail_if_exception(session, "WriteOrDie wait")?;
+        let state = write_or_die_state(session);
+        if predicate(&state) {
+            return Ok(());
+        }
+    }
+    anyhow::bail!("timed out waiting for WriteOrDie state: {:?}", write_or_die_state(session));
+}
+
 fn wait_for_basic_writer_banner_to_clear(session: &mut FirmwareSession) -> Result<()> {
     const CHUNK_STEPS: usize = 100_000;
     const MAX_STEPS: usize = 12_000_000;
@@ -1143,6 +1347,19 @@ fn launch_basic_writer_through_menu(session: &mut FirmwareSession, _ocr_scale: u
     Ok(())
 }
 
+fn launch_write_or_die_through_menu(session: &mut FirmwareSession) -> Result<()> {
+    for _ in 0..30 {
+        session.tap_matrix_code_long(0x15);
+        session.run_steps(250_000);
+    }
+    session.press_matrix_code(0x69);
+    session.run_steps(3_000_000);
+    session.release_matrix_code(0x69);
+    session.run_steps(3_000_000);
+    session.clear_keyboard_transients();
+    Ok(())
+}
+
 fn launch_forth_mini_for_debugging(session: &mut FirmwareSession) -> Result<()> {
     focus_forth_mini_direct(session)?;
     if let Some(exception) = session.snapshot().last_exception.clone() {
@@ -1225,6 +1442,13 @@ fn tap_key_now(session: &mut FirmwareSession, code: u8) {
     session.run_steps(300_000);
 }
 
+fn press_key_now(session: &mut FirmwareSession, code: u8) {
+    session.press_matrix_code(code);
+    session.run_steps(700_000);
+    session.release_matrix_code(code);
+    session.run_steps(700_000);
+}
+
 fn switch_basic_writer_file(session: &mut FirmwareSession, slot: u32) -> Result<()> {
     let key = match slot {
         1 => 0x4b,
@@ -1245,6 +1469,13 @@ fn switch_basic_writer_file(session: &mut FirmwareSession, slot: u32) -> Result<
 }
 
 fn exit_basic_writer_to_menu(session: &mut FirmwareSession) {
+    session.press_matrix_code(0x46);
+    session.run_steps(3_000_000);
+    session.release_matrix_code(0x46);
+    session.run_steps(3_000_000);
+}
+
+fn exit_write_or_die_to_menu(session: &mut FirmwareSession) {
     session.press_matrix_code(0x46);
     session.run_steps(3_000_000);
     session.release_matrix_code(0x46);

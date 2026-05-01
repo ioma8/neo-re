@@ -39,9 +39,9 @@ typedef enum {
 } WodPressure_t;
 
 typedef struct {
-    WodPhase_t phase;
+    uint32_t phase;
     uint32_t selected_setup_row;
-    WodGoalMode_t goal_mode;
+    uint32_t goal_mode;
     uint32_t word_goal;
     uint32_t time_goal_seconds;
     uint32_t grace_seconds;
@@ -51,6 +51,7 @@ typedef struct {
     uint32_t last_penalty_ms;
     uint32_t final_word_count;
     uint32_t dirty;
+    uint32_t display_remaining_seconds;
 } WodAppState_t;
 
 #endif

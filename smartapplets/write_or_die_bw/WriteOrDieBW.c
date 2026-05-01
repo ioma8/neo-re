@@ -37,6 +37,7 @@ static void StartChallenge(WodAppState_t* state) {
     state->last_penalty_ms = now;
     state->dirty = 1;
     storage_save(state);
+    state->display_remaining_seconds = state->time_goal_seconds;
     ui_draw_challenge(state, WOD_PRESSURE_SAFE, state->time_goal_seconds);
 }
 
@@ -45,6 +46,11 @@ static uint32_t RemainingSeconds(const WodAppState_t* state, uint32_t now) {
         return challenge_remaining_seconds(now, state->start_ms, state->time_goal_seconds);
     }
     return state->time_goal_seconds;
+}
+
+static void DrawChallenge(WodAppState_t* state, WodPressure_t pressure, uint32_t remaining_seconds) {
+    state->display_remaining_seconds = remaining_seconds;
+    ui_draw_challenge(state, pressure, remaining_seconds);
 }
 
 static void CompleteChallenge(WodAppState_t* state) {
@@ -114,6 +120,11 @@ static void HandleSetupKey(WodAppState_t* state, uint32_t key, uint32_t* status)
     }
 }
 
+static bool IsEnterChar(uint32_t param) {
+    uint8_t byte = (uint8_t)(param & 0xff);
+    return byte == '\r' || byte == '\n';
+}
+
 static bool ApplyChar(WodAppState_t* state, uint8_t byte) {
     if(byte == '\r' || byte == '\n') {
         return editor_insert_byte(&state->editor, '\n');
@@ -140,7 +151,7 @@ static void HandleRunningChar(WodAppState_t* state, uint32_t param) {
     }
     CheckCompletion(state, now);
     if(state->phase == WOD_PHASE_RUNNING) {
-        ui_draw_challenge(state, WOD_PRESSURE_SAFE, RemainingSeconds(state, now));
+        DrawChallenge(state, WOD_PRESSURE_SAFE, RemainingSeconds(state, now));
     }
 }
 
@@ -168,7 +179,7 @@ static void HandleRunningKey(WodAppState_t* state, uint32_t key, uint32_t* statu
         CheckCompletion(state, now);
         if(state->phase == WOD_PHASE_RUNNING) {
             uint32_t idle = now - state->last_activity_ms;
-            ui_draw_challenge(state, challenge_pressure(idle, state->grace_seconds), RemainingSeconds(state, now));
+            DrawChallenge(state, challenge_pressure(idle, state->grace_seconds), RemainingSeconds(state, now));
         }
     }
 }
@@ -187,7 +198,7 @@ static void HandleRunningIdle(WodAppState_t* state) {
     }
     CheckCompletion(state, now);
     if(state->phase == WOD_PHASE_RUNNING) {
-        ui_draw_challenge(state, pressure, RemainingSeconds(state, now));
+        DrawChallenge(state, pressure, RemainingSeconds(state, now));
     }
 }
 
@@ -204,12 +215,19 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
                 ui_draw_completed(state);
             } else {
                 state->phase = WOD_PHASE_SETUP;
+                state->selected_setup_row = 0;
                 ui_draw_setup(state);
             }
             break;
         case MSG_CHAR:
             if(state->phase == WOD_PHASE_RUNNING) {
                 HandleRunningChar(state, param);
+            } else if(state->phase == WOD_PHASE_SETUP && IsEnterChar(param)) {
+                HandleSetupKey(state, KEY_ENTER, status);
+            } else if(state->phase == WOD_PHASE_COMPLETED && IsEnterChar(param)) {
+                state->phase = WOD_PHASE_SETUP;
+                state->selected_setup_row = 0;
+                ui_draw_setup(state);
             }
             break;
         case MSG_KEY:
@@ -217,6 +235,10 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
                 HandleSetupKey(state, param & 0xff, status);
             } else if(state->phase == WOD_PHASE_RUNNING) {
                 HandleRunningKey(state, param & 0xff, status);
+            } else if((param & 0xff) == KEY_ENTER) {
+                state->phase = WOD_PHASE_SETUP;
+                state->selected_setup_row = 0;
+                ui_draw_setup(state);
             } else if((param & 0xff) == KEY_APPLETS || (param & 0xff) == KEY_ESC) {
                 storage_save(state);
                 *status = APPLET_EXIT_STATUS;
