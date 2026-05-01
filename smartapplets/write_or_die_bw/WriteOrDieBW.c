@@ -3,6 +3,7 @@
 #include "challenge.h"
 #include "editor.h"
 #include "os3k.h"
+#include "storage.h"
 #include "ui.h"
 
 APPLET_ENTRY(alpha_neo_process_message);
@@ -17,12 +18,25 @@ static void SetDefaults(WodAppState_t* state) {
     state->grace_seconds = WOD_DEFAULT_GRACE_SECONDS;
 }
 
+static void ClampState(WodAppState_t* state) {
+    if(state->phase > WOD_PHASE_COMPLETED) state->phase = WOD_PHASE_SETUP;
+    if(state->goal_mode > WOD_GOAL_TIME) state->goal_mode = WOD_GOAL_WORDS;
+    if(state->selected_setup_row > 2) state->selected_setup_row = 0;
+    if(state->word_goal < WOD_MIN_WORD_GOAL) state->word_goal = WOD_DEFAULT_WORD_GOAL;
+    if(state->time_goal_seconds < WOD_MIN_TIME_SECONDS) state->time_goal_seconds = WOD_DEFAULT_TIME_SECONDS;
+    if(state->grace_seconds < WOD_MIN_GRACE_SECONDS) state->grace_seconds = WOD_DEFAULT_GRACE_SECONDS;
+    if(state->editor.len > WOD_MAX_TEXT_BYTES) state->editor.len = WOD_MAX_TEXT_BYTES;
+    if(state->editor.cursor > state->editor.len) state->editor.cursor = state->editor.len;
+}
+
 static void StartChallenge(WodAppState_t* state) {
     uint32_t now = GetUptimeMilliseconds();
     state->phase = WOD_PHASE_RUNNING;
     state->start_ms = now;
     state->last_activity_ms = now;
     state->last_penalty_ms = now;
+    state->dirty = 1;
+    storage_save(state);
     ui_draw_challenge(state, WOD_PRESSURE_SAFE, state->time_goal_seconds);
 }
 
@@ -37,6 +51,7 @@ static void CompleteChallenge(WodAppState_t* state) {
     state->phase = WOD_PHASE_COMPLETED;
     state->final_word_count = editor_word_count(&state->editor);
     state->dirty = 1;
+    storage_save(state);
     ui_draw_completed(state);
 }
 
@@ -88,6 +103,7 @@ static void HandleSetupKey(WodAppState_t* state, uint32_t key, uint32_t* status)
             break;
         case KEY_APPLETS:
         case KEY_ESC:
+            storage_save(state);
             *status = APPLET_EXIT_STATUS;
             break;
         default:
@@ -141,6 +157,7 @@ static void HandleRunningKey(WodAppState_t* state, uint32_t key, uint32_t* statu
             break;
         case KEY_APPLETS:
         case KEY_ESC:
+            storage_save(state);
             *status = APPLET_EXIT_STATUS;
             break;
         default:
@@ -164,6 +181,7 @@ static void HandleRunningIdle(WodAppState_t* state) {
        now - state->last_penalty_ms >= challenge_penalty_interval_ms(state->grace_seconds)) {
         if(editor_delete_last_word(&state->editor)) {
             state->dirty = 1;
+            storage_save(state);
         }
         state->last_penalty_ms = now;
     }
@@ -179,7 +197,15 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
     switch(message) {
         case MSG_SETFOCUS:
             SetDefaults(state);
-            ui_draw_setup(state);
+            if(storage_load(state)) {
+                ClampState(state);
+            }
+            if(state->phase == WOD_PHASE_COMPLETED) {
+                ui_draw_completed(state);
+            } else {
+                state->phase = WOD_PHASE_SETUP;
+                ui_draw_setup(state);
+            }
             break;
         case MSG_CHAR:
             if(state->phase == WOD_PHASE_RUNNING) {
@@ -192,6 +218,7 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
             } else if(state->phase == WOD_PHASE_RUNNING) {
                 HandleRunningKey(state, param & 0xff, status);
             } else if((param & 0xff) == KEY_APPLETS || (param & 0xff) == KEY_ESC) {
+                storage_save(state);
                 *status = APPLET_EXIT_STATUS;
             }
             break;
