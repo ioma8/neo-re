@@ -16,6 +16,8 @@ use crate::lcd::LcdSnapshot;
 use crate::memory::{EmuMemory, MemoryError};
 use crate::text_screen::TextScreen;
 
+const FIRMWARE_STOP_IDLE_PC: u32 = 0x0042_6756;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FirmwareSnapshot {
     pub pc: u32,
@@ -137,6 +139,10 @@ impl FirmwareSession {
         self.trace_stack_at_pc = pc;
         self.trace_stack_at_pc_hit = 0;
         self.trace_stack_at_pc_target_hit = hit.max(1);
+    }
+
+    pub fn clear_trace(&mut self) {
+        self.trace.clear();
     }
 
     pub fn run_steps(&mut self, max_steps: usize) {
@@ -328,7 +334,7 @@ impl FirmwareSession {
     }
 
     fn wake_after_firmware_stop(&mut self) -> bool {
-        if !self.cpu.stop || self.cpu.regs.pc.0 != 0x0042_6756 {
+        if !self.cpu.stop || self.cpu.regs.pc.0 != FIRMWARE_STOP_IDLE_PC {
             return false;
         }
         self.cpu.stop = false;
@@ -397,14 +403,21 @@ impl FirmwareSession {
 
     #[must_use]
     pub fn is_running(&self) -> bool {
-        !self.cpu.stop && self.last_exception.is_none()
+        self.last_exception.is_none()
+            && (!self.cpu.stop || self.cpu.regs.pc.0 == FIRMWARE_STOP_IDLE_PC)
     }
 
     #[must_use]
     pub fn status_text(&self) -> &str {
         self.last_exception
             .as_deref()
-            .unwrap_or(if self.cpu.stop { "stopped" } else { "running" })
+            .unwrap_or(if self.cpu.stop && self.cpu.regs.pc.0 == FIRMWARE_STOP_IDLE_PC {
+                "idle"
+            } else if self.cpu.stop {
+                "stopped"
+            } else {
+                "running"
+            })
     }
 
     #[must_use]
@@ -455,6 +468,39 @@ impl FirmwareSession {
         }
     }
 
+    pub fn tap_char_for_cycles(&mut self, value: char, press_cycles: u64, release_cycles: u64) {
+        if let Some(stroke) = matrix_key_stroke_for_char(value) {
+            if stroke.shift {
+                self.memory.tap_key_chord_for_cycles(
+                    &[left_shift_key(), stroke.key],
+                    press_cycles,
+                    release_cycles,
+                );
+            } else {
+                self.memory.tap_key_chord_for_cycles(
+                    &[stroke.key],
+                    press_cycles,
+                    release_cycles,
+                );
+            }
+        }
+    }
+
+    pub fn tap_char_for_reads(&mut self, value: char, press_reads: usize, release_reads: usize) {
+        if let Some(stroke) = matrix_key_stroke_for_char(value) {
+            if stroke.shift {
+                self.memory.tap_key_chord_for_reads(
+                    &[left_shift_key(), stroke.key],
+                    press_reads,
+                    release_reads,
+                );
+            } else {
+                self.memory
+                    .tap_key_chord_for_reads(&[stroke.key], press_reads, release_reads);
+            }
+        }
+    }
+
     pub fn tap_char_debug(&mut self, value: char) {
         if let Some(stroke) = matrix_key_stroke_for_char(value) {
             if stroke.shift {
@@ -491,6 +537,58 @@ impl FirmwareSession {
         if let Some(key) = matrix_key_for_code(code) {
             self.memory.tap_key(key);
         }
+    }
+
+    pub fn tap_matrix_code_for_cycles(
+        &mut self,
+        code: u8,
+        press_cycles: u64,
+        release_cycles: u64,
+    ) {
+        if let Some(key) = matrix_key_for_code(code) {
+            self.memory
+                .tap_key_chord_for_cycles(&[key], press_cycles, release_cycles);
+        }
+    }
+
+    pub fn tap_matrix_chord_for_cycles(
+        &mut self,
+        codes: &[u8],
+        press_cycles: u64,
+        release_cycles: u64,
+    ) {
+        let keys: Vec<_> = codes
+            .iter()
+            .filter_map(|code| matrix_key_for_code(*code))
+            .collect();
+        self.memory
+            .tap_key_chord_for_cycles(&keys, press_cycles, release_cycles);
+    }
+
+    pub fn tap_matrix_code_for_reads(
+        &mut self,
+        code: u8,
+        press_reads: usize,
+        release_reads: usize,
+    ) {
+        if let Some(key) = matrix_key_for_code(code) {
+            self.memory
+                .tap_key_chord_for_reads(&[key], press_reads, release_reads);
+        }
+    }
+
+    pub fn tap_matrix_chord_for_reads(
+        &mut self,
+        codes: &[u8],
+        press_reads: usize,
+        release_reads: usize,
+    ) {
+        let keys: Vec<_> = codes
+            .iter()
+            .filter_map(|code| matrix_key_for_code(*code))
+            .collect();
+        self.memory
+            .tap_key_chord_for_reads(&keys, press_reads, release_reads);
     }
 
     pub fn tap_matrix_chord(&mut self, codes: &[u8]) {
@@ -583,6 +681,8 @@ impl FirmwareSession {
             .ok_or_else(|| format!("missing applet A5 adjust at 0x{a5_adjust_addr:08x}"))?;
         self.cpu.regs.pc = Wrapping(info.entry);
         self.cpu.regs.ssp = Wrapping(VALIDATION_STACK);
+        self.cpu.regs.usp = Wrapping(VALIDATION_STACK);
+        self.cpu.regs.sr.s = true;
         self.cpu.regs.d[6] = Wrapping(info.entry_offset);
         self.cpu.regs.d[7] = Wrapping(message);
         self.cpu.regs.a[5] = Wrapping(a5_adjust);
@@ -621,6 +721,13 @@ impl FirmwareSession {
         param: u32,
     ) -> Result<(), String> {
         self.start_applet_message_with_param_for_validation_and_launch_info(applet_name, message, param)
+    }
+
+    pub fn applet_state_base_for_validation(&self, applet_name: &str) -> Option<u32> {
+        let info = self.memory.find_applet_launch_info(applet_name)?;
+        let a5_adjust_addr = 0x0000_355e + info.slot * 4;
+        let a5_adjust = self.memory.peek_long(a5_adjust_addr)?;
+        Some(a5_adjust.saturating_add(0x300))
     }
 
     #[must_use]
@@ -892,6 +999,17 @@ mod tests {
         assert_eq!(snapshot.cycles, elapsed);
         assert!(snapshot.steps <= 10_000);
         assert!(snapshot.last_exception.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn firmware_idle_stop_is_still_gui_runnable() -> Result<(), Box<dyn std::error::Error>> {
+        let mut session = FirmwareSession::boot_small_rom_default()?;
+        session.cpu.stop = true;
+        session.cpu.regs.pc.0 = super::FIRMWARE_STOP_IDLE_PC;
+
+        assert!(session.is_running());
+        assert_eq!(session.status_text(), "idle");
         Ok(())
     }
 

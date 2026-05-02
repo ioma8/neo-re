@@ -93,6 +93,10 @@ WriteOrDie running-state flicker is caused by MSG_IDLE clearing and redrawing th
 WriteOrDie countdown drops one second per typed key because GetUptimeMilliseconds is not reliable for challenge elapsed time under key callbacks	disproven
 WriteOrDie GUI countdown drops on keypress because GUI key handling runs a large realtime settle after every host key event	proven
 WriteOrDie real-device timer jumps because the applet reads low-level 0xfffff608 instead of firmware uptime	proven
+GUI emulator typing delay is caused by queued scripted tap phases being drained only by firmware matrix reads, so fast host typing accumulates seconds of pending key phases	proven
+GUI emulator typing delay is caused by GUI realtime loop running far below 33 MHz because LCD rendering and per-frame wall-time caps starve CPU execution	needs further investigation
+GUI emulator arrow delay and text delay share the same root cause in matrix-tap scheduling rather than applet-specific code	proven
+GUI timed key pulses shorter than the firmware scan/debounce interval can drop alternating characters in full-system applets	proven
 Forth Mini prompt rendering uses the SDK text-trap display path, so an empty emulator text_screen means the draw callback did not run rather than an OCR blind spot	needs further investigation
 Forth Mini rows 1-3 can render fixed text in full-system headless mode	proven
 Fresh full-system build->reinit still leaves Forth Mini blank after Enter	proven
@@ -176,3 +180,90 @@ Pressing physical File1..File8 in a multi-file applet updates firmware current-f
 Basic Writer multi-file persistence failed because alpha-neo-pack emitted the applet with file_count=1 instead of 8	proven
 Basic Writer can use distinct runtime handles 1..8 for slot snapshots once the packaged applet really declares file_count=8	proven
 Basic Writer FILE key MSG_KEY param carries hidden 0x8011..0x8018 metadata identity beyond the low key byte	disproven
+WriteOrDie early challenge wrapping is caused by WOD_SCREEN_COLS=28 underusing the GUI 264px visible crop, which fits 33 eight-pixel text cells	proven
+WriteOrDie challenge flashing is caused by ui_draw_challenge clearing and redrawing all text rows on idle status updates	proven
+WriteOrDie can safely use all 33 eight-pixel cells implied by the 264px GUI crop	proven
+WriteOrDie exact-line corruption at 31-33 columns was caused by editor_render_row drawing a fallback cursor on row 0 even when the real cursor was visible on a later row	proven
+WriteOrDie GUI freeze around 2.5 rows is caused by editor_render_row recomputing VisualPosition from the start for each character on every text repaint	proven
+WriteOrDie GUI freeze after setup Enter is caused by synchronous full snapshot saves in the key/idle path before the setup redraw can complete	proven
+WriteOrDie GUI freeze in long time-mode sessions is caused by running-state autosave entering slow applet-owned file I/O during the challenge loop	disproven
+WriteOrDie GUI freeze in long time-mode sessions is caused by cycle-timed GUI key pulses accumulating faster than the GUI realtime loop drains them	proven
+WriteOrDie rows are visually shorter than AlphaWord because OS text rendering uses a 33-column grid while AlphaWord uses the 44-column small-font editor grid	needs further investigation
+WriteOrDie AlphaWord append fails because namespace-2 control selectors were sent as raw desired selector bytes instead of source bytes that AlphaWord maps through DAT_0001488c	disproven
+WriteOrDie editor wraps by character because visual layout treats every byte independently and does not measure upcoming words before line breaks	proven
+WriteOrDie AlphaWord open hang after export is caused by namespace-2 selector 0x87 sync before terminator	disproven
+WriteOrDie headless AlphaWord OCR failure is caused by the validator not actually exiting WriteOrDie before navigating to AlphaWord	proven
+WriteOrDie AlphaWord append corruption is caused by using namespace-2 span write as an append primitive without the correct AlphaWord append protocol	proven
+WriteOrDie can use namespace-1 payload command 0x10002 as a direct append replacement from this applet context	disproven
+WriteOrDie direct AlphaWord focus validator corrupts or misinitializes AlphaWord even when export is skipped	proven
+AlphaWord append by locating a fixed text buffer in RAM is unsafe because AlphaWord files are firmware-owned logical records with attributes, length, reserved size, and workspace invariants	proven
+WriteOrDie namespace-1 packet layout mismatch caused bytes to be read from low RAM instead of the applet input buffer	proven
+WriteOrDie namespace-1 reset mutates state but does not return reliable 0x11 status through this AppletSendMessage path	proven
+WriteOrDie AlphaWord append validation must use AlphaWord protocol readback instead of headless menu OCR because the menu exit/launch helper is not reliable from the completed screen	proven
+WriteOrDie direct-message validator cannot reuse polling loops because advancing past the direct applet-message trampoline runs into firmware STOP/invalid return state	proven
+WriteOrDie menu-count validators are currently unreliable because stale SmartApplets menu navigation can select the wrong applet after the applet set changes	proven
+WriteOrDie validator seeded phase as a big-endian u32 even though the applet is compiled with -fshort-enums and C reads the phase byte at offset 0	proven
+WriteOrDie validator state reads must use the per-applet A5 table rather than the CPU A5 register after direct-message trampoline return	proven
+WriteOrDie phase field is a 32-bit field in the current C build; byte-phase hypothesis from -fshort-enums was wrong for this struct layout	disproven
+WriteOrDie validator state reads can use the firmware current-slot word after direct applet-message dispatch	disproven
+WriteOrDie direct applet-message validation can seed only SSP and still pass correct arguments to Betawise wrappers	disproven
+WriteOrDie AlphaWord append readback fails because namespace-1 reset happens after namespace-2 slot selection	disproven
+WriteOrDie namespace-1 0x00010002 reaches AlphaWord append payload handling	disproven
+WriteOrDie AlphaWord protocol packets used wrong five-word ABI layout	proven
+WriteOrDie AlphaWord five-word ABI stores output count inline in word 3	proven
+WriteOrDie AlphaWord append failure is fixed by removing namespace-1 reset from the write path	disproven
+WriteOrDie namespace-2 terminator must be sent as source byte 0xd8 rather than raw internal byte 0xbb	disproven
+WriteOrDie AlphaWord readback returns zero bytes because selector 0x84 does not enter the expected namespace-2 read mode	needs further investigation
+WriteOrDie AlphaWord append must move the namespace-2 transfer cursor to file end before writing session text	disproven
+WriteOrDie AlphaWord namespace-2 write payload calls are silently rejected or left outside text-write mode	needs further investigation
+WriteOrDie AlphaWord append fails because AlphaWord state is not initialized before cross-applet protocol calls	needs further investigation
+WriteOrDie AlphaWord append protocol works if AlphaWord is launched once by firmware before WriteOrDie exports	needs further investigation
+GUI/full-system boot address error at 0x00413358 is caused by an odd-length injected WriteOrDie OS3K applet record that the seeded boot path validates with long-word footer reads	proven
+The current direct AlphaWord focus validator can be used as a preflight before WriteOrDie export	disproven
+AppletSendMessage invokes AlphaWord namespace handlers with the caller WriteOrDie A5 rather than AlphaWord A5 in the current validation path	disproven
+WriteOrDie AlphaWord append fails because namespace-2 slot selection does not actually select the requested AlphaWord file slot	proven
+WriteOrDie namespace-2 slot/rebuild control selectors must be source-encoded through DAT_0001488c, while read/query selectors remain raw	disproven
+WriteOrDie AlphaWord namespace-2 payload packets use a different packet word order than the current five-word ABI assumption	proven
+WriteOrDie AlphaWord packet word 3 is an output-count pointer, not an inline output-count field	disproven
+WriteOrDie AlphaWord control prefix and selector must be sent in the same namespace-2 packet	disproven
+WriteOrDie AlphaWord control selectors are zero-length namespace-2 packets with a raw sentinel byte at input[0]	proven
+WriteOrDie direct-message validator cannot drive the applets menu after export because the validation trampoline returns to firmware STOP state	proven
+WriteOrDie GUI first-column flashing is caused by the GUI synthetic cursor blink heuristic masking text stems even when the applet hides its cursor	proven
+WriteOrDie GUI challenge freeze during sustained typing is caused by read-count based GUI key phases accumulating faster than firmware matrix scans drain them	proven
+WriteOrDie edge word disappearance is caused by word-wrap/rendering disagreement at the right display boundary	disproven
+WriteOrDie bottom-row spillover into the status bar is caused by drawing 44 cells starting at column 1 instead of column 0	disproven
+WriteOrDie keypress blinking in the first cells is caused by redundant full-row redraws during each keypress	needs further investigation
+WriteOrDie all screens broke because _OS3K_SetCursor was called with a width value instead of its real CursorMode_e third argument	proven
+WriteOrDie first-row missing characters are caused by WOD_SCREEN_COLS=44 exceeding the firmware text row capacity when drawing from column 1, so row 4 wraps trailing cells into row 1	proven
+WriteOrDie remaining first-row missing character is caused by WOD_SCREEN_COLS=42 still exceeding the firmware text row capacity by one cell from column 1	proven
+WriteOrDie export reports success without proving AlphaWord file contents changed	proven
+WriteOrDie AlphaWord message append fails because firmware current-app/current-file globals still point at WriteOrDie during cross-applet AlphaWord calls	disproven
+WriteOrDie AlphaWord message append fails because printable text is sent as MSG_CHAR, but AlphaWord text entry is MSG_KEY/key-state driven	disproven
+WriteOrDie AlphaWord append works by scanning AlphaWord low-RAM file descriptors and appending to the selected slot text buffer before the 0xa7 fill tail	disproven
+WriteOrDie writes a stale AlphaWord descriptor buffer while the GUI opens a later duplicate descriptor for the same file slot	disproven
+WriteOrDie AlphaWord descriptor append must update one descriptor size word to the payload length	disproven
+WriteOrDie AlphaWord descriptor append should preserve the two 512-byte size words; typed text end is represented by the 0xa7 buffer tail	proven
+WriteOrDie appends to an in-memory AlphaWord editor descriptor but AlphaWord later opens from a separate firmware file payload/attribute store	needs further investigation
+WriteOrDie AlphaWord append was invisible because the exporter overwrote AlphaWord's second 512-byte size word with the text length, corrupting the file metadata shape	proven
+WriteOrDie low-RAM descriptor patch is insufficient because full-path AlphaWord launch remains stuck opening the target file with workspace globals unset	proven
+The full-path visible-export validator proves export corruption because AlphaWord hangs after WriteOrDie export	disproven
+The full-path visible-export validator is invalid because the same AlphaWord opening hang occurs when WriteOrDie export is skipped	proven
+Directly patching AlphaWord File 2 descriptors in a normally running AlphaWord session is reliable if descriptor fields and 0xa7 tail match typed files	disproven
+Direct AlphaWord descriptor patching can trigger firmware file-recovery errors, so WriteOrDie must use an AlphaWord-owned protocol/API path	proven
+WriteOrDie can append AlphaWord slot files by temporarily selecting AlphaWord and using the Betawise file API sequence from inside WriteOrDie	disproven
+WriteOrDie can append AlphaWord slot files by temporarily selecting AlphaWord and calling only A190/FileReadBuffer/FileWriteBuffer from inside WriteOrDie	disproven
+WriteOrDie can append safely by sending AlphaWord its own File-key/end/text key messages from cross-applet context	disproven
+WriteOrDie can append AlphaWord files through A190/FileReadBuffer/FileWriteBuffer if it temporarily switches the CPU A5 register to AlphaWord's A5	disproven
+WriteOrDie AlphaWord namespace-2 direct import can append if we directly seed the AlphaWord transfer span and current slot byte	disproven
+WriteOrDie can append through AlphaWord file API with AlphaWord A5 switched and full A2DC/A2EC/A2FC/A190 sequence	disproven
+WriteOrDie namespace-2 direct 0xbd returns no output because AlphaWord transfer cursor is still below transfer size and consumes it as stream data	disproven
+WriteOrDie AlphaWord namespace-2 payload packet is malformed or unstable across AppletSendMessage	disproven
+WriteOrDie AlphaWord namespace-2 sentinel commands require zero-length packets with input[0] populated	disproven
+WriteOrDie low-RAM AlphaWord append was invisible because it scanned only later duplicate records and missed the primary File records around 0x114e/0x1196	proven
+WriteOrDie can append after AlphaWord edit buffers are released by writing persistent zero-length File records at their payload pointers and updating length fields	proven
+WriteOrDie export corrupts AlphaWord because zero-length records require size fields +36/+3a to remain allocated capacity while only +2e/+32 hold used length	proven
+WriteOrDie repeated AlphaWord append fails because the exporter treats used length +2e as capacity after the first append	proven
+WriteOrDie finished-screen File-key freeze only happens on firmware matrix key delivery, not direct MSG_KEY validation	disproven
+WriteOrDie GUI freeze can be triggered by exporting through malformed/stale AlphaWord descriptors left by earlier bad builds	needs further investigation
+WriteOrDie export is invisible in AlphaWord because only 512-byte workspace descriptors are written while AlphaWord rebuilds visible files from the 9216-byte primary descriptor	proven
+WriteOrDie post-export GUI freeze is caused by firmware entering normal idle STOP at 0x00426756 while the GUI loop only advances non-stopped sessions	proven

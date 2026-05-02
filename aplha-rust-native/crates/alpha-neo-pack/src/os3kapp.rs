@@ -60,6 +60,9 @@ pub fn build_image(manifest: &AppletManifest, entry_code: &[u8]) -> Result<Vec<u
     payload.extend_from_slice(&1_u32.to_be_bytes());
     payload.extend_from_slice(&2_u32.to_be_bytes());
     payload.extend_from_slice(entry_code);
+    if payload.len() % 2 != 0 {
+        payload.push(0);
+    }
 
     let info_table = build_info_table(manifest.file_count, manifest.alphaword_write_metadata);
     let info_table_len = info_table.len();
@@ -98,6 +101,9 @@ pub fn validate_image(image: &[u8]) -> Result<(), Os3kAppError> {
 
     let declared_size = u32::from_be_bytes([image[4], image[5], image[6], image[7]]);
     if declared_size as usize != image.len() {
+        return Err(Os3kAppError::FileTooLarge(image.len()));
+    }
+    if image.len() % 2 != 0 {
         return Err(Os3kAppError::FileTooLarge(image.len()));
     }
 
@@ -270,6 +276,32 @@ mod tests {
     }
 
     #[test]
+    fn pads_odd_entry_code_before_info_table() -> Result<(), Box<dyn Error>> {
+        let manifest = AppletManifest {
+            id: 0xA133,
+            name: "WriteOrDie",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x4000,
+            extra_memory_size: 0x2000,
+            copyright: "neo-re Betawise WriteOrDie SmartApplet",
+            file_count: 1,
+            alphaword_write_metadata: true,
+        };
+        let image = build_image(&manifest, &[0x4E, 0x75, 0x4E])?;
+        let declared_size = u32::from_be_bytes(image[4..8].try_into()?) as usize;
+        let info_offset = u32::from_be_bytes(image[0x0c..0x10].try_into()?) as usize;
+
+        assert_eq!(image.len() % 2, 0);
+        assert_eq!(declared_size, image.len());
+        assert_eq!(info_offset % 2, 0);
+        assert_eq!(image[0x97], 0);
+        assert_eq!(&image[image.len() - 4..], &[0xCA, 0xFE, 0xFE, 0xED]);
+        validate_image(&image)?;
+        Ok(())
+    }
+
+    #[test]
     fn packages_single_owned_file_shape() -> Result<(), Box<dyn Error>> {
         let manifest = AppletManifest {
             id: 0xA131,
@@ -317,6 +349,7 @@ mod tests {
 
         assert_eq!(&image[0x14..0x16], &[0xA1, 0x33]);
         assert_eq!(image[0x17], 1);
+        assert_eq!(image.len() % 2, 0);
         assert!(image.windows(slot_1.len()).any(|window| window == slot_1));
         validate_image(&image)?;
         Ok(())

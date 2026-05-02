@@ -1,37 +1,34 @@
 #include "ui.h"
 
 #include "../betawise-sdk/os3k.h"
+#include "../betawise-sdk/screen_lines.h"
 #include "editor.h"
 
 void _OS3K_ClearScreen(void);
-void _OS3K_SetCursor(uint8_t row, uint8_t col, CursorMode_e cursor_mode);
-
-static void ClearLine(char* line) {
-    for(uint8_t i = 0; i < WOD_SCREEN_COLS; i++) {
-        line[i] = ' ';
-    }
-    line[WOD_SCREEN_COLS] = '\0';
-}
 
 static void PutLine(uint8_t row, const char* text) {
-    char line[WOD_SCREEN_COLS + 1];
-    ClearLine(line);
-    for(uint8_t i = 0; i < WOD_SCREEN_COLS && text[i] != '\0'; i++) {
-        line[i] = text[i];
+    applet_screen_put_line(row, text, WOD_SCREEN_COLS);
+}
+
+static void PutCachedLine(uint8_t row, const char* text, char* cache) {
+    applet_screen_put_cached_line(row, text, cache, WOD_SCREEN_COLS);
+}
+
+static void InvalidateChallengeCache(WodAppState_t* state) {
+    applet_screen_invalidate_cache(state->display_status_line);
+    for(uint8_t row = 0; row < WOD_TEXT_ROWS; row++) {
+        applet_screen_invalidate_cache(state->display_text_lines[row]);
     }
-    _OS3K_SetCursor(row, 1, CURSOR_MODE_HIDE);
-    PutStringRaw(line);
 }
 
 static void PutSelectedLine(uint8_t row, uint32_t selected, const char* text) {
     char line[WOD_SCREEN_COLS + 1];
-    ClearLine(line);
+    applet_screen_clear_line(line, WOD_SCREEN_COLS);
     line[0] = selected ? '>' : ' ';
     for(uint8_t i = 0; i + 2 < WOD_SCREEN_COLS && text[i] != '\0'; i++) {
         line[i + 2] = text[i];
     }
-    _OS3K_SetCursor(row, 1, CURSOR_MODE_HIDE);
-    PutStringRaw(line);
+    PutLine(row, line);
 }
 
 static uint32_t DivMod60(uint32_t value, uint32_t* remainder) {
@@ -44,9 +41,10 @@ static uint32_t DivMod60(uint32_t value, uint32_t* remainder) {
     return quotient;
 }
 
-void ui_draw_setup(const WodAppState_t* state) {
+void ui_draw_setup(WodAppState_t* state) {
     char line[WOD_SCREEN_COLS + 1];
     _OS3K_ClearScreen();
+    InvalidateChallengeCache(state);
     SetCursorMode(CURSOR_MODE_HIDE);
     if(state->goal_mode == WOD_GOAL_WORDS) {
         sprintf(line, "Goal: Words %lu", (unsigned long)state->word_goal);
@@ -70,10 +68,16 @@ static const char* PressureText(WodPressure_t pressure) {
     }
 }
 
-void ui_draw_challenge(const WodAppState_t* state, WodPressure_t pressure, uint32_t remaining_seconds) {
-    char line[WOD_SCREEN_COLS + 1];
+void ui_draw_challenge(WodAppState_t* state, WodPressure_t pressure, uint32_t remaining_seconds) {
     _OS3K_ClearScreen();
+    InvalidateChallengeCache(state);
     SetCursorMode(CURSOR_MODE_HIDE);
+    ui_update_challenge_status(state, pressure, remaining_seconds);
+    ui_update_challenge_text(state);
+}
+
+void ui_update_challenge_status(WodAppState_t* state, WodPressure_t pressure, uint32_t remaining_seconds) {
+    char line[WOD_SCREEN_COLS + 1];
     if(state->goal_mode == WOD_GOAL_WORDS) {
         sprintf(line, "%lu/%lu %s", (unsigned long)editor_word_count(&state->editor), (unsigned long)state->word_goal, PressureText(pressure));
     } else {
@@ -81,20 +85,43 @@ void ui_draw_challenge(const WodAppState_t* state, WodPressure_t pressure, uint3
         uint32_t minutes = DivMod60(remaining_seconds, &seconds);
         sprintf(line, "%02lu:%02lu %luw %s", (unsigned long)minutes, (unsigned long)seconds, (unsigned long)editor_word_count(&state->editor), PressureText(pressure));
     }
-    PutLine(1, line);
+    PutCachedLine(1, line, state->display_status_line);
+}
+
+void ui_update_challenge_text(WodAppState_t* state) {
+    char line[WOD_SCREEN_COLS + 1];
     for(uint8_t row = 0; row < WOD_TEXT_ROWS; row++) {
         editor_render_row(&state->editor, row, line);
-        PutLine((uint8_t)(row + 2), line);
+        PutCachedLine((uint8_t)(row + 2), line, state->display_text_lines[row]);
     }
 }
 
-void ui_draw_completed(const WodAppState_t* state) {
+void ui_draw_completed(WodAppState_t* state) {
     char line[WOD_SCREEN_COLS + 1];
     _OS3K_ClearScreen();
+    InvalidateChallengeCache(state);
     SetCursorMode(CURSOR_MODE_HIDE);
     PutLine(1, "Done.");
     sprintf(line, "Words: %lu", (unsigned long)state->final_word_count);
     PutLine(2, line);
-    PutLine(3, "Saved.");
+    PutLine(3, "Press File 1-8");
+    PutLine(4, "append to AlphaWord");
+}
+
+void ui_draw_export_result(WodAppState_t* state) {
+    char line[WOD_SCREEN_COLS + 1];
+    _OS3K_ClearScreen();
+    InvalidateChallengeCache(state);
+    SetCursorMode(CURSOR_MODE_HIDE);
+    if(state->export_status == 1) {
+        sprintf(line, "Appended to File %lu", (unsigned long)state->export_slot);
+        PutLine(1, line);
+        PutLine(2, "WriteOrDie session");
+        PutLine(3, "saved in AlphaWord");
+    } else {
+        PutLine(1, "Append failed");
+        PutLine(2, "Open AlphaWord first");
+        PutLine(3, "then try again");
+    }
     PutLine(4, "Applets exits");
 }

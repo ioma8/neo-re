@@ -1,5 +1,6 @@
 use m68000::MemoryAccess;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 use thiserror::Error;
 
@@ -132,6 +133,26 @@ impl EmuMemory {
 
     pub(crate) fn tap_key_chord(&mut self, keys: &[MatrixKey]) {
         self.keyboard.tap_chord(keys);
+    }
+
+    pub(crate) fn tap_key_chord_for_reads(
+        &mut self,
+        keys: &[MatrixKey],
+        press_reads: usize,
+        release_reads: usize,
+    ) {
+        self.keyboard
+            .tap_chord_for_reads(keys, press_reads, release_reads);
+    }
+
+    pub(crate) fn tap_key_chord_for_cycles(
+        &mut self,
+        keys: &[MatrixKey],
+        press_cycles: u64,
+        release_cycles: u64,
+    ) {
+        self.keyboard
+            .tap_chord_for_cycles(keys, press_cycles, release_cycles);
     }
 
     pub(crate) fn tap_key_chord_debug(&mut self, keys: &[MatrixKey]) {
@@ -302,6 +323,7 @@ impl EmuMemory {
     }
 
     pub(crate) fn advance_cpu_cycles(&mut self, cycles: usize) {
+        self.keyboard.advance_cycles(cycles as u64);
         self.pll_clk32_cycles = self.pll_clk32_cycles.saturating_add(cycles as u64);
         while self.pll_clk32_cycles >= PLL_CLK32_CYCLES_PER_EDGE {
             self.pll_clk32_cycles -= PLL_CLK32_CYCLES_PER_EDGE;
@@ -498,6 +520,15 @@ fn applet_name(bytes: &[u8]) -> Option<String> {
 
 fn load_stock_applets(bytes: &mut [u8]) {
     let applet_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analysis/device-dumps/applets");
+    let extra_applets = EXTRA_APPLET_PATHS
+        .iter()
+        .map(|path| Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
+        .collect::<Vec<_>>();
+    let extra_names = extra_applets
+        .iter()
+        .filter_map(|path| std::fs::read(path).ok())
+        .filter_map(|image| applet_name(image.get(0x18..0x40)?))
+        .collect::<BTreeSet<_>>();
     let mut applets = std::fs::read_dir(applet_dir)
         .ok()
         .into_iter()
@@ -510,12 +541,14 @@ fn load_stock_applets(bytes: &mut [u8]) {
                     .and_then(|name| name.to_str())
                     .is_some_and(|name| name.starts_with('A') && !name.starts_with("AF"))
         })
+        .filter(|path| {
+            std::fs::read(path)
+                .ok()
+                .and_then(|image| applet_name(image.get(0x18..0x40)?))
+                .is_none_or(|name| !extra_names.contains(&name))
+        })
         .collect::<Vec<_>>();
     applets.sort();
-    let extra_applets = EXTRA_APPLET_PATHS
-        .iter()
-        .map(|path| Path::new(env!("CARGO_MANIFEST_DIR")).join(path))
-        .collect::<Vec<_>>();
     let stock_limit = 31usize.saturating_sub(extra_applets.len());
 
     let mut cursor = STOCK_APPLET_BASE;

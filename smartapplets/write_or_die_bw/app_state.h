@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define WOD_SCREEN_COLS 28
+#define WOD_SCREEN_COLS 41
 #define WOD_TEXT_ROWS 3
 #define WOD_MAX_TEXT_BYTES 768
 #define WOD_DEFAULT_WORD_GOAL 500
@@ -23,7 +23,8 @@ typedef struct {
 typedef enum {
     WOD_PHASE_SETUP = 0,
     WOD_PHASE_RUNNING = 1,
-    WOD_PHASE_COMPLETED = 2
+    WOD_PHASE_COMPLETED = 2,
+    WOD_PHASE_EXPORTED = 3
 } WodPhase_t;
 
 typedef enum {
@@ -53,6 +54,10 @@ typedef struct {
     uint32_t dirty;
     uint32_t display_remaining_seconds;
     uint32_t display_pressure;
+    uint32_t export_slot;
+    uint32_t export_status;
+    char display_status_line[WOD_SCREEN_COLS + 1];
+    char display_text_lines[WOD_TEXT_ROWS][WOD_SCREEN_COLS + 1];
 } WodAppState_t;
 
 #endif

@@ -9,7 +9,7 @@ use eframe::egui;
 use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::FirmwareSession;
 use crate::keyboard::{matrix_key_for_char, matrix_key_label};
-use crate::lcd::{LcdSnapshot, cursor_blink_snapshot};
+use crate::lcd::LcdSnapshot;
 use crate::recovery_seed;
 
 const SHIFT_CODE: u8 = 0x6e;
@@ -22,7 +22,8 @@ const MAX_REALTIME_STEPS_PER_FRAME: usize = 1_000_000;
 const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(16);
 const MAX_REALTIME_WORK_PER_FRAME: Duration = Duration::from_millis(15);
 const SPEED_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
-const GUI_KEY_SETTLE_STEPS: usize = 300_000;
+const GUI_KEY_PRESS_CYCLES: u64 = NEO_CPU_HZ / 25;
+const GUI_KEY_RELEASE_CYCLES: u64 = NEO_CPU_HZ / 50;
 const NEO_VISIBLE_LCD_HEIGHT: usize = 64;
 const NEO_VISIBLE_LCD_WIDTH: usize = 264;
 const LCD_INNER_PADDING: f32 = 4.0;
@@ -480,8 +481,16 @@ enum MatrixTap {
 impl MatrixTap {
     fn apply(self, session: &mut FirmwareSession) {
         match self {
-            Self::Key(code) => session.tap_matrix_code(code),
-            Self::Chord(codes) => session.tap_matrix_chord(codes),
+            Self::Key(code) => session.tap_matrix_code_for_cycles(
+                code,
+                GUI_KEY_PRESS_CYCLES,
+                GUI_KEY_RELEASE_CYCLES,
+            ),
+            Self::Chord(codes) => session.tap_matrix_chord_for_cycles(
+                codes,
+                GUI_KEY_PRESS_CYCLES,
+                GUI_KEY_RELEASE_CYCLES,
+            ),
         }
     }
 }
@@ -493,7 +502,11 @@ struct TextTap {
 
 impl TextTap {
     fn apply_as_text(self, session: &mut FirmwareSession) {
-        session.tap_char(self.character);
+        session.tap_char_for_cycles(
+            self.character,
+            GUI_KEY_PRESS_CYCLES,
+            GUI_KEY_RELEASE_CYCLES,
+        );
     }
 }
 
@@ -755,7 +768,6 @@ fn format_speed(hz: f64) -> String {
 }
 
 fn render_functional_keys(ui: &mut egui::Ui, session: &mut FirmwareSession) {
-    let mut any_pressed = false;
     render_key_group(
         ui,
         "Files",
@@ -770,7 +782,6 @@ fn render_functional_keys(ui: &mut egui::Ui, session: &mut FirmwareSession) {
             ("F8", 0x42),
         ],
         session,
-        &mut any_pressed,
     );
     render_key_group(
         ui,
@@ -784,7 +795,6 @@ fn render_functional_keys(ui: &mut egui::Ui, session: &mut FirmwareSession) {
             ("Clear", 0x54),
         ],
         session,
-        &mut any_pressed,
     );
     render_key_group(
         ui,
@@ -798,7 +808,6 @@ fn render_functional_keys(ui: &mut egui::Ui, session: &mut FirmwareSession) {
             ("Right", 0x76),
         ],
         session,
-        &mut any_pressed,
     );
     render_key_group(
         ui,
@@ -815,11 +824,7 @@ fn render_functional_keys(ui: &mut egui::Ui, session: &mut FirmwareSession) {
             ("Cmd", COMMAND_CODE),
         ],
         session,
-        &mut any_pressed,
     );
-    if any_pressed {
-        session.run_realtime_steps(GUI_KEY_SETTLE_STEPS);
-    }
 }
 
 fn render_key_group(
@@ -827,7 +832,6 @@ fn render_key_group(
     title: &str,
     keys: &[(&str, u8)],
     session: &mut FirmwareSession,
-    any_pressed: &mut bool,
 ) {
     ui.horizontal_wrapped(|ui| {
         ui.add_sized(
@@ -841,8 +845,11 @@ fn render_key_group(
         );
         for (label, raw) in keys {
             if button_for_matrix_key(ui, label, *raw).clicked() {
-                session.tap_matrix_code(*raw);
-                *any_pressed = true;
+                session.tap_matrix_code_for_cycles(
+                    *raw,
+                    GUI_KEY_PRESS_CYCLES,
+                    GUI_KEY_RELEASE_CYCLES,
+                );
             }
         }
     });
@@ -887,8 +894,6 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
         let pixel_rect = rect.shrink(LCD_INNER_PADDING);
         let scale_x = pixel_rect.width() / visible_width as f32;
         let scale_y = pixel_rect.height() / visible_height as f32;
-        let cursor_visible = ((ui.input(|input| input.time) * 2.0) as u64).is_multiple_of(2);
-        let lcd = cursor_blink_snapshot(lcd, cursor_visible);
         for y in 0..visible_height {
             for x in 0..visible_width {
                 if lcd.pixels[y * lcd.width + x] {

@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MatrixKey(u8);
 
@@ -308,10 +310,18 @@ struct KeyPhase {
     all_rows: bool,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct TimedKeyPhase {
+    key_codes: [Option<MatrixKey>; 4],
+    remaining_cycles: u64,
+    all_rows: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct Keyboard {
     held: Vec<MatrixKey>,
     script: Vec<KeyPhase>,
+    timed_script: VecDeque<TimedKeyPhase>,
     phase: usize,
     reads_in_phase: usize,
     selected_rows: Option<u16>,
@@ -320,6 +330,7 @@ pub(crate) struct Keyboard {
 impl Keyboard {
     pub(crate) fn clear_transients(&mut self) {
         self.script.clear();
+        self.timed_script.clear();
         self.phase = 0;
         self.reads_in_phase = 0;
     }
@@ -340,12 +351,35 @@ impl Keyboard {
     }
 
     pub(crate) fn tap_chord(&mut self, keys: &[MatrixKey]) {
+        self.tap_chord_for_reads(keys, 1_024, 4_096);
+    }
+
+    pub(crate) fn tap_chord_for_reads(
+        &mut self,
+        keys: &[MatrixKey],
+        press_reads: usize,
+        release_reads: usize,
+    ) {
         let mut key_codes = [None, None, None, None];
         for (slot, key) in key_codes.iter_mut().zip(keys.iter().copied()) {
             *slot = Some(key);
         }
-        self.push_phase(key_codes, 1_024, false);
-        self.push_phase([None, None, None, None], 4_096, false);
+        self.push_phase(key_codes, press_reads.max(1), false);
+        self.push_phase([None, None, None, None], release_reads.max(1), false);
+    }
+
+    pub(crate) fn tap_chord_for_cycles(
+        &mut self,
+        keys: &[MatrixKey],
+        press_cycles: u64,
+        release_cycles: u64,
+    ) {
+        let mut key_codes = [None, None, None, None];
+        for (slot, key) in key_codes.iter_mut().zip(keys.iter().copied()) {
+            *slot = Some(key);
+        }
+        self.push_timed_phase(key_codes, press_cycles.max(1), false);
+        self.push_timed_phase([None, None, None, None], release_cycles.max(1), false);
     }
 
     pub(crate) fn tap_chord_debug(&mut self, keys: &[MatrixKey]) {
@@ -426,12 +460,36 @@ impl Keyboard {
                 active_columns |= script_key.column_mask();
             }
         }
+        for script_key in self.read_timed_script_keys() {
+            let visible_row = if script_key.all_rows {
+                None
+            } else {
+                self.selected_rows
+            };
+            if script_key.key.is_visible_on_rows(visible_row) {
+                active_columns |= script_key.column_mask();
+            }
+        }
         for key in self.held.iter().copied() {
             if key.is_visible_on_rows(self.selected_rows) {
                 active_columns |= key.column_mask();
             }
         }
         !active_columns
+    }
+
+    pub(crate) fn advance_cycles(&mut self, mut cycles: u64) {
+        while cycles > 0 {
+            let Some(phase) = self.timed_script.front_mut() else {
+                return;
+            };
+            if cycles < phase.remaining_cycles {
+                phase.remaining_cycles -= cycles;
+                return;
+            }
+            cycles -= phase.remaining_cycles;
+            self.timed_script.pop_front();
+        }
     }
 
     fn read_script_keys(&mut self) -> Vec<ScriptKey> {
@@ -454,10 +512,38 @@ impl Keyboard {
             .collect()
     }
 
+    fn read_timed_script_keys(&self) -> Vec<ScriptKey> {
+        let Some(phase) = self.timed_script.front().copied() else {
+            return Vec::new();
+        };
+        phase
+            .key_codes
+            .into_iter()
+            .flatten()
+            .map(|key| ScriptKey {
+                key,
+                all_rows: phase.all_rows,
+            })
+            .collect()
+    }
+
     fn push_phase(&mut self, key_codes: [Option<MatrixKey>; 4], reads: usize, all_rows: bool) {
         self.script.push(KeyPhase {
             key_codes,
             reads,
+            all_rows,
+        });
+    }
+
+    fn push_timed_phase(
+        &mut self,
+        key_codes: [Option<MatrixKey>; 4],
+        remaining_cycles: u64,
+        all_rows: bool,
+    ) {
+        self.timed_script.push_back(TimedKeyPhase {
+            key_codes,
+            remaining_cycles,
             all_rows,
         });
     }
@@ -689,6 +775,23 @@ mod tests {
         keyboard.select_row(0x05);
 
         assert_eq!(keyboard.read_matrix_input(), 0xfd);
+    }
+
+    #[test]
+    fn timed_tap_duration_depends_on_cycles_not_matrix_reads() {
+        let mut keyboard = Keyboard::default();
+        keyboard.select_row(0x05);
+        keyboard.tap_chord_for_cycles(&[MatrixKey::new(0x15)], 100, 50);
+
+        for _ in 0..10 {
+            assert_eq!(keyboard.read_matrix_input(), 0xfd);
+        }
+        keyboard.advance_cycles(99);
+        assert_eq!(keyboard.read_matrix_input(), 0xfd);
+        keyboard.advance_cycles(1);
+        assert_eq!(keyboard.read_matrix_input(), 0xff);
+        keyboard.advance_cycles(50);
+        assert_eq!(keyboard.read_matrix_input(), 0xff);
     }
 
     #[test]

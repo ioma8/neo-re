@@ -203,7 +203,7 @@ bool IsKeyReady();
 uint8_t GetKeyModifiers();
 void ScanKeyboard();
 void QueueKey(KeyMod_e key);
-void SetKeyModifiers(uint16_t mask);
+void SetModifierKeys(uint16_t mask);
 bool IsKeyDownNow();
 
 void SleepCentiseconds(uint32_t centiseconds);

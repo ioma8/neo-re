@@ -63,8 +63,16 @@ In practice that means:
   and shared applet status constants
 - include `smartapplets/betawise-sdk/file_store.h` for the validated one-file
   snapshot persistence path
+- include `smartapplets/betawise-sdk/screen_lines.h` for fixed-width row
+  rendering with cursor hiding and cached redraws
+- include `smartapplets/betawise-sdk/challenge_timer.h` for uptime-based
+  elapsed/remaining/pressure timing
 - link `smartapplets/betawise-sdk/syscall.c`
 - link `smartapplets/betawise-sdk/file_store.c` if the applet persists state
+- link `smartapplets/betawise-sdk/screen_lines.c` if the applet writes full LCD
+  rows
+- link `smartapplets/betawise-sdk/challenge_timer.c` if the applet has
+  countdown or pressure timing
 - provide your own entry shim in `.text.alpha_usb_entry`
 - dispatch `MSG_SETFOCUS`, `MSG_CHAR`, and `MSG_KEY` yourself
 - handle Enter as `MSG_CHAR` byte `0x0d`/`0x0a` where the screen flow expects
@@ -85,6 +93,18 @@ The repo-owned Betawise-side SDK now exposes these validated low-level helpers:
 - `file_store.h` / `file_store.c`
   - `applet_load_snapshot(...)`
   - `applet_save_snapshot(...)`
+- `screen_lines.h` / `screen_lines.c`
+  - `APPLET_SCREEN_SAFE_COLS`
+  - `applet_screen_put_line(...)`
+  - `applet_screen_put_cached_line(...)`
+  - row formatting, cache invalidation, and fixed-width line copying helpers
+- `challenge_timer.h` / `challenge_timer.c`
+  - `applet_seconds_to_milliseconds(...)`
+  - `applet_milliseconds_to_seconds(...)`
+  - `applet_elapsed_milliseconds(...)`
+  - `applet_remaining_seconds(...)`
+  - `applet_penalty_interval_milliseconds(...)`
+  - `applet_pressure_stage(...)`
 
 This means applet code no longer needs to carry:
 
@@ -92,6 +112,10 @@ This means applet code no longer needs to carry:
 - direct `A5 + 0x300` pointer boilerplate
 - direct `A2DC -> A2EC/A2FC -> A190 -> FileReadBuffer/FileWriteBuffer -> FileClose`
   choreography for one-file snapshot persistence
+- local copies of the validated `row 1..4`, `col = 1`, `CURSOR_MODE_HIDE`
+  full-row rendering pattern
+- local copies of the uptime-based challenge countdown and pressure-stage
+  arithmetic
 
 For the currently validated one-file persistence path used by `forth_mini_bw`:
 
