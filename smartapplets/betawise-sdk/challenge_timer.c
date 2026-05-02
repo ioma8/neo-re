@@ -52,3 +52,15 @@ uint32_t applet_pressure_stage(uint32_t idle_ms, uint32_t grace_seconds) {
     }
     return APPLET_PRESSURE_SAFE;
 }
+
+bool applet_flash_phase(uint32_t elapsed_ms, uint32_t interval_ms) {
+    bool phase = false;
+    if(interval_ms == 0) {
+        return false;
+    }
+    while(elapsed_ms >= interval_ms) {
+        elapsed_ms -= interval_ms;
+        phase = !phase;
+    }
+    return phase;
+}

@@ -276,3 +276,4 @@ WriteOrDie penalty flash validator was comparing against an already-highlighted 
 WriteOrDie successful typing path fails to clear an active punishment highlight, so flash can remain on after resumed writing	proven
 WriteOrDie punishment deletion works when MSG_IDLE reaches penalty pressure and last_penalty_ms is older than the penalty interval	proven
 WriteOrDie LCD reverse highlight produces a visible headless LCD diff when compared against a normal non-highlighted text baseline	proven
+Basic Writer validation failure after SDK lift is caused by menu validation launching WriteOrDie instead of Basic Writer, as shown by WOD setup OCR on the basic_writer_focus checkpoint	proven

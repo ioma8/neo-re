@@ -73,6 +73,8 @@ In practice that means:
   rows
 - link `smartapplets/betawise-sdk/challenge_timer.c` if the applet has
   countdown or pressure timing
+- link `smartapplets/betawise-sdk/alphaword_export.c` if the applet appends
+  text into visible AlphaWord File slots
 - provide your own entry shim in `.text.alpha_usb_entry`
 - dispatch `MSG_SETFOCUS`, `MSG_CHAR`, and `MSG_KEY` yourself
 - handle Enter as `MSG_CHAR` byte `0x0d`/`0x0a` where the screen flow expects
@@ -97,6 +99,9 @@ The repo-owned Betawise-side SDK now exposes these validated low-level helpers:
   - `APPLET_SCREEN_SAFE_COLS`
   - `applet_screen_put_line(...)`
   - `applet_screen_put_cached_line(...)`
+  - `applet_screen_set_reverse(...)`
+  - `applet_screen_set_reverse_cached(...)`
+  - `applet_screen_clear_reverse_cache(...)`
   - row formatting, cache invalidation, and fixed-width line copying helpers
 - `challenge_timer.h` / `challenge_timer.c`
   - `applet_seconds_to_milliseconds(...)`
@@ -105,6 +110,9 @@ The repo-owned Betawise-side SDK now exposes these validated low-level helpers:
   - `applet_remaining_seconds(...)`
   - `applet_penalty_interval_milliseconds(...)`
   - `applet_pressure_stage(...)`
+  - `applet_flash_phase(...)`
+- `alphaword_export.h` / `alphaword_export.c`
+  - `alphaword_append_text_block(...)`
 
 This means applet code no longer needs to carry:
 
@@ -116,6 +124,9 @@ This means applet code no longer needs to carry:
   full-row rendering pattern
 - local copies of the uptime-based challenge countdown and pressure-stage
   arithmetic
+- direct LCD command writes for whole-display reverse/highlight feedback
+- local interval phase loops for periodic warning/punishment flashing
+- direct AlphaWord visible-file descriptor scanning and append patching
 
 For the currently validated one-file persistence path used by `forth_mini_bw`:
 
@@ -195,3 +206,50 @@ Everything mutable should hang off that state block.
 - `smartapplets/write_or_die_bw`: challenge editor applet, reference for setup
   menus, live timers, pressure states, one-file autosave, and full-system
   headless validation of completion plus persistence
+
+## Validated screen feedback helpers
+
+Use `applet_screen_set_reverse(true)` for strong whole-display highlight
+feedback, and always call `applet_screen_set_reverse(false)` before leaving a
+screen, redrawing cached text from a normal baseline, or returning to another
+applet. The helper writes both LCD controllers, turns the display on first, and
+uses the same command path that validates in the headless emulator.
+
+For applets that store display state in their `A5 + 0x300` state block, prefer
+`applet_screen_set_reverse_cached(&state->reverse_flag, enabled)` and
+`applet_screen_clear_reverse_cache(&state->reverse_flag)`. That avoids redundant
+LCD command writes and prevents stale reverse mode from leaking across screens.
+
+For periodic visual feedback, use:
+
+```c
+bool on = applet_flash_phase(idle_ms, 500u);
+```
+
+`write_or_die_bw` combines that with `applet_pressure_stage(...)`: danger and
+penalty states flash, normal typing clears the highlight immediately, and
+penalty idle ticks delete trailing words at
+`applet_penalty_interval_milliseconds(...)`. The headless validator checks both
+the visible LCD diff and repeated word removal.
+
+## Validated AlphaWord append helper
+
+Use `alphaword_append_text_block(slot, title, text, text_len)` when an applet
+needs to append plain text to a visible AlphaWord File key slot. `slot` is the
+user-visible file number, `1..8`; the helper handles the backing descriptor
+rotation discovered from AlphaWord. Newlines in `text` are written as AlphaWord
+carriage returns, and unsupported bytes are skipped.
+
+The helper intentionally performs the narrow proven sequence only:
+
+- find the AlphaWord applet
+- temporarily focus AlphaWord and press the requested File key so firmware
+  initializes the visible file state
+- locate the last initialized backing descriptor for that visible file
+- append `title`, a newline, then filtered text bytes
+- update the used-length mirror fields and refill the remaining capacity with
+  AlphaWord's `0xa7` tail byte
+
+This is AlphaWord-specific and should not be used as general applet-owned
+storage. The WriteOrDie headless validator verifies the exported session by
+opening/reading the visible AlphaWord file path after export.

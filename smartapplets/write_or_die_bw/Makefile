@@ -4,7 +4,7 @@ LD = m68k-elf-ld
 CFLAGS = -m68000 -mpcrel -fomit-frame-pointer -ffixed-a5 -ffixed-d7 -fshort-enums
 CFLAGS += -O1 -fno-inline -fno-optimize-sibling-calls -I"../betawise-sdk" -ffunction-sections -fdata-sections -ffreestanding
 LDFLAGS = -static -T WriteOrDieBW.lds --gc-sections
-OBJ = WriteOrDieBW.o editor.o challenge.o ui.o storage.o alpha_export.o syscall.o file_store.o screen_lines.o challenge_timer.o
+OBJ = WriteOrDieBW.o editor.o challenge.o ui.o storage.o alpha_export.o syscall.o file_store.o screen_lines.o challenge_timer.o alphaword_export.o
 TARGET = WriteOrDieBW.elf
 
 all: $(TARGET)
@@ -24,8 +24,11 @@ screen_lines.o: ../betawise-sdk/screen_lines.c
 challenge_timer.o: ../betawise-sdk/challenge_timer.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
+alphaword_export.o: ../betawise-sdk/alphaword_export.c
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(TARGET): $(OBJ) WriteOrDieBW.lds
 	$(LD) $(OBJ) $(LDFLAGS) -o $@
 
 clean:
-	rm -f WriteOrDieBW.o editor.o challenge.o ui.o storage.o alpha_export.o syscall.o file_store.o screen_lines.o challenge_timer.o WriteOrDieBW.elf
+	rm -f WriteOrDieBW.o editor.o challenge.o ui.o storage.o alpha_export.o syscall.o file_store.o screen_lines.o challenge_timer.o alphaword_export.o WriteOrDieBW.elf

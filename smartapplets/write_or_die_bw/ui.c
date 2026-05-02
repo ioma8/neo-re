@@ -10,24 +10,16 @@ static void PutLine(uint8_t row, const char* text) {
     applet_screen_put_line(row, text, WOD_SCREEN_COLS);
 }
 
-static void SetDisplayReverse(bool enabled) {
-    LCD_CMD_REG_LEFT = LCD_CMD_ON(1u);
-    LCD_CMD_REG_RIGHT = LCD_CMD_ON(1u);
-    LCD_CMD_REG_LEFT = LCD_CMD_REVERSE(enabled ? 1u : 0u);
-    LCD_CMD_REG_RIGHT = LCD_CMD_REVERSE(enabled ? 1u : 0u);
-}
-
 static void PutCachedLine(uint8_t row, const char* text, char* cache) {
     applet_screen_put_cached_line(row, text, cache, WOD_SCREEN_COLS);
 }
 
 static void InvalidateChallengeCache(WodAppState_t* state) {
-    SetDisplayReverse(false);
+    applet_screen_clear_reverse_cache(&state->display_flash_on);
     applet_screen_invalidate_cache(state->display_status_line);
     for(uint8_t row = 0; row < WOD_TEXT_ROWS; row++) {
         applet_screen_invalidate_cache(state->display_text_lines[row]);
     }
-    state->display_flash_on = 0;
 }
 
 static void PutSelectedLine(uint8_t row, uint32_t selected, const char* text) {
@@ -113,11 +105,7 @@ void ui_update_challenge_text(WodAppState_t* state) {
 }
 
 void ui_set_challenge_text_highlight(WodAppState_t* state, bool enabled) {
-    if((state->display_flash_on != 0) == enabled) {
-        return;
-    }
-    SetDisplayReverse(enabled);
-    state->display_flash_on = enabled ? 1u : 0u;
+    applet_screen_set_reverse_cached(&state->display_flash_on, enabled);
 }
 
 void ui_draw_completed(WodAppState_t* state) {

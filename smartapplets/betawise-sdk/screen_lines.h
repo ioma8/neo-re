@@ -13,5 +13,8 @@ void applet_screen_copy_line(char* target, const char* source, uint8_t width);
 void applet_screen_invalidate_cache(char* cache);
 void applet_screen_put_line(uint8_t row, const char* text, uint8_t width);
 void applet_screen_put_cached_line(uint8_t row, const char* text, char* cache, uint8_t width);
+void applet_screen_set_reverse(bool enabled);
+void applet_screen_set_reverse_cached(uint32_t* cached_state, bool enabled);
+void applet_screen_clear_reverse_cache(uint32_t* cached_state);
 
 #endif

@@ -8,6 +8,26 @@ static uint8_t ClampWidth(uint8_t width) {
     return width > APPLET_SCREEN_SAFE_COLS ? APPLET_SCREEN_SAFE_COLS : width;
 }
 
+void applet_screen_set_reverse(bool enabled) {
+    LCD_CMD_REG_LEFT = LCD_CMD_ON(1u);
+    LCD_CMD_REG_RIGHT = LCD_CMD_ON(1u);
+    LCD_CMD_REG_LEFT = LCD_CMD_REVERSE(enabled ? 1u : 0u);
+    LCD_CMD_REG_RIGHT = LCD_CMD_REVERSE(enabled ? 1u : 0u);
+}
+
+void applet_screen_set_reverse_cached(uint32_t* cached_state, bool enabled) {
+    if((*cached_state != 0) == enabled) {
+        return;
+    }
+    applet_screen_set_reverse(enabled);
+    *cached_state = enabled ? 1u : 0u;
+}
+
+void applet_screen_clear_reverse_cache(uint32_t* cached_state) {
+    applet_screen_set_reverse(false);
+    *cached_state = 0;
+}
+
 void applet_screen_clear_line(char* line, uint8_t width) {
     width = ClampWidth(width);
     for(uint8_t i = 0; i < width; i++) {
