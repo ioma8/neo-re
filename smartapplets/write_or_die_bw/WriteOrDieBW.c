@@ -91,6 +91,19 @@ static void DrawChallenge(WodAppState_t* state, WodPressure_t pressure, uint32_t
     }
 }
 
+static bool ShouldFlashText(WodPressure_t pressure) {
+    return pressure >= WOD_PRESSURE_DANGER;
+}
+
+static bool FlashPhase(uint32_t idle_ms) {
+    bool phase = false;
+    while(idle_ms >= 500u) {
+        idle_ms -= 500u;
+        phase = !phase;
+    }
+    return phase;
+}
+
 static void CompleteChallenge(WodAppState_t* state) {
     state->phase = WOD_PHASE_COMPLETED;
     state->final_word_count = editor_word_count(&state->editor);
@@ -209,6 +222,7 @@ static void HandleRunningChar(WodAppState_t* state, uint32_t param) {
     bool changed = ApplyChar(state, param & 0xff);
     if(changed) {
         MarkActivity(state, now);
+        ui_set_challenge_text_highlight(state, false);
     }
     CheckCompletion(state, elapsed);
     if(state->phase == WOD_PHASE_RUNNING) {
@@ -243,7 +257,9 @@ static void HandleRunningKey(WodAppState_t* state, uint32_t key, uint32_t* statu
         CheckCompletion(state, elapsed);
         if(state->phase == WOD_PHASE_RUNNING) {
             uint32_t idle = now - state->last_activity_ms;
-            DrawChallenge(state, challenge_pressure(idle, state->grace_seconds), RemainingSeconds(state, elapsed), text_changed);
+            WodPressure_t pressure = challenge_pressure(idle, state->grace_seconds);
+            DrawChallenge(state, pressure, RemainingSeconds(state, elapsed), text_changed);
+            ui_set_challenge_text_highlight(state, ShouldFlashText(pressure) && FlashPhase(idle));
         }
     }
 }
@@ -268,6 +284,7 @@ static void HandleRunningIdle(WodAppState_t* state) {
         if(changed || pressure != state->display_pressure || remaining != state->display_remaining_seconds) {
             DrawChallenge(state, pressure, remaining, changed);
         }
+        ui_set_challenge_text_highlight(state, ShouldFlashText(pressure) && FlashPhase(idle));
     }
 }
 

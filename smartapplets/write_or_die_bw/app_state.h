@@ -56,6 +56,7 @@ typedef struct {
     uint32_t display_pressure;
     uint32_t export_slot;
     uint32_t export_status;
+    uint32_t display_flash_on;
     char display_status_line[WOD_SCREEN_COLS + 1];
     char display_text_lines[WOD_TEXT_ROWS][WOD_SCREEN_COLS + 1];
 } WodAppState_t;

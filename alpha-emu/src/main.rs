@@ -464,6 +464,8 @@ fn main() -> Result<()> {
             seed_write_or_die_completed_state(&mut session, "one two three four five");
             print_ocr_checkpoint("write_or_die_completed", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie completed text")?;
+            assert_write_or_die_penalty_feedback(&mut session)?;
+            seed_write_or_die_completed_state(&mut session, "one two three four five");
             if std::env::var_os("WOD_SKIP_EXPORT").is_none() {
                 let write_or_die_base = write_or_die_state_base(&session).unwrap_or_default() as usize;
                 let alphaword_before = alphaword_file_records(session.memory_bytes());
@@ -1011,6 +1013,7 @@ struct WriteOrDieState {
     remaining_seconds_estimate: u32,
     export_slot: u32,
     export_status: u32,
+    flash_on: u32,
 }
 
 fn write_or_die_state(session: &FirmwareSession) -> WriteOrDieState {
@@ -1054,6 +1057,7 @@ fn write_or_die_state_at(session: &FirmwareSession, base: usize) -> WriteOrDieSt
         remaining_seconds_estimate: read_u32(824),
         export_slot: read_u32(832),
         export_status: read_u32(836),
+        flash_on: read_u32(840),
     }
 }
 
@@ -1129,6 +1133,101 @@ fn seed_write_or_die_completed_state(session: &mut FirmwareSession, text: &str) 
     write_u32(session, 816, 5);
     write_u32(session, 832, 0);
     write_u32(session, 836, 0);
+    write_u32(session, 840, 0);
+}
+
+fn seed_write_or_die_running_state(session: &mut FirmwareSession, text: &str) {
+    seed_write_or_die_running_state_with_idle(session, text, 8_500);
+}
+
+fn seed_write_or_die_running_state_with_idle(
+    session: &mut FirmwareSession,
+    text: &str,
+    idle_ms: u32,
+) {
+    let base = write_or_die_state_base(session).unwrap_or_default();
+    let write_u32 = |session: &mut FirmwareSession, offset: u32, value: u32| {
+        session.overlay_memory_range(base + offset, &value.to_be_bytes());
+    };
+    let now = session.snapshot().cycles.saturating_div(33_000) as u32;
+    write_u32(session, 0, 1);
+    write_u32(session, 8, 0);
+    write_u32(session, 12, 500);
+    write_u32(session, 16, 600);
+    write_u32(session, 20, 2);
+    write_u32(session, 24, text.len() as u32);
+    write_u32(session, 28, text.len() as u32);
+    write_u32(session, 32, 0);
+    let mut text_bytes = [0u8; 768];
+    let source = text.as_bytes();
+    let len = source.len().min(text_bytes.len());
+    text_bytes[..len].copy_from_slice(&source[..len]);
+    session.overlay_memory_range(base + 36, &text_bytes);
+    write_u32(session, 804, now.saturating_sub(30_000));
+    write_u32(session, 808, now.saturating_sub(idle_ms));
+    write_u32(session, 812, now.saturating_sub(idle_ms));
+    write_u32(session, 824, 600);
+    write_u32(session, 828, 0);
+    write_u32(session, 840, 0);
+}
+
+fn assert_write_or_die_penalty_feedback(session: &mut FirmwareSession) -> Result<()> {
+    focus_write_or_die_direct(session)?;
+    seed_write_or_die_running_state_with_idle(session, "alpha beta gamm", 0);
+    dispatch_write_or_die_message(session, 0x20, b'a'.into(), "WriteOrDie penalty setup draw")?;
+    seed_write_or_die_running_state(session, "alpha beta gamma");
+    let before = session.snapshot();
+    dispatch_write_or_die_message(session, 0x00, 0, "WriteOrDie penalty idle")?;
+    let after = session.snapshot();
+    let state = write_or_die_state(session);
+    if !state.preview.starts_with("alpha beta") || state.preview.contains("gamma") {
+        anyhow::bail!("WriteOrDie penalty did not remove trailing word: {state:?}");
+    }
+    let text_area_diff = lcd_diff_pixels_in_rect(&before.lcd, &after.lcd, 0, 16, 264, 48);
+    let full_lcd_diff = lcd_diff_pixels_in_rect(&before.lcd, &after.lcd, 0, 0, 320, 128);
+    if text_area_diff < 500 {
+        let lcd_mmio = after
+            .mmio_accesses
+            .iter()
+            .filter(|line| line.contains("0100") || line.contains("8000"))
+            .rev()
+            .take(8)
+            .cloned()
+            .collect::<Vec<_>>();
+        anyhow::bail!("WriteOrDie penalty did not visibly highlight the written text area; diff_pixels={text_area_diff} full_lcd_diff={full_lcd_diff} state={state:?} lcd_mmio={lcd_mmio:?}");
+    }
+    let base = write_or_die_state_base(session).unwrap_or_default();
+    let now = session.snapshot().cycles.saturating_div(33_000) as u32;
+    session.overlay_memory_range(base + 812, &now.saturating_sub(8_500).to_be_bytes());
+    dispatch_write_or_die_message(session, 0x00, 0, "WriteOrDie second penalty idle")?;
+    let state = write_or_die_state(session);
+    if !state.preview.starts_with("alpha") || state.preview.contains("beta") {
+        anyhow::bail!("WriteOrDie repeated penalty did not remove another trailing word: {state:?}");
+    }
+    Ok(())
+}
+
+fn lcd_diff_pixels_in_rect(
+    before: &LcdSnapshot,
+    after: &LcdSnapshot,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> usize {
+    let max_y = (y + height).min(before.height).min(after.height);
+    let max_x = (x + width).min(before.width).min(after.width);
+    let mut count = 0;
+    for pixel_y in y..max_y {
+        for pixel_x in x..max_x {
+            if before.pixels[pixel_y * before.width + pixel_x]
+                != after.pixels[pixel_y * after.width + pixel_x]
+            {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 fn write_or_die_state_base(session: &FirmwareSession) -> Option<u32> {

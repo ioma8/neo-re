@@ -272,3 +272,7 @@ WriteOrDie File 2 export appears in AlphaWord File 3 because AlphaWord backing d
 WriteOrDie visible File 2 appears in both File 1 and File 2 because backing slot 1 has multiple descriptor groups and exporter writes all duplicates	proven
 WriteOrDie single-primary backing descriptor append is invisible because AlphaWord visible files use a later duplicate descriptor group	proven
 WriteOrDie AlphaWord visible file append requires selecting the last initialized backing descriptor instead of all duplicate descriptors	proven
+WriteOrDie penalty flash validator was comparing against an already-highlighted baseline because the setup draw left LCD reverse enabled before the before-snapshot	proven
+WriteOrDie successful typing path fails to clear an active punishment highlight, so flash can remain on after resumed writing	proven
+WriteOrDie punishment deletion works when MSG_IDLE reaches penalty pressure and last_penalty_ms is older than the penalty interval	proven
+WriteOrDie LCD reverse highlight produces a visible headless LCD diff when compared against a normal non-highlighted text baseline	proven
