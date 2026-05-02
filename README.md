@@ -17,9 +17,10 @@ root, proxy hardware, or typewriter fallback.
 - Desktop TUI backup app and desktop GUI backup app.
 - Android GUI backup path using the `Alpha USB` SmartApplet to enter direct USB.
 - Native Rust SmartApplet SDK/packer targeting `m68k-unknown-none-elf`.
-- Native Rust SmartApplets: validated `Alpha USB` and experimental `Forth Mini`
-  REPL source/package.
-- Early desktop SmartApplet emulator running the real `Alpha USB` package.
+- Betawise-derived C SmartApplet workflow for reliable NEO applets, including
+  `Basic Writer`, `Forth Mini`, and `WriteOrDie`.
+- Native Rust SmartApplet: validated `Alpha USB`.
+- Desktop/headless SmartApplet emulator for stock firmware plus repo applets.
 
 ## Main Components
 
@@ -30,8 +31,11 @@ root, proxy hardware, or typewriter fallback.
   are in [alpha-cli/README.md](alpha-cli/README.md).
 - `aplha-rust-native/`: native Rust SmartApplet SDK and packer targeting
   `m68k-unknown-none-elf`. See [aplha-rust-native/README.md](aplha-rust-native/README.md).
-- `alpha-emu/`: desktop SmartApplet emulator using `m68000` plus emulated NEO
-  OS services for `Alpha USB`. See [alpha-emu/README.md](alpha-emu/README.md).
+- `smartapplets/`: current validated Betawise-derived C applet workflow and
+  reusable NEO applet SDK helpers. See [smartapplets/README.md](smartapplets/README.md).
+- `alpha-emu/`: desktop/headless SmartApplet emulator using `m68000` plus
+  emulated NEO OS services and applet validators. See
+  [alpha-emu/README.md](alpha-emu/README.md).
 - `poc/neotools/`: protocol parsers, packet builders, validators, and offline
   reverse-engineering helpers.
 - `docs/`: protocol notes and device findings. The most important recovery note

@@ -45,7 +45,8 @@ Headless supports:
   `--lcd-bits-path`, `--lcd-pbm`, `--lcd-visible-pbm`, `--lcd-blink-pbm-prefix`,
   `--lcd-ranges`, `--lcd-dump-dir`, `--lcd-ocr`
 - validation helpers: `--launch-forth-mini`, `--launch-calculator`,
-  `--validate-alpha-usb-native`, `--validate-forth-mini`
+  `--validate-alpha-usb-native`, `--validate-forth-mini`,
+  `--validate-basic-writer`, `--validate-write-or-die`
 
 The full flag reference and verified command patterns are in
 [`docs/2026-04-22-alpha-emu-headless-usage.md`](../docs/2026-04-22-alpha-emu-headless-usage.md).
@@ -64,7 +65,8 @@ cargo run -- --headless \
 
 The desktop UI shows:
 
-- emulated NEO LCD active viewport, cropped to 256x64 square pixels from the 320x128 controller buffer
+- emulated NEO LCD active viewport, cropped to 264x64 square pixels from the
+  320x128 controller buffer
 - reset-vector boot state
 - current running/stopped state
 

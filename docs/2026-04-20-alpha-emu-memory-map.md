@@ -421,7 +421,7 @@ trap instead of reintroducing Rust-side A-line service shims.
 
 The NEO LCD behaves like two page/column byte-addressed controllers, each
 covering half of a 320x128 controller buffer. The GUI displays the active NEO
-viewport as the top-left 256x64 square-pixel crop. The lower and right-side
+viewport as the top-left 264x64 square-pixel crop. The lower and right-side
 controller rows/columns remain in the backing buffer for firmware compatibility
 but are not part of the normal visible NEO screen.
 

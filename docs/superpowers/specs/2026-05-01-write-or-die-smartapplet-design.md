@@ -62,29 +62,31 @@ Values should be adjustable in setup. The exact increments can be implementation
 
 ## Pressure Loop
 
-The configured grace period drives all pressure thresholds.
+The configured grace period drives the safe phase. The final implementation was
+updated to match the original WriteOrDie timing more closely.
 
 For default `10s` grace:
 
 - `0-10s`: safe
-- `10-20s`: warning
-- `20-30s`: danger
-- `30s+`: penalty
+- `10-14s`: warning
+- `14s+`: punishment and kamikaze deletion
 
 General thresholds:
 
 - warning starts at `grace`
-- danger starts at `2 * grace`
-- deletion starts at `3 * grace`
+- punishment starts after a fixed `4` second warning phase
+- kamikaze deletion runs every `700` ms while punishment is active
 
 Indicators:
 
 - safe: normal status text
-- warning: status row says `write`
-- danger: status row alternates or inverts warning text during idle redraws
-- penalty: permanently delete one word every `max(grace / 2, 2s)` until typing resumes
+- warning: the writing area flashes, but text is not damaged
+- penalty: the writing area keeps flashing and one trailing character is
+  permanently deleted every `700` ms until typing resumes
 
-Any printable character, Enter, or Backspace resets the pressure timer and stops active penalties. Deleted text is not recoverable through this applet.
+Any printable character, Enter, or Backspace resets the pressure timer and stops
+active penalties immediately. Deleted text is not recoverable through this
+applet.
 
 ## Completion Rules
 

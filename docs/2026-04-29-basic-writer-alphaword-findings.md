@@ -1,10 +1,32 @@
 # 2026-04-29 Basic Writer AlphaWord Findings
 
-This note records the findings that actually made the Rust `Basic Writer`
-SmartApplet work in the emulator, plus the SDK abstractions extracted from that
-work.
+This note originally recorded the Rust `Basic Writer` prototype. The current
+maintained and validated Basic Writer applet is `smartapplets/basic_writer_bw`,
+built through the Betawise-derived C workflow documented in
+`smartapplets/README.md`.
 
-## What Worked
+The Rust textbox findings below are historical: they explain why the first
+prototype behaved like AlphaWord in the emulator, but they are not the current
+reliable applet path.
+
+## Current Status
+
+- Build with `./scripts/build-smartapplet.sh basic_writer_bw --no-validate`.
+- Use the Betawise syscall stubs and headers, but replace the Betawise wrapper
+  with the repo-owned no-global runtime.
+- Keep applet state at `A5 + 0x300`.
+- Package with local `alpha-neo-pack`.
+- Use `smartapplets/betawise-sdk/file_store.h` for applet-owned retrievable
+  file snapshots.
+- Use `smartapplets/betawise-sdk/screen_lines.h` for stable four-row rendering.
+- Basic Writer owns eight retrievable SmartApplet files and switches them from
+  physical File keys.
+- The current full Basic Writer validator has a known menu-selection caveat
+  when multiple repo applets are installed; build validation is reliable, and
+  shared SDK behavior is covered through the Forth Mini and WriteOrDie
+  validators until that path is tightened.
+
+## Historical Rust Prototype Findings
 
 1. Use the firmware textbox control, not a handwritten key loop.
    - The stable text-entry path is trap `A084`, exposed as
@@ -82,7 +104,7 @@ work.
    - Direct callback injection gave false confidence for editor behavior.
    - Real menu launch plus OCR/state checks was the only reliable validation.
 
-## SDK Abstractions Added
+## Historical Rust SDK Abstractions
 
 These validated pieces are now in `alpha-neo-sdk`:
 
@@ -101,14 +123,9 @@ This keeps `Basic Writer` focused on editor policy:
 - file-slot switching
 - storage integration points
 
-The SDK owns the proven firmware boundary.
-
-## Remaining Constraint
-
-True SmartApplet-owned retrievable file persistence is still not fully
-implemented. The storage functions remain deliberately gated behind
-`FirmwarePathUnproven` until the file load/save/commit trap sequence is proven
-well enough to implement safely.
+The Rust SDK owns that historical firmware boundary. Current applet-owned file
+persistence is proven in the Betawise-side SDK, not through these Rust storage
+gates.
 
 ## Minimal Working Pattern
 
@@ -121,5 +138,6 @@ let exit = alpha_neo_sdk::keyboard::normalize_textbox_exit(
 );
 ```
 
-That is the current validated foundation for future AlphaWord-like Rust
-SmartApplets.
+That remains useful context for future AlphaWord-like Rust SmartApplets, but
+new reliable applets should start from `smartapplets/basic_writer_bw` or the
+Betawise-side SDK templates.

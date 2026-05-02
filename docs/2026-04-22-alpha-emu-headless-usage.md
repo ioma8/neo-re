@@ -343,11 +343,25 @@ Built-in validators:
 ```sh
 --validate-alpha-usb-native
 --validate-forth-mini
+--validate-basic-writer
+--validate-write-or-die
 ```
 
 `--validate-forth-mini` boots the full system, enters SmartApplets, launches
 Forth Mini through the menu, sends a fixed evaluation sequence, and fails if the
 LCD does not change or an exception occurs.
+
+`--validate-write-or-die` boots the full system, launches WriteOrDie through the
+menu, exercises setup, challenge typing, punishment timing, export state, and
+AlphaWord append readback. It is the preferred regression check after touching
+the WriteOrDie applet, the Betawise-side SDK helpers, or GUI/headless keyboard
+timing.
+
+`--validate-basic-writer` exists for Basic Writer, but the current full menu
+validator has a known applet-selection caveat when several local applets are
+installed. Until that validator is tightened, use
+`./scripts/build-smartapplet.sh basic_writer_bw --no-validate` for build-only
+coverage and validate shared SDK changes through WriteOrDie/Forth Mini.
 
 ## Verified Calculator Workflow
 

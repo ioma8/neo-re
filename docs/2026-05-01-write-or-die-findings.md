@@ -19,6 +19,7 @@ Validated command:
 
 ```sh
 ./scripts/build-smartapplet.sh write_or_die_bw --no-validate
+cargo run --manifest-path alpha-emu/Cargo.toml -- --headless --validate-write-or-die analysis/cab/os3kneorom.os3kos
 ```
 
 ## State And Persistence
@@ -40,6 +41,16 @@ Validated command:
 - Keypresses reset pressure timing, but must not advance countdown time.
 - The validated countdown, elapsed-time, penalty-interval, and pressure-stage
   helpers now live in `smartapplets/betawise-sdk/challenge_timer.h`.
+- Punishment timing follows the requested WriteOrDie loop:
+  - safe idle phase lasts the configured grace period, default `10` seconds and
+    configurable from `0` to `30` seconds
+  - warning phase lasts `4` seconds, flashes the writing area, and does not
+    damage text
+  - punishment starts immediately after warning
+  - kamikaze deletion removes one trailing character every `700` ms during
+    punishment
+  - any typed character immediately clears warning/punishment and starts a new
+    full grace period
 
 ## GUI Emulator Input Findings
 
@@ -89,22 +100,30 @@ void _OS3K_SetCursor(uint8_t row, uint8_t col, CursorMode_e cursor_mode);
 - Cross-applet AlphaWord `MSG_CHAR`/`MSG_KEY` calls do not reliably mutate the
   selected AlphaWord file. The applet can report success while no file buffer
   changes.
-- The working route is descriptor-based, not fixed-address based: scan the
-  low-RAM AlphaWord file descriptors for `File N`, confirm the slot/key bytes,
-  read the descriptor's live text-buffer pointer, then append before the
-  `0xa7` fill tail.
+- The working route is descriptor-based, not fixed-address based. The reusable
+  helper is `smartapplets/betawise-sdk/alphaword_export.h`:
+  `alphaword_append_text_block(slot, title, text, text_len)`.
+- The helper preselects AlphaWord and the requested visible File key, maps the
+  visible slot to AlphaWord's backing slot rotation, scans low-RAM AlphaWord
+  file descriptors for the last initialized matching `File N` record, reads
+  the descriptor's text-buffer pointer, then appends before the `0xa7` fill
+  tail.
 - There are two relevant descriptor states. If AlphaWord's live edit buffers
   exist, records point at `0xa7`-filled 512-byte buffers. If switching away from
   AlphaWord has released those buffers, persistent records can have length `0`
   with valid payload pointers. In that state WriteOrDie writes the payload at
   the pointer and updates the record length fields to the actual byte count.
-- The descriptor scan must include the primary records around `0x1000`, not
-  only later duplicate/cache records. Scanning only `0x1600..0x2400` can report
-  success while AlphaWord later opens an unchanged primary file.
-- Headless validation now checks the selected AlphaWord slot buffer itself.
-  For File 2, the validator found `WriteOrDie session` in descriptor-owned
-  buffers at `0x0001569c`, `0x0001749c`, and `0x00018a9c` in the recovery-seed
-  run.
+- The descriptor scan must include the primary records and later duplicate
+  groups, then update only the last initialized matching descriptor. Updating
+  all duplicates made the same append appear in multiple visible files; updating
+  only the first primary descriptor was invisible to AlphaWord.
+- Visible File keys are rotated in the backing descriptor records. The validated
+  helper maps visible File `1` to backing File `8`, and visible File `N > 1` to
+  backing File `N - 1`.
+- Headless validation checks the selected AlphaWord backing descriptor buffer
+  directly and verifies repeated append growth. Recent File 2 validation prints
+  `write_or_die_export_visible_file2_backing_slot1_buffers=0x0001889c` and
+  `write_or_die_second_export_file2_buffers=0x0001889c`.
 
 ## Practical Validation
 
@@ -112,10 +131,11 @@ Useful checks after changes:
 
 ```sh
 cargo check --manifest-path alpha-emu/Cargo.toml
-WOD_SKIP_EXPORT=1 cargo run --manifest-path alpha-emu/Cargo.toml -- --headless --validate-write-or-die --lcd-ocr analysis/cab/os3kneorom.os3kos
+cargo run --manifest-path alpha-emu/Cargo.toml -- --headless --validate-write-or-die analysis/cab/os3kneorom.os3kos
 cargo run --manifest-path alpha-emu/Cargo.toml -- --headless --steps=5000000 analysis/cab/os3kneorom.os3kos
 ```
 
 The first validates Rust-side emulator changes. The second catches most
-WriteOrDie state and screen regressions. The third catches full-system boot
-regressions with the recovery seed and injected applet block.
+WriteOrDie state, screen, timing, punishment, and AlphaWord export regressions.
+The third catches full-system boot regressions with the recovery seed and
+injected applet block.

@@ -253,4 +253,5 @@ The helper intentionally performs the narrow proven sequence only:
 
 This is AlphaWord-specific and should not be used as general applet-owned
 storage. The WriteOrDie headless validator verifies the exported session by
-opening/reading the visible AlphaWord file path after export.
+checking the selected AlphaWord backing descriptor buffer and repeated append
+growth after export.
