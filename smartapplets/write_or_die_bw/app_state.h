@@ -11,7 +11,8 @@
 #define WOD_DEFAULT_GRACE_SECONDS 10
 #define WOD_MIN_WORD_GOAL 5
 #define WOD_MIN_TIME_SECONDS 60
-#define WOD_MIN_GRACE_SECONDS 2
+#define WOD_MIN_GRACE_SECONDS 0
+#define WOD_MAX_GRACE_SECONDS 30
 
 typedef struct {
     uint32_t len;

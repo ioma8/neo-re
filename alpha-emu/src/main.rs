@@ -1145,6 +1145,12 @@ fn seed_write_or_die_running_state_with_idle(
     text: &str,
     idle_ms: u32,
 ) {
+    let target_now = idle_ms.saturating_add(1_000);
+    let now = session.snapshot().cycles.saturating_div(33_000) as u32;
+    if now < target_now {
+        let missing_ms = target_now - now;
+        session.run_realtime_cycles(u64::from(missing_ms) * 33_000, 5_000_000);
+    }
     let base = write_or_die_state_base(session).unwrap_or_default();
     let write_u32 = |session: &mut FirmwareSession, offset: u32, value: u32| {
         session.overlay_memory_range(base + offset, &value.to_be_bytes());
@@ -1154,7 +1160,7 @@ fn seed_write_or_die_running_state_with_idle(
     write_u32(session, 8, 0);
     write_u32(session, 12, 500);
     write_u32(session, 16, 600);
-    write_u32(session, 20, 2);
+    write_u32(session, 20, 6);
     write_u32(session, 24, text.len() as u32);
     write_u32(session, 28, text.len() as u32);
     write_u32(session, 32, 0);
@@ -1163,9 +1169,9 @@ fn seed_write_or_die_running_state_with_idle(
     let len = source.len().min(text_bytes.len());
     text_bytes[..len].copy_from_slice(&source[..len]);
     session.overlay_memory_range(base + 36, &text_bytes);
-    write_u32(session, 804, now.saturating_sub(30_000));
-    write_u32(session, 808, now.saturating_sub(idle_ms));
-    write_u32(session, 812, now.saturating_sub(idle_ms));
+    write_u32(session, 804, now.wrapping_sub(30_000));
+    write_u32(session, 808, now.wrapping_sub(idle_ms));
+    write_u32(session, 812, now.wrapping_sub(idle_ms));
     write_u32(session, 824, 600);
     write_u32(session, 828, 0);
     write_u32(session, 840, 0);
@@ -1175,13 +1181,26 @@ fn assert_write_or_die_penalty_feedback(session: &mut FirmwareSession) -> Result
     focus_write_or_die_direct(session)?;
     seed_write_or_die_running_state_with_idle(session, "alpha beta gamm", 0);
     dispatch_write_or_die_message(session, 0x20, b'a'.into(), "WriteOrDie penalty setup draw")?;
-    seed_write_or_die_running_state(session, "alpha beta gamma");
+    seed_write_or_die_running_state_with_idle(session, "alpha beta gamma", 5_999);
+    dispatch_write_or_die_message(session, 0x00, 0, "WriteOrDie safe idle")?;
+    let state = write_or_die_state(session);
+    if state.preview.contains("gamm.") || state.flash_on != 0 {
+        anyhow::bail!("WriteOrDie damaged or flashed text during safe grace: {state:?}");
+    }
+    seed_write_or_die_running_state_with_idle(session, "alpha beta gamma", 6_750);
+    dispatch_write_or_die_message(session, 0x00, 0, "WriteOrDie warning idle")?;
+    let state = write_or_die_state(session);
+    if state.preview.contains("gamm.") || state.flash_on == 0 {
+        anyhow::bail!("WriteOrDie warning phase should flash without deleting: {state:?}");
+    }
+    dispatch_write_or_die_message(session, 0x20, b'!'.into(), "WriteOrDie warning recovery")?;
+    seed_write_or_die_running_state_with_idle(session, "alpha beta gamma", 10_750);
     let before = session.snapshot();
     dispatch_write_or_die_message(session, 0x00, 0, "WriteOrDie penalty idle")?;
     let after = session.snapshot();
     let state = write_or_die_state(session);
-    if !state.preview.starts_with("alpha beta") || state.preview.contains("gamma") {
-        anyhow::bail!("WriteOrDie penalty did not remove trailing word: {state:?}");
+    if !state.preview.starts_with("alpha beta gamm") || state.preview.contains("gamma") {
+        anyhow::bail!("WriteOrDie penalty did not remove one trailing character: {state:?}");
     }
     let text_area_diff = lcd_diff_pixels_in_rect(&before.lcd, &after.lcd, 0, 16, 264, 48);
     let full_lcd_diff = lcd_diff_pixels_in_rect(&before.lcd, &after.lcd, 0, 0, 320, 128);
@@ -1197,12 +1216,23 @@ fn assert_write_or_die_penalty_feedback(session: &mut FirmwareSession) -> Result
         anyhow::bail!("WriteOrDie penalty did not visibly highlight the written text area; diff_pixels={text_area_diff} full_lcd_diff={full_lcd_diff} state={state:?} lcd_mmio={lcd_mmio:?}");
     }
     let base = write_or_die_state_base(session).unwrap_or_default();
-    let now = session.snapshot().cycles.saturating_div(33_000) as u32;
-    session.overlay_memory_range(base + 812, &now.saturating_sub(8_500).to_be_bytes());
+    let stale_penalty_ms = session
+        .memory_bytes()
+        .get((base + 808) as usize..(base + 812) as usize)
+        .map(|bytes| [bytes[0], bytes[1], bytes[2], bytes[3]])
+        .unwrap_or([0, 0, 0, 0]);
+    session.overlay_memory_range(base + 812, &stale_penalty_ms);
     dispatch_write_or_die_message(session, 0x00, 0, "WriteOrDie second penalty idle")?;
     let state = write_or_die_state(session);
-    if !state.preview.starts_with("alpha") || state.preview.contains("beta") {
-        anyhow::bail!("WriteOrDie repeated penalty did not remove another trailing word: {state:?}");
+    if !state.preview.starts_with("alpha beta gam") || state.preview.contains("gamm") {
+        anyhow::bail!("WriteOrDie repeated penalty did not remove another trailing character: {state:?}");
+    }
+    let now = session.snapshot().cycles.saturating_div(33_000) as u32;
+    session.overlay_memory_range(base + 808, &now.to_be_bytes());
+    dispatch_write_or_die_message(session, 0x20, b'!'.into(), "WriteOrDie recovery char")?;
+    let state = write_or_die_state(session);
+    if !state.preview.starts_with("alpha beta gam!") || state.flash_on != 0 {
+        anyhow::bail!("WriteOrDie typing did not stop punishment immediately: {state:?}");
     }
     Ok(())
 }

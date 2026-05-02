@@ -13,6 +13,7 @@ void editor_move_right(WodEditor_t* editor);
 void editor_move_up(WodEditor_t* editor);
 void editor_move_down(WodEditor_t* editor);
 uint32_t editor_word_count(const WodEditor_t* editor);
+bool editor_delete_last_byte(WodEditor_t* editor);
 bool editor_delete_last_word(WodEditor_t* editor);
 void editor_render_row(const WodEditor_t* editor, uint8_t row, char* output);
 

@@ -34,7 +34,7 @@ static void ClampState(WodAppState_t* state) {
     if(state->selected_setup_row > 2) state->selected_setup_row = 0;
     if(state->word_goal < WOD_MIN_WORD_GOAL) state->word_goal = WOD_DEFAULT_WORD_GOAL;
     if(state->time_goal_seconds < WOD_MIN_TIME_SECONDS) state->time_goal_seconds = WOD_DEFAULT_TIME_SECONDS;
-    if(state->grace_seconds < WOD_MIN_GRACE_SECONDS) state->grace_seconds = WOD_DEFAULT_GRACE_SECONDS;
+    if(state->grace_seconds > WOD_MAX_GRACE_SECONDS) state->grace_seconds = WOD_DEFAULT_GRACE_SECONDS;
     if(state->display_pressure > WOD_PRESSURE_PENALTY) state->display_pressure = WOD_PRESSURE_SAFE;
     if(state->editor.len > WOD_MAX_TEXT_BYTES) state->editor.len = WOD_MAX_TEXT_BYTES;
     if(state->editor.cursor > state->editor.len) state->editor.cursor = state->editor.len;
@@ -92,7 +92,7 @@ static void DrawChallenge(WodAppState_t* state, WodPressure_t pressure, uint32_t
 }
 
 static bool ShouldFlashText(WodPressure_t pressure) {
-    return pressure >= WOD_PRESSURE_DANGER;
+    return pressure >= WOD_PRESSURE_WARNING;
 }
 
 static void CompleteChallenge(WodAppState_t* state) {
@@ -130,6 +130,7 @@ static void AdjustSetup(WodAppState_t* state, int8_t delta) {
     } else if(state->selected_setup_row == 1) {
         int32_t next = (int32_t)state->grace_seconds + delta;
         state->grace_seconds = next < WOD_MIN_GRACE_SECONDS ? WOD_MIN_GRACE_SECONDS : (uint32_t)next;
+        if(state->grace_seconds > WOD_MAX_GRACE_SECONDS) state->grace_seconds = WOD_MAX_GRACE_SECONDS;
     }
 }
 
@@ -263,7 +264,7 @@ static void HandleRunningIdle(WodAppState_t* state) {
     bool changed = false;
     if(pressure == WOD_PRESSURE_PENALTY &&
        now - state->last_penalty_ms >= applet_penalty_interval_milliseconds(state->grace_seconds)) {
-        if(editor_delete_last_word(&state->editor)) {
+        if(editor_delete_last_byte(&state->editor)) {
             MarkDirty(state);
             changed = true;
         }

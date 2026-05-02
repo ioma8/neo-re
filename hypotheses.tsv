@@ -277,3 +277,5 @@ WriteOrDie successful typing path fails to clear an active punishment highlight,
 WriteOrDie punishment deletion works when MSG_IDLE reaches penalty pressure and last_penalty_ms is older than the penalty interval	proven
 WriteOrDie LCD reverse highlight produces a visible headless LCD diff when compared against a normal non-highlighted text baseline	proven
 Basic Writer validation failure after SDK lift is caused by menu validation launching WriteOrDie instead of Basic Writer, as shown by WOD setup OCR on the basic_writer_focus checkpoint	proven
+WriteOrDie punishment timing is still old 1x/2x/3x grace and whole-word deletion; validator fails before the requested 4s warning plus 700ms character-deletion model is implemented	proven
+WriteOrDie now matches requested WriteOrDie punishment timing: safe for grace, 4s warning flash without deletion, then 700ms character deletion until typing recovery	proven

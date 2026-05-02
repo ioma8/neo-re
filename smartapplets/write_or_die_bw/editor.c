@@ -175,6 +175,19 @@ uint32_t editor_word_count(const WodEditor_t* editor) {
     return count;
 }
 
+bool editor_delete_last_byte(WodEditor_t* editor) {
+    if(editor->len == 0) {
+        return false;
+    }
+    editor->len--;
+    if(editor->cursor > editor->len) {
+        editor->cursor = editor->len;
+    }
+    editor->bytes[editor->len] = 0;
+    EnsureCursorVisible(editor);
+    return true;
+}
+
 bool editor_delete_last_word(WodEditor_t* editor) {
     uint32_t end = editor->len;
     while(end > 0 && IsWhitespace(editor->bytes[end - 1])) {

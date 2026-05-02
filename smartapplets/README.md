@@ -226,11 +226,12 @@ For periodic visual feedback, use:
 bool on = applet_flash_phase(idle_ms, 500u);
 ```
 
-`write_or_die_bw` combines that with `applet_pressure_stage(...)`: danger and
-penalty states flash, normal typing clears the highlight immediately, and
-penalty idle ticks delete trailing words at
-`applet_penalty_interval_milliseconds(...)`. The headless validator checks both
-the visible LCD diff and repeated word removal.
+`write_or_die_bw` combines that with `applet_pressure_stage(...)`: the full
+grace period is safe, the next four seconds flash as a warning, and the penalty
+state flashes while deleting one trailing character every 700 ms. Normal typing
+clears the highlight immediately and starts a new full grace period. The
+headless validator checks the visible LCD diff, no deletion during warning,
+repeated character deletion, and immediate recovery.
 
 ## Validated AlphaWord append helper
 
