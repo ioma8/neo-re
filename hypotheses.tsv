@@ -267,3 +267,8 @@ WriteOrDie finished-screen File-key freeze only happens on firmware matrix key d
 WriteOrDie GUI freeze can be triggered by exporting through malformed/stale AlphaWord descriptors left by earlier bad builds	needs further investigation
 WriteOrDie export is invisible in AlphaWord because only 512-byte workspace descriptors are written while AlphaWord rebuilds visible files from the 9216-byte primary descriptor	proven
 WriteOrDie post-export GUI freeze is caused by firmware entering normal idle STOP at 0x00426756 while the GUI loop only advances non-stopped sessions	proven
+WriteOrDie File 2 export appears in AlphaWord File 3 because the exporter writes the wrong AlphaWord descriptor slot despite receiving KEY_FILE_2 correctly	proven
+WriteOrDie File 2 export appears in AlphaWord File 3 because AlphaWord backing descriptor names are shifted relative to visible file buttons	proven
+WriteOrDie visible File 2 appears in both File 1 and File 2 because backing slot 1 has multiple descriptor groups and exporter writes all duplicates	proven
+WriteOrDie single-primary backing descriptor append is invisible because AlphaWord visible files use a later duplicate descriptor group	proven
+WriteOrDie AlphaWord visible file append requires selecting the last initialized backing descriptor instead of all duplicate descriptors	proven

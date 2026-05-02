@@ -530,16 +530,20 @@ fn main() -> Result<()> {
                 let marker_offsets = validate_alphaword_export_records(
                     &alphaword_before,
                     session.memory_bytes(),
-                    2,
+                    backing_alphaword_slot(2),
                     b"WriteOrDie session",
                 )?;
-                if marker_offsets.is_empty() {
-                    anyhow::bail!("WriteOrDie AlphaWord export did not place marker in File 2 AlphaWord buffer");
+                if marker_offsets.len() != 1 {
+                    anyhow::bail!(
+                        "WriteOrDie AlphaWord export should touch exactly one backing File 1 buffer for visible File 2; got {}: {}",
+                        marker_offsets.len(),
+                        marker_offsets.join(",")
+                    );
                 }
-                println!("write_or_die_export_file2_buffers={}", marker_offsets.join(","));
+                println!("write_or_die_export_visible_file2_backing_slot{}_buffers={}", backing_alphaword_slot(2), marker_offsets.join(","));
                 seed_write_or_die_completed_state(&mut session, "six seven");
                 let before_second = alphaword_file_records(session.memory_bytes());
-                let used_before_second = max_alphaword_slot_used(&before_second, 2);
+                let used_before_second = max_alphaword_slot_used(&before_second, backing_alphaword_slot(2));
                 send_write_or_die_key_direct(&mut session, 0x2c)?;
                 let second_state = write_or_die_state_at(&session, write_or_die_base);
                 if second_state.phase != 3 || second_state.export_slot != 2 || second_state.export_status != 1 {
@@ -548,10 +552,10 @@ fn main() -> Result<()> {
                 let second_offsets = validate_alphaword_export_records(
                     &before_second,
                     session.memory_bytes(),
-                    2,
+                    backing_alphaword_slot(2),
                     b"six seven",
                 )?;
-                let used_after_second = max_alphaword_slot_used(&alphaword_file_records(session.memory_bytes()), 2);
+                let used_after_second = max_alphaword_slot_used(&alphaword_file_records(session.memory_bytes()), backing_alphaword_slot(2));
                 if second_offsets.is_empty() || used_after_second <= used_before_second {
                     anyhow::bail!(
                         "WriteOrDie second AlphaWord export did not append: offsets={:?} before_used={} after_used={}",
@@ -1286,6 +1290,10 @@ fn alphaword_marker_offsets(bytes: &[u8], slot: u8, marker: &[u8]) -> Vec<String
         .collect()
 }
 
+fn backing_alphaword_slot(visible_slot: u8) -> u8 {
+    if visible_slot == 1 { 8 } else { visible_slot - 1 }
+}
+
 fn validate_write_or_die_file_keys_through_menu(
     firmware: FirmwareRuntime,
     recovery_seed_path: &Path,
@@ -1328,18 +1336,19 @@ fn validate_write_or_die_file_keys_through_menu(
                 "WriteOrDie matrix File {slot} export did not complete: raw=0x{raw:02x} state={state:?}"
             );
         }
+        let backing_slot = backing_alphaword_slot(*slot);
         let offsets = if *slot == 2 {
             validate_alphaword_export_records(
                 &before,
                 session.memory_bytes(),
-                *slot,
+                backing_slot,
                 b"matrix file export",
             )?
         } else {
-            alphaword_marker_offsets(session.memory_bytes(), *slot, b"matrix file export")
+            alphaword_marker_offsets(session.memory_bytes(), backing_slot, b"matrix file export")
         };
         if offsets.is_empty() {
-            anyhow::bail!("WriteOrDie matrix File {slot} export wrote no marker");
+            anyhow::bail!("WriteOrDie matrix File {slot} export wrote no marker in backing slot {backing_slot}");
         }
         if *slot == 2 {
             assert_write_or_die_exported_screen_accepts_enter(&mut session)?;
