@@ -6,10 +6,10 @@
 
 enum {
     BIRD_Q8 = 256,
-    BIRD_X = 5,
-    BIRD_ROWS = 4,
-    BIRD_COLS = 28,
-    BIRD_START_Y_Q8 = 1 * BIRD_Q8 + BIRD_Q8 / 2
+    BIRD_X = 28,
+    BIRD_ROWS = 64,
+    BIRD_COLS = 264,
+    BIRD_START_Y_Q8 = 32 * BIRD_Q8
 };
 
 typedef struct {

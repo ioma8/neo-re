@@ -283,3 +283,6 @@ Snake rectangular blocks were caused by 6x4 LCD cells; 4x4 cells over a 66x16 gr
 Snake edge death was caused by explicit boundary game-over checks; replacing boundary checks with coordinate wraparound makes edges pass-through	proven
 Snake gameplay flashing was caused by full-screen ROP_WHITENESS redraws on every movement tick and arrow key; normal gameplay now updates only changed cells	proven
 Snake initial food repeats because reset/restart always used fixed seed 31; applet now seeds from uptime while tests keep deterministic seeded init	proven
+Floppy Bird score gets erased because old barrier clearing whites the score rectangle; score is now redrawn when barriers touch that area	proven
+Floppy Bird gameplay flashing is worsened by clearing the entire old barrier column; normal ticks now clear only the exposed trailing edge	proven
+Floppy Bird game-over flashing is caused by drawing the gameplay scene then inverting a large overlay; game-over now draws a stable dedicated screen once	proven

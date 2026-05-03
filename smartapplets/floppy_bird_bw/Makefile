@@ -4,7 +4,7 @@ LD = m68k-elf-ld
 CFLAGS = -m68000 -mpcrel -fomit-frame-pointer -ffixed-a5 -ffixed-d7 -fshort-enums
 CFLAGS += -O1 -fno-inline -fno-optimize-sibling-calls -I"../betawise-sdk" -ffunction-sections -fdata-sections -ffreestanding
 LDFLAGS = -static -T FloppyBirdBW.lds --gc-sections
-OBJ = FloppyBirdBW.o game.o syscall.o
+OBJ = FloppyBirdBW.o game.o draw_text.o syscall.o
 TARGET = FloppyBirdBW.elf
 
 all: $(TARGET)
@@ -19,4 +19,4 @@ $(TARGET): $(OBJ) FloppyBirdBW.lds
 	$(LD) $(OBJ) $(LDFLAGS) -o $@
 
 clean:
-	rm -f FloppyBirdBW.o game.o syscall.o FloppyBirdBW.elf
+	rm -f FloppyBirdBW.o game.o draw_text.o syscall.o FloppyBirdBW.elf

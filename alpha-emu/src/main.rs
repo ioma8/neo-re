@@ -597,6 +597,10 @@ fn main() -> Result<()> {
             focus_floppy_bird_direct(&mut session)?;
             bail_if_exception(&session, "Floppy Bird focus")?;
             print_ocr_checkpoint("floppy_bird_focus", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            let initial_pixels = lcd_visible_lit_pixels(&session.snapshot().lcd);
+            if initial_pixels < 120 {
+                anyhow::bail!("Floppy Bird should render full-LCD pixel graphics, got only {initial_pixels} lit pixels");
+            }
             assert_floppy_bird_state(&session, 0, false, "Floppy Bird initial state")?;
             let before_flap = floppy_bird_state(&session);
             dispatch_floppy_bird_message(&mut session, 0x21, 0x4c, "Floppy Bird space flap")?;
@@ -608,9 +612,29 @@ fn main() -> Result<()> {
             seed_floppy_bird_near_score(&mut session);
             force_floppy_bird_tick(&mut session, "Floppy Bird score tick")?;
             assert_floppy_bird_state(&session, 1, false, "Floppy Bird scoring")?;
+            let score_pixels = lcd_lit_pixels_in_rect(&session.snapshot().lcd, 0, 0, 24, 12);
+            if score_pixels < 20 {
+                anyhow::bail!("Floppy Bird score should stay visible after barrier crosses score area, got {score_pixels} lit score pixels");
+            }
             seed_floppy_bird_crash(&mut session);
             force_floppy_bird_tick(&mut session, "Floppy Bird crash tick")?;
             assert_floppy_bird_state(&session, 1, true, "Floppy Bird game over")?;
+            let game_over_pixels = lcd_lit_pixels_in_rect(&session.snapshot().lcd, 40, 0, 190, 64);
+            if game_over_pixels < 600 {
+                anyhow::bail!("Floppy Bird game-over screen should show large title/help pixels, got {game_over_pixels}");
+            }
+            let stable_game_over = session.snapshot().lcd.clone();
+            force_floppy_bird_tick(&mut session, "Floppy Bird stable game-over idle")?;
+            let game_over_diff =
+                lcd_diff_pixels_in_rect(&stable_game_over, &session.snapshot().lcd, 0, 0, 264, 64);
+            if game_over_diff != 0 {
+                anyhow::bail!("Floppy Bird game-over screen should not redraw/flash during idle, diff_pixels={game_over_diff}");
+            }
+            dispatch_floppy_bird_message(&mut session, 0x21, 0x23, "Floppy Bird restart key")?;
+            assert_floppy_bird_state(&session, 0, false, "Floppy Bird restart")?;
+            seed_floppy_bird_crash(&mut session);
+            force_floppy_bird_tick(&mut session, "Floppy Bird crash after restart")?;
+            assert_floppy_bird_state(&session, 0, true, "Floppy Bird game over after restart")?;
             dispatch_floppy_bird_message(&mut session, 0x21, 0x48, "Floppy Bird escape exit")?;
             let status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
             if status != 7 {
@@ -1260,7 +1284,7 @@ fn floppy_bird_state(session: &FirmwareSession) -> FloppyBirdState {
 
 fn assert_floppy_bird_state(session: &FirmwareSession, score: u8, game_over: bool, label: &str) -> Result<()> {
     let state = floppy_bird_state(session);
-    if state.score != score || state.game_over != game_over || state.gap_row > 2 || state.barrier_x > 27 {
+    if state.score != score || state.game_over != game_over || state.gap_row > 44 || state.barrier_x > 263 {
         anyhow::bail!("{label}: expected score={score} game_over={game_over}, got {state:?}");
     }
     Ok(())
@@ -1282,10 +1306,10 @@ fn write_floppy_u32(session: &mut FirmwareSession, offset: u32, value: u32) {
 }
 
 fn seed_floppy_bird_near_score(session: &mut FirmwareSession) {
-    write_floppy_i16(session, 0, 384);
+    write_floppy_i16(session, 0, 8192);
     write_floppy_i16(session, 2, 0);
-    write_floppy_i16(session, 4, 4);
-    write_floppy_u8(session, 6, 1);
+    write_floppy_i16(session, 4, 20);
+    write_floppy_u8(session, 6, 22);
     write_floppy_u8(session, 7, 0);
     write_floppy_u8(session, 9, 0);
     write_floppy_u8(session, 10, 0);
@@ -1294,10 +1318,10 @@ fn seed_floppy_bird_near_score(session: &mut FirmwareSession) {
 }
 
 fn seed_floppy_bird_crash(session: &mut FirmwareSession) {
-    write_floppy_i16(session, 0, 900);
+    write_floppy_i16(session, 0, 10240);
     write_floppy_i16(session, 2, 120);
-    write_floppy_i16(session, 4, 10);
-    write_floppy_u8(session, 6, 1);
+    write_floppy_i16(session, 4, 30);
+    write_floppy_u8(session, 6, 8);
     write_floppy_u8(session, 10, 0);
     write_floppy_u32(session, 12, 0);
     write_floppy_u8(session, 16, 1);
