@@ -46,7 +46,8 @@ Headless supports:
   `--lcd-ranges`, `--lcd-dump-dir`, `--lcd-ocr`
 - validation helpers: `--launch-forth-mini`, `--launch-calculator`,
   `--validate-alpha-usb-native`, `--validate-forth-mini`,
-  `--validate-basic-writer`, `--validate-write-or-die`
+  `--validate-basic-writer`, `--validate-write-or-die`,
+  `--validate-floppy-bird`, `--validate-snake`
 
 The full flag reference and verified command patterns are in
 [`docs/2026-04-22-alpha-emu-headless-usage.md`](../docs/2026-04-22-alpha-emu-headless-usage.md).

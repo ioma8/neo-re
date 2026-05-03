@@ -34,6 +34,8 @@ The same workflow applies to every applet with an `applet.env`, for example:
 
 ```sh
 ./scripts/build-smartapplet.sh write_or_die_bw
+./scripts/build-smartapplet.sh floppy_bird_bw
+./scripts/build-smartapplet.sh snake_bw
 ```
 
 ## Tool requirements
@@ -206,6 +208,12 @@ Everything mutable should hang off that state block.
 - `smartapplets/write_or_die_bw`: challenge editor applet, reference for setup
   menus, live timers, pressure states, one-file autosave, and full-system
   headless validation of completion plus persistence
+- `smartapplets/floppy_bird_bw`: simple LCD game applet, reference for
+  uptime-driven frame ticks, transient in-memory game state, and key-controlled
+  animation
+- `smartapplets/snake_bw`: full-pixel Snake game applet, reference for using
+  the whole 264x64 LCD area through 4x4 square-cell rectangle raster operations
+  with edge wraparound
 
 ## Validated screen feedback helpers
 

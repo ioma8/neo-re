@@ -46,6 +46,8 @@ fn main() -> Result<()> {
     let mut validate_forth_mini = false;
     let mut validate_basic_writer = false;
     let mut validate_write_or_die = false;
+    let mut validate_floppy_bird = false;
+    let mut validate_snake = false;
     let mut probe_basic_writer_key = None;
     let mut load_memory = None;
     let mut dump_memory_start = None;
@@ -100,6 +102,10 @@ fn main() -> Result<()> {
             validate_basic_writer = true;
         } else if arg == "--validate-write-or-die" {
             validate_write_or_die = true;
+        } else if arg == "--validate-floppy-bird" {
+            validate_floppy_bird = true;
+        } else if arg == "--validate-snake" {
+            validate_snake = true;
         } else if let Some(value) = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix("--probe-basic-writer-key="))
@@ -226,6 +232,8 @@ fn main() -> Result<()> {
         || validate_forth_mini
         || validate_basic_writer
         || validate_write_or_die
+        || validate_floppy_bird
+        || validate_snake
         || probe_basic_writer_key.is_some()
         || lcd_ascii
         || lcd_visible_ascii
@@ -575,6 +583,106 @@ fn main() -> Result<()> {
                 snapshot.pc,
                 snapshot.steps,
                 snapshot.last_exception.as_deref().unwrap_or("none")
+            );
+            return Ok(());
+        }
+        if validate_floppy_bird {
+            if !is_full_system {
+                anyhow::bail!("Floppy Bird validation requires the full NEO system firmware image");
+            }
+            let firmware = FirmwareRuntime::load_small_rom(&path)?;
+            let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+            recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            focus_floppy_bird_direct(&mut session)?;
+            bail_if_exception(&session, "Floppy Bird focus")?;
+            print_ocr_checkpoint("floppy_bird_focus", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
+            assert_floppy_bird_state(&session, 0, false, "Floppy Bird initial state")?;
+            let before_flap = floppy_bird_state(&session);
+            dispatch_floppy_bird_message(&mut session, 0x21, 0x4c, "Floppy Bird space flap")?;
+            force_floppy_bird_tick(&mut session, "Floppy Bird post-flap tick")?;
+            let after_flap = floppy_bird_state(&session);
+            if after_flap.bird_y_q8 >= before_flap.bird_y_q8 {
+                anyhow::bail!("Floppy Bird flap did not move upward: before={before_flap:?} after={after_flap:?}");
+            }
+            seed_floppy_bird_near_score(&mut session);
+            force_floppy_bird_tick(&mut session, "Floppy Bird score tick")?;
+            assert_floppy_bird_state(&session, 1, false, "Floppy Bird scoring")?;
+            seed_floppy_bird_crash(&mut session);
+            force_floppy_bird_tick(&mut session, "Floppy Bird crash tick")?;
+            assert_floppy_bird_state(&session, 1, true, "Floppy Bird game over")?;
+            dispatch_floppy_bird_message(&mut session, 0x21, 0x48, "Floppy Bird escape exit")?;
+            let status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
+            if status != 7 {
+                anyhow::bail!("Floppy Bird Escape should return applet exit status 7, got {status}");
+            }
+            let snapshot = session.snapshot();
+            println!(
+                "floppy_bird_validation=ok pc=0x{:08x} steps={} exception={}",
+                snapshot.pc,
+                snapshot.steps,
+                snapshot.last_exception.as_deref().unwrap_or("none")
+            );
+            return Ok(());
+        }
+        if validate_snake {
+            if !is_full_system {
+                anyhow::bail!("Snake validation requires the full NEO system firmware image");
+            }
+            let firmware = FirmwareRuntime::load_small_rom(&path)?;
+            let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+            recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            focus_snake_direct(&mut session)?;
+            bail_if_exception(&session, "Snake focus")?;
+            assert_snake_state(&session, 0, 3, false, false, "Snake initial")?;
+            let initial_pixels = lcd_visible_lit_pixels(&session.snapshot().lcd);
+            if initial_pixels < 64 {
+                anyhow::bail!("Snake should render pixel graphics over the LCD, got only {initial_pixels} lit pixels");
+            }
+            let before_turn = snake_state(&session);
+            dispatch_snake_message(&mut session, 0x21, 0x0d, "Snake down arrow")?;
+            force_snake_tick(&mut session, "Snake down movement")?;
+            let after_turn = snake_state(&session);
+            if after_turn.head_y <= before_turn.head_y {
+                anyhow::bail!("Snake down arrow did not move the head downward: before={before_turn:?} after={after_turn:?}");
+            }
+            seed_snake_food_ahead(&mut session);
+            force_snake_tick(&mut session, "Snake food tick")?;
+            assert_snake_state(&session, 1, 4, false, false, "Snake scoring/growth")?;
+            dispatch_snake_message(&mut session, 0x21, 0x1e, "Snake pause key")?;
+            let paused = snake_state(&session);
+            force_snake_tick(&mut session, "Snake paused tick")?;
+            let still_paused = snake_state(&session);
+            if !still_paused.paused || still_paused.head_x != paused.head_x || still_paused.head_y != paused.head_y {
+                anyhow::bail!("Snake pause should stop movement: before={paused:?} after={still_paused:?}");
+            }
+            dispatch_snake_message(&mut session, 0x21, 0x23, "Snake restart key")?;
+            assert_snake_state(&session, 0, 3, false, false, "Snake restart")?;
+            seed_snake_edge_wrap(&mut session);
+            force_snake_tick(&mut session, "Snake edge wrap")?;
+            let wrapped = snake_state(&session);
+            if wrapped.game_over || wrapped.head_x != 0 {
+                anyhow::bail!("Snake should wrap from right edge to left edge, got {wrapped:?}");
+            }
+            dispatch_snake_message(&mut session, 0x21, 0x48, "Snake escape exit")?;
+            let status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
+            if status != 7 {
+                anyhow::bail!("Snake Escape should return applet exit status 7, got {status}");
+            }
+            focus_snake_direct(&mut session)?;
+            dispatch_snake_message(&mut session, 0x21, 0x29, "Snake applets exit")?;
+            let status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
+            if status != 7 {
+                anyhow::bail!("Snake Applets should return applet exit status 7, got {status}");
+            }
+            let snapshot = session.snapshot();
+            println!(
+                "snake_validation=ok pc=0x{:08x} steps={} exception={} pixels={}",
+                snapshot.pc,
+                snapshot.steps,
+                snapshot.last_exception.as_deref().unwrap_or("none"),
+                initial_pixels
             );
             return Ok(());
         }
@@ -1114,6 +1222,163 @@ fn assert_write_or_die_screen_contains(session: &FirmwareSession, needle: &str, 
         anyhow::bail!("{label}: expected screen to contain {needle:?}, got {text:?}");
     }
     Ok(())
+}
+
+#[derive(Debug)]
+struct FloppyBirdState {
+    bird_y_q8: i16,
+    barrier_x: i16,
+    gap_row: u8,
+    score: u8,
+    game_over: bool,
+}
+
+fn floppy_bird_state_base(session: &FirmwareSession) -> Option<u32> {
+    session.applet_state_base_for_validation("Floppy Bird")
+}
+
+fn read_be_i16(bytes: &[u8], addr: usize) -> Option<i16> {
+    let slice = bytes.get(addr..addr + 2)?;
+    Some(i16::from_be_bytes([slice[0], slice[1]]))
+}
+
+fn floppy_bird_state(session: &FirmwareSession) -> FloppyBirdState {
+    let base = floppy_bird_state_base(session).unwrap_or_default() as usize;
+    let bytes = session.memory_bytes();
+    FloppyBirdState {
+        bird_y_q8: read_be_i16(bytes, base).unwrap_or_default(),
+        barrier_x: read_be_i16(bytes, base + 4).unwrap_or_default(),
+        gap_row: bytes.get(base + 6).copied().unwrap_or_default(),
+        score: bytes.get(base + 7).copied().unwrap_or_default(),
+        game_over: bytes.get(base + 10).copied().unwrap_or_default() != 0,
+    }
+}
+
+fn assert_floppy_bird_state(session: &FirmwareSession, score: u8, game_over: bool, label: &str) -> Result<()> {
+    let state = floppy_bird_state(session);
+    if state.score != score || state.game_over != game_over || state.gap_row > 2 || state.barrier_x > 27 {
+        anyhow::bail!("{label}: expected score={score} game_over={game_over}, got {state:?}");
+    }
+    Ok(())
+}
+
+fn write_floppy_i16(session: &mut FirmwareSession, offset: u32, value: i16) {
+    let base = floppy_bird_state_base(session).unwrap_or_default();
+    session.overlay_memory_range(base + offset, &value.to_be_bytes());
+}
+
+fn write_floppy_u8(session: &mut FirmwareSession, offset: u32, value: u8) {
+    let base = floppy_bird_state_base(session).unwrap_or_default();
+    session.overlay_memory_range(base + offset, &[value]);
+}
+
+fn write_floppy_u32(session: &mut FirmwareSession, offset: u32, value: u32) {
+    let base = floppy_bird_state_base(session).unwrap_or_default();
+    session.overlay_memory_range(base + offset, &value.to_be_bytes());
+}
+
+fn seed_floppy_bird_near_score(session: &mut FirmwareSession) {
+    write_floppy_i16(session, 0, 384);
+    write_floppy_i16(session, 2, 0);
+    write_floppy_i16(session, 4, 4);
+    write_floppy_u8(session, 6, 1);
+    write_floppy_u8(session, 7, 0);
+    write_floppy_u8(session, 9, 0);
+    write_floppy_u8(session, 10, 0);
+    write_floppy_u32(session, 12, 0);
+    write_floppy_u8(session, 16, 1);
+}
+
+fn seed_floppy_bird_crash(session: &mut FirmwareSession) {
+    write_floppy_i16(session, 0, 900);
+    write_floppy_i16(session, 2, 120);
+    write_floppy_i16(session, 4, 10);
+    write_floppy_u8(session, 6, 1);
+    write_floppy_u8(session, 10, 0);
+    write_floppy_u32(session, 12, 0);
+    write_floppy_u8(session, 16, 1);
+}
+
+#[derive(Debug)]
+struct SnakeState {
+    length: u8,
+    head_x: u8,
+    head_y: u8,
+    score: u8,
+    paused: bool,
+    game_over: bool,
+}
+
+fn snake_state_base(session: &FirmwareSession) -> Option<u32> {
+    session.applet_state_base_for_validation("Snake")
+}
+
+fn snake_state(session: &FirmwareSession) -> SnakeState {
+    let base = snake_state_base(session).unwrap_or_default() as usize;
+    let bytes = session.memory_bytes();
+    SnakeState {
+        length: bytes.get(base + 384).copied().unwrap_or_default(),
+        head_x: bytes.get(base + 385).copied().unwrap_or_default(),
+        head_y: bytes.get(base + 386).copied().unwrap_or_default(),
+        score: bytes.get(base + 389).copied().unwrap_or_default(),
+        paused: bytes.get(base + 393).copied().unwrap_or_default() != 0,
+        game_over: bytes.get(base + 394).copied().unwrap_or_default() != 0,
+    }
+}
+
+fn assert_snake_state(
+    session: &FirmwareSession,
+    score: u8,
+    length: u8,
+    paused: bool,
+    game_over: bool,
+    label: &str,
+) -> Result<()> {
+    let state = snake_state(session);
+    if state.score != score || state.length != length || state.paused != paused || state.game_over != game_over {
+        anyhow::bail!("{label}: expected score={score} length={length} paused={paused} game_over={game_over}, got {state:?}");
+    }
+    Ok(())
+}
+
+fn write_snake_u8(session: &mut FirmwareSession, offset: u32, value: u8) {
+    let base = snake_state_base(session).unwrap_or_default();
+    session.overlay_memory_range(base + offset, &[value]);
+}
+
+fn write_snake_u32(session: &mut FirmwareSession, offset: u32, value: u32) {
+    let base = snake_state_base(session).unwrap_or_default();
+    session.overlay_memory_range(base + offset, &value.to_be_bytes());
+}
+
+fn seed_snake_food_ahead(session: &mut FirmwareSession) {
+    let state = snake_state(session);
+    write_snake_u8(session, 387, state.head_x);
+    write_snake_u8(session, 388, state.head_y.saturating_add(1));
+    write_snake_u32(session, 396, 0);
+}
+
+fn seed_snake_edge_wrap(session: &mut FirmwareSession) {
+    write_snake_u8(session, 0, 65);
+    write_snake_u8(session, 192, 8);
+    write_snake_u8(session, 384, 3);
+    write_snake_u8(session, 385, 65);
+    write_snake_u8(session, 386, 8);
+    write_snake_u8(session, 389, 0);
+    write_snake_u8(session, 391, 1);
+    write_snake_u8(session, 392, 1);
+    write_snake_u8(session, 393, 0);
+    write_snake_u8(session, 394, 0);
+    write_snake_u32(session, 396, 0);
+}
+
+fn lcd_visible_lit_pixels(snapshot: &LcdSnapshot) -> usize {
+    let width = snapshot.width.min(264);
+    let height = snapshot.height.min(64);
+    (0..height)
+        .flat_map(|y| (0..width).map(move |x| (x, y)))
+        .filter(|(x, y)| snapshot.pixels[*y * snapshot.width + *x])
+        .count()
 }
 
 fn seed_write_or_die_completed_state(session: &mut FirmwareSession, text: &str) {
@@ -1850,6 +2115,24 @@ fn focus_write_or_die_direct(session: &mut FirmwareSession) -> Result<()> {
     dispatch_write_or_die_message(session, 0x19, 0, "WriteOrDie direct focus")
 }
 
+fn focus_floppy_bird_direct(session: &mut FirmwareSession) -> Result<()> {
+    dispatch_floppy_bird_message(session, 0x19, 0, "Floppy Bird direct focus")
+}
+
+fn force_floppy_bird_tick(session: &mut FirmwareSession, label: &str) -> Result<()> {
+    write_floppy_u32(session, 12, 0);
+    dispatch_floppy_bird_message(session, 0x00, 0, label)
+}
+
+fn focus_snake_direct(session: &mut FirmwareSession) -> Result<()> {
+    dispatch_snake_message(session, 0x19, 0, "Snake direct focus")
+}
+
+fn force_snake_tick(session: &mut FirmwareSession, label: &str) -> Result<()> {
+    write_snake_u32(session, 396, 0);
+    dispatch_snake_message(session, 0x00, 0, label)
+}
+
 fn launch_alpha_word_from_write_or_die_menu(session: &mut FirmwareSession) {
     for _ in 0..30 {
         session.tap_matrix_code_long(0x77);
@@ -1982,6 +2265,40 @@ fn dispatch_write_or_die_message(
     session
         .start_applet_message_with_param_for_validation("WriteOrDie", message, param)
         .map_err(|error| anyhow::anyhow!("failed to dispatch WriteOrDie message: {error}"))?;
+    if !session.run_until_pc_or_steps(VALIDATION_RETURN_PC, 5_000_000) {
+        bail_if_exception(session, label)?;
+        anyhow::bail!("{label}: applet did not return to validation trampoline");
+    }
+    Ok(())
+}
+
+fn dispatch_floppy_bird_message(
+    session: &mut FirmwareSession,
+    message: u32,
+    param: u32,
+    label: &str,
+) -> Result<()> {
+    const VALIDATION_RETURN_PC: u32 = 0x0042_6752;
+    session
+        .start_applet_message_with_param_for_validation("Floppy Bird", message, param)
+        .map_err(|error| anyhow::anyhow!("failed to dispatch Floppy Bird message: {error}"))?;
+    if !session.run_until_pc_or_steps(VALIDATION_RETURN_PC, 5_000_000) {
+        bail_if_exception(session, label)?;
+        anyhow::bail!("{label}: applet did not return to validation trampoline");
+    }
+    Ok(())
+}
+
+fn dispatch_snake_message(
+    session: &mut FirmwareSession,
+    message: u32,
+    param: u32,
+    label: &str,
+) -> Result<()> {
+    const VALIDATION_RETURN_PC: u32 = 0x0042_6752;
+    session
+        .start_applet_message_with_param_for_validation("Snake", message, param)
+        .map_err(|error| anyhow::anyhow!("failed to dispatch Snake message: {error}"))?;
     if !session.run_until_pc_or_steps(VALIDATION_RETURN_PC, 5_000_000) {
         bail_if_exception(session, label)?;
         anyhow::bail!("{label}: applet did not return to validation trampoline");

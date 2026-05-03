@@ -279,3 +279,5 @@ WriteOrDie LCD reverse highlight produces a visible headless LCD diff when compa
 Basic Writer validation failure after SDK lift is caused by menu validation launching WriteOrDie instead of Basic Writer, as shown by WOD setup OCR on the basic_writer_focus checkpoint	proven
 WriteOrDie punishment timing is still old 1x/2x/3x grace and whole-word deletion; validator fails before the requested 4s warning plus 700ms character-deletion model is implemented	proven
 WriteOrDie now matches requested WriteOrDie punishment timing: safe for grace, 4s warning flash without deletion, then 700ms character deletion until typing recovery	proven
+Snake rectangular blocks were caused by 6x4 LCD cells; 4x4 cells over a 66x16 grid make square blocks across the full 264x64 display	proven
+Snake edge death was caused by explicit boundary game-over checks; replacing boundary checks with coordinate wraparound makes edges pass-through	proven

@@ -87,6 +87,28 @@ fn manifest_for(applet: AppletName) -> AppletManifest {
             file_count: 1,
             alphaword_write_metadata: true,
         },
+        AppletName::FloppyBird => AppletManifest {
+            id: 0xA134,
+            name: "Floppy Bird",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x2000,
+            extra_memory_size: 0x1000,
+            copyright: "neo-re Betawise Floppy Bird SmartApplet",
+            file_count: 0,
+            alphaword_write_metadata: true,
+        },
+        AppletName::Snake => AppletManifest {
+            id: 0xA135,
+            name: "Snake",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x3000,
+            extra_memory_size: 0x1000,
+            copyright: "neo-re Betawise Snake SmartApplet",
+            file_count: 0,
+            alphaword_write_metadata: true,
+        },
     }
 }
 
@@ -102,6 +124,8 @@ enum AppletName {
     ForthMini,
     BasicWriter,
     WriteOrDie,
+    FloppyBird,
+    Snake,
 }
 
 impl AppletName {
@@ -111,6 +135,8 @@ impl AppletName {
             "forth-mini" => Some(Self::ForthMini),
             "basic-writer" => Some(Self::BasicWriter),
             "write-or-die" => Some(Self::WriteOrDie),
+            "floppy-bird" => Some(Self::FloppyBird),
+            "snake" => Some(Self::Snake),
             _ => None,
         }
     }
@@ -126,7 +152,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Usage => f.write_str(
-                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die> <input-elf-or-a> <output.os3kapp>",
+                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die|floppy-bird|snake> <input-elf-or-a> <output.os3kapp>",
             ),
             Self::UnknownApplet(name) => write!(f, "unknown applet: {name}"),
         }
@@ -134,3 +160,30 @@ impl std::fmt::Display for CliError {
 }
 
 impl Error for CliError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_floppy_bird_manifest() {
+        let applet = AppletName::parse("floppy-bird").expect("floppy-bird applet name");
+        let manifest = manifest_for(applet);
+
+        assert_eq!(manifest.id, 0xA134);
+        assert_eq!(manifest.name, "Floppy Bird");
+        assert_eq!(manifest.file_count, 0);
+        assert!(manifest.alphaword_write_metadata);
+    }
+
+    #[test]
+    fn parses_snake_manifest() {
+        let applet = AppletName::parse("snake").expect("snake applet name");
+        let manifest = manifest_for(applet);
+
+        assert_eq!(manifest.id, 0xA135);
+        assert_eq!(manifest.name, "Snake");
+        assert_eq!(manifest.file_count, 0);
+        assert!(manifest.alphaword_write_metadata);
+    }
+}

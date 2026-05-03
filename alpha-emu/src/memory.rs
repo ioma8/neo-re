@@ -30,6 +30,8 @@ const EXTRA_APPLET_PATHS: &[&str] = &[
     "../exports/applets/forth-mini.os3kapp",
     "../exports/applets/basic-writer.os3kapp",
     "../exports/applets/write-or-die.os3kapp",
+    "../exports/applets/floppy-bird.os3kapp",
+    "../exports/applets/snake.os3kapp",
 ];
 
 #[derive(Debug, Error)]

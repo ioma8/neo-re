@@ -345,6 +345,8 @@ Built-in validators:
 --validate-forth-mini
 --validate-basic-writer
 --validate-write-or-die
+--validate-floppy-bird
+--validate-snake
 ```
 
 `--validate-forth-mini` boots the full system, enters SmartApplets, launches
@@ -362,6 +364,15 @@ validator has a known applet-selection caveat when several local applets are
 installed. Until that validator is tightened, use
 `./scripts/build-smartapplet.sh basic_writer_bw --no-validate` for build-only
 coverage and validate shared SDK changes through WriteOrDie/Forth Mini.
+
+`--validate-floppy-bird` boots the full system, focuses Floppy Bird, checks the
+initial LCD/game state, sends a Space flap, forces game ticks, validates score
+progression and game-over state, then verifies Escape returns applet exit
+status.
+
+`--validate-snake` boots the full system, focuses Snake, checks full-pixel LCD
+rendering with square cells, arrow movement, food scoring and growth, pause,
+restart, edge wraparound, and both Escape/Applets exit statuses.
 
 ## Verified Calculator Workflow
 
