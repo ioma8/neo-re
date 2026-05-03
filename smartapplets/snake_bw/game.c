@@ -30,7 +30,7 @@ static void PlaceFood(SnakeGame_t* game) {
     game->food_y = 0;
 }
 
-void snake_game_init(SnakeGame_t* game) {
+void snake_game_init_seeded(SnakeGame_t* game, uint8_t seed) {
     for(uint8_t i = 0; i < SNAKE_MAX_LEN; i++) {
         game->body_x[i] = 0;
         game->body_y[i] = 0;
@@ -45,7 +45,7 @@ void snake_game_init(SnakeGame_t* game) {
     game->body_x[2] = (uint8_t)(game->head_x - 2);
     game->body_y[2] = game->head_y;
     game->score = 0;
-    game->seed = 31;
+    game->seed = seed == 0 ? 31 : seed;
     game->direction = SNAKE_RIGHT;
     game->pending_direction = SNAKE_RIGHT;
     game->paused = false;
@@ -53,8 +53,16 @@ void snake_game_init(SnakeGame_t* game) {
     PlaceFood(game);
 }
 
+void snake_game_init(SnakeGame_t* game) {
+    snake_game_init_seeded(game, 31);
+}
+
+void snake_game_restart_seeded(SnakeGame_t* game, uint8_t seed) {
+    snake_game_init_seeded(game, seed);
+}
+
 void snake_game_restart(SnakeGame_t* game) {
-    snake_game_init(game);
+    snake_game_restart_seeded(game, 31);
 }
 
 void snake_game_turn(SnakeGame_t* game, SnakeDirection_t direction) {

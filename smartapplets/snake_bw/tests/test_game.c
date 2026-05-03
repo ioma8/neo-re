@@ -13,6 +13,20 @@ static void starts_moving_right_with_three_segments(void) {
     assert(game.head_y == SNAKE_ROWS / 2);
 }
 
+static void uses_200_pixel_playfield(void) {
+    assert(SNAKE_COLS == 50);
+    assert(SNAKE_ROWS == 16);
+}
+
+static void seeded_starts_place_food_differently(void) {
+    SnakeGame_t first;
+    SnakeGame_t second;
+    snake_game_init_seeded(&first, 31);
+    snake_game_init_seeded(&second, 32);
+
+    assert(first.food_x != second.food_x || first.food_y != second.food_y);
+}
+
 static void ignores_instant_reverse(void) {
     SnakeGame_t game;
     snake_game_init(&game);
@@ -75,6 +89,8 @@ static void moving_past_right_edge_wraps_to_left(void) {
 
 int main(void) {
     starts_moving_right_with_three_segments();
+    uses_200_pixel_playfield();
+    seeded_starts_place_food_differently();
     ignores_instant_reverse();
     eating_food_grows_and_scores();
     pause_stops_movement();

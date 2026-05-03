@@ -281,3 +281,5 @@ WriteOrDie punishment timing is still old 1x/2x/3x grace and whole-word deletion
 WriteOrDie now matches requested WriteOrDie punishment timing: safe for grace, 4s warning flash without deletion, then 700ms character deletion until typing recovery	proven
 Snake rectangular blocks were caused by 6x4 LCD cells; 4x4 cells over a 66x16 grid make square blocks across the full 264x64 display	proven
 Snake edge death was caused by explicit boundary game-over checks; replacing boundary checks with coordinate wraparound makes edges pass-through	proven
+Snake gameplay flashing was caused by full-screen ROP_WHITENESS redraws on every movement tick and arrow key; normal gameplay now updates only changed cells	proven
+Snake initial food repeats because reset/restart always used fixed seed 31; applet now seeds from uptime while tests keep deterministic seeded init	proven

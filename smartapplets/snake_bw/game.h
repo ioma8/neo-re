@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 enum {
-    SNAKE_COLS = 66,
+    SNAKE_COLS = 50,
     SNAKE_ROWS = 16,
     SNAKE_MAX_LEN = 192
 };
@@ -34,7 +34,9 @@ typedef struct {
 } SnakeGame_t;
 
 void snake_game_init(SnakeGame_t* game);
+void snake_game_init_seeded(SnakeGame_t* game, uint8_t seed);
 void snake_game_restart(SnakeGame_t* game);
+void snake_game_restart_seeded(SnakeGame_t* game, uint8_t seed);
 void snake_game_turn(SnakeGame_t* game, SnakeDirection_t direction);
 void snake_game_toggle_pause(SnakeGame_t* game);
 void snake_game_tick(SnakeGame_t* game);

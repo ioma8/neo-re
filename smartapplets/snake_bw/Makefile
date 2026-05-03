@@ -4,7 +4,7 @@ LD = m68k-elf-ld
 CFLAGS = -m68000 -mpcrel -fomit-frame-pointer -ffixed-a5 -ffixed-d7 -fshort-enums
 CFLAGS += -O1 -fno-inline -fno-optimize-sibling-calls -I"../betawise-sdk" -ffunction-sections -fdata-sections -ffreestanding
 LDFLAGS = -static -T SnakeBW.lds --gc-sections
-OBJ = SnakeBW.o game.o syscall.o
+OBJ = SnakeBW.o game.o draw.o syscall.o
 TARGET = SnakeBW.elf
 
 all: $(TARGET)
@@ -19,4 +19,4 @@ $(TARGET): $(OBJ) SnakeBW.lds
 	$(LD) $(OBJ) $(LDFLAGS) -o $@
 
 clean:
-	rm -f SnakeBW.o game.o syscall.o SnakeBW.elf
+	rm -f SnakeBW.o game.o draw.o syscall.o SnakeBW.elf

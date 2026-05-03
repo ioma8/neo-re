@@ -637,8 +637,12 @@ fn main() -> Result<()> {
             bail_if_exception(&session, "Snake focus")?;
             assert_snake_state(&session, 0, 3, false, false, "Snake initial")?;
             let initial_pixels = lcd_visible_lit_pixels(&session.snapshot().lcd);
-            if initial_pixels < 64 {
+            if initial_pixels < 400 {
                 anyhow::bail!("Snake should render pixel graphics over the LCD, got only {initial_pixels} lit pixels");
+            }
+            let sidebar_pixels = lcd_lit_pixels_in_rect(&session.snapshot().lcd, 200, 0, 64, 64);
+            if sidebar_pixels < 300 {
+                anyhow::bail!("Snake should render title/help/length in the 64px sidebar, got {sidebar_pixels} lit sidebar pixels");
             }
             let before_turn = snake_state(&session);
             dispatch_snake_message(&mut session, 0x21, 0x0d, "Snake down arrow")?;
@@ -1359,10 +1363,10 @@ fn seed_snake_food_ahead(session: &mut FirmwareSession) {
 }
 
 fn seed_snake_edge_wrap(session: &mut FirmwareSession) {
-    write_snake_u8(session, 0, 65);
+    write_snake_u8(session, 0, 49);
     write_snake_u8(session, 192, 8);
     write_snake_u8(session, 384, 3);
-    write_snake_u8(session, 385, 65);
+    write_snake_u8(session, 385, 49);
     write_snake_u8(session, 386, 8);
     write_snake_u8(session, 389, 0);
     write_snake_u8(session, 391, 1);
@@ -1378,6 +1382,21 @@ fn lcd_visible_lit_pixels(snapshot: &LcdSnapshot) -> usize {
     (0..height)
         .flat_map(|y| (0..width).map(move |x| (x, y)))
         .filter(|(x, y)| snapshot.pixels[*y * snapshot.width + *x])
+        .count()
+}
+
+fn lcd_lit_pixels_in_rect(
+    snapshot: &LcdSnapshot,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> usize {
+    let max_y = (y + height).min(snapshot.height);
+    let max_x = (x + width).min(snapshot.width);
+    (y..max_y)
+        .flat_map(|pixel_y| (x..max_x).map(move |pixel_x| (pixel_x, pixel_y)))
+        .filter(|(pixel_x, pixel_y)| snapshot.pixels[*pixel_y * snapshot.width + *pixel_x])
         .count()
 }
 
