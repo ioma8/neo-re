@@ -286,3 +286,17 @@ Snake initial food repeats because reset/restart always used fixed seed 31; appl
 Floppy Bird score gets erased because old barrier clearing whites the score rectangle; score is now redrawn when barriers touch that area	proven
 Floppy Bird gameplay flashing is worsened by clearing the entire old barrier column; normal ticks now clear only the exposed trailing edge	proven
 Floppy Bird game-over flashing is caused by drawing the gameplay scene then inverting a large overlay; game-over now draws a stable dedicated screen once	proven
+Raycaster looked like filled wall bars because each ray painted a solid vertical strip; renderer now connects projected wall slice endpoints with pixel lines for outlined perspective walls	proven
+Raycaster accordion walls were caused by treating screen columns as wrapped angle offsets around the whole player instead of forward camera-plane rays; per-column forward rays now produce stable Wolfenstein-style projection	proven
+Raycaster still looked like square patterned blocks because walls were filled per column and height was heavily bucketed; outline-only connected top/bottom edges with smoother distance height produce angled perspective walls	proven
+Raycaster outline-only walls looked like a flat floor-plan because the opening corridor and hollow wall rendering exposed only edges; a centered room start plus solid untextured vertical slices gives a readable Wolfenstein-style 3D view	proven
+Raycaster still looked square because the default camera was cardinal and square-on to wall planes; starting on a diagonal view plus shift-only continuous wall heights creates visible perspective variation on the LCD	proven
+Raycaster full-width viewport stretched the 3D projection across the Neo's very wide LCD and made walls read as horizontal slabs; constraining rendering to 128x64 produces a more classic low-resolution raycaster view	proven
+Raycaster still looked ugly because each ray rendered as its own rectangular wall column; grouping adjacent rays by wall cell and filling each group as a trapezoid matches the desired wall-plane projection style	proven
+Raycaster 128px viewport left too much unused screen; 160x64 raycast viewport plus right-side live minimap keeps the 3D projection compact while using the remaining LCD space meaningfully	proven
+Raycaster shallow rays were less accurate because per-step division dropped small ray components to zero; accumulator ray stepping preserves both axes without libgcc math helpers	proven
+Raycaster movement felt too loose near walls because collision tested only the player center; a small four-corner player radius blocks wall clipping while keeping movement simple	proven
+Raycaster enemy was only visual because Space was not wired to gameplay; visible-enemy shooting now removes the enemy and is covered by host and headless validation	proven
+Raycaster keyboard movement felt slow because each key changed one angle unit or about 16 px; two-angle turns and doubled movement distance make input responsive while retaining collision checks	proven
+Raycaster redraw was slow because wall faces were rendered as many 1-pixel RasterOp strips; 4-pixel ray columns and strip fills reduce redraw work while preserving the trapezoid projection	proven
+Raycaster walls merged visually because every wall face was solid black; lightweight per-face white highlights make adjacent wall planes easier to distinguish on the monochrome LCD	proven

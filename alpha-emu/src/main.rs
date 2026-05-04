@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
@@ -48,6 +50,7 @@ fn main() -> Result<()> {
     let mut validate_write_or_die = false;
     let mut validate_floppy_bird = false;
     let mut validate_snake = false;
+    let mut validate_raycaster = false;
     let mut probe_basic_writer_key = None;
     let mut load_memory = None;
     let mut dump_memory_start = None;
@@ -106,6 +109,8 @@ fn main() -> Result<()> {
             validate_floppy_bird = true;
         } else if arg == "--validate-snake" {
             validate_snake = true;
+        } else if arg == "--validate-raycaster" {
+            validate_raycaster = true;
         } else if let Some(value) = arg
             .to_str()
             .and_then(|arg| arg.strip_prefix("--probe-basic-writer-key="))
@@ -234,6 +239,7 @@ fn main() -> Result<()> {
         || validate_write_or_die
         || validate_floppy_bird
         || validate_snake
+        || validate_raycaster
         || probe_basic_writer_key.is_some()
         || lcd_ascii
         || lcd_visible_ascii
@@ -711,6 +717,69 @@ fn main() -> Result<()> {
                 snapshot.steps,
                 snapshot.last_exception.as_deref().unwrap_or("none"),
                 initial_pixels
+            );
+            return Ok(());
+        }
+        if validate_raycaster {
+            if !is_full_system {
+                anyhow::bail!("Raycaster validation requires the full NEO system firmware image");
+            }
+            let firmware = FirmwareRuntime::load_small_rom(&path)?;
+            let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+            recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            focus_raycaster_direct(&mut session)?;
+            bail_if_exception(&session, "Raycaster focus")?;
+            let initial_pixels = lcd_visible_lit_pixels(&session.snapshot().lcd);
+            if initial_pixels < 900 {
+                anyhow::bail!("Raycaster should render substantial pixel graphics, got only {initial_pixels} lit pixels");
+            }
+            let top_variation = raycaster_wall_top_variation(&session.snapshot().lcd);
+            if top_variation < 8 {
+                anyhow::bail!("Raycaster opening view should have perspective top-edge variation, got {top_variation}");
+            }
+            let minimap_pixels = lcd_lit_pixels_in_rect(&session.snapshot().lcd, 160, 0, 104, 64);
+            if minimap_pixels < 350 {
+                anyhow::bail!("Raycaster minimap should render on right side, got only {minimap_pixels} lit pixels");
+            }
+            let before = raycaster_state(&session);
+            let before_lcd = session.snapshot().lcd.clone();
+            dispatch_raycaster_message(&mut session, 0x21, 0x4a, "Raycaster right turn")?;
+            let turned = raycaster_state(&session);
+            if turned.angle == before.angle {
+                anyhow::bail!("Raycaster right arrow should rotate: before={before:?} after={turned:?}");
+            }
+            dispatch_raycaster_message(&mut session, 0x21, 0x4b, "Raycaster forward")?;
+            let moved = raycaster_state(&session);
+            if moved.player_x == turned.player_x && moved.player_y == turned.player_y {
+                anyhow::bail!("Raycaster up arrow should move player: before={turned:?} after={moved:?}");
+            }
+            let minimap_diff = lcd_diff_pixels_in_rect(&before_lcd, &session.snapshot().lcd, 160, 0, 104, 64);
+            if minimap_diff == 0 {
+                anyhow::bail!("Raycaster minimap should update after movement");
+            }
+            seed_raycaster_visible_enemy(&mut session);
+            dispatch_raycaster_message(&mut session, 0x21, 0x4c, "Raycaster shoot")?;
+            let shot = raycaster_state(&session);
+            if shot.enemy_alive != 0 {
+                anyhow::bail!("Raycaster Space should remove visible enemy, got {shot:?}");
+            }
+            dispatch_raycaster_message(&mut session, 0x21, 0x23, "Raycaster restart")?;
+            let reset = raycaster_state(&session);
+            if reset.player_x != 1152 || reset.player_y != 1664 || reset.angle != 56 {
+                anyhow::bail!("Raycaster R should restart, got {reset:?}");
+            }
+            dispatch_raycaster_message(&mut session, 0x21, 0x48, "Raycaster escape exit")?;
+            let status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
+            if status != 7 {
+                anyhow::bail!("Raycaster Escape should return applet exit status 7, got {status}");
+            }
+            let snapshot = session.snapshot();
+            println!(
+                "raycaster_validation=ok pc=0x{:08x} steps={} exception={} pixels={initial_pixels}",
+                snapshot.pc,
+                snapshot.steps,
+                snapshot.last_exception.as_deref().unwrap_or("none")
             );
             return Ok(());
         }
@@ -1337,6 +1406,41 @@ struct SnakeState {
     game_over: bool,
 }
 
+#[derive(Debug)]
+struct RaycasterState {
+    player_x: i16,
+    player_y: i16,
+    angle: u8,
+    enemy_alive: u8,
+}
+
+fn raycaster_state_base(session: &FirmwareSession) -> Option<u32> {
+    session.applet_state_base_for_validation("Raycaster")
+}
+
+fn raycaster_state(session: &FirmwareSession) -> RaycasterState {
+    let base = raycaster_state_base(session).unwrap_or_default() as usize;
+    let bytes = session.memory_bytes();
+    RaycasterState {
+        player_x: read_be_i16(bytes, base).unwrap_or_default(),
+        player_y: read_be_i16(bytes, base + 2).unwrap_or_default(),
+        angle: bytes.get(base + 4).copied().unwrap_or_default(),
+        enemy_alive: bytes.get(base + 7).copied().unwrap_or_default(),
+    }
+}
+
+fn seed_raycaster_visible_enemy(session: &mut FirmwareSession) {
+    let base = raycaster_state_base(session).unwrap_or_default();
+    // Place player at (1152×4, 384×4) in raycaster tile units and set
+    // enemy_alive=1 at offset+7. This positions an enemy within line-of-sight
+    // so the shoot test can verify that Space removes it.
+    session.overlay_memory_range(base, &(4 * 256i16 + 128).to_be_bytes());
+    session.overlay_memory_range(base + 2, &(256i16 + 128).to_be_bytes());
+    session.overlay_memory_range(base + 4, &[0, 6, 1, 1]);
+    // Byte layout at base+4..=base+7: [angle, unused, unused, enemy_alive]
+    // Writing [0, 6, 1, 1] sets angle=0 and enemy_alive=1.
+}
+
 fn snake_state_base(session: &FirmwareSession) -> Option<u32> {
     session.applet_state_base_for_validation("Snake")
 }
@@ -1422,6 +1526,20 @@ fn lcd_lit_pixels_in_rect(
         .flat_map(|pixel_y| (x..max_x).map(move |pixel_x| (pixel_x, pixel_y)))
         .filter(|(pixel_x, pixel_y)| snapshot.pixels[*pixel_y * snapshot.width + *pixel_x])
         .count()
+}
+
+fn raycaster_wall_top_variation(snapshot: &LcdSnapshot) -> usize {
+    let mut min_top = usize::MAX;
+    let mut max_top = 0usize;
+    for x in (0..160.min(snapshot.width)).step_by(8) {
+        if let Some(top) = (0..48.min(snapshot.height))
+            .find(|y| snapshot.pixels[*y * snapshot.width + x])
+        {
+            min_top = min_top.min(top);
+            max_top = max_top.max(top);
+        }
+    }
+    max_top.saturating_sub(min_top)
 }
 
 fn seed_write_or_die_completed_state(session: &mut FirmwareSession, text: &str) {
@@ -2171,6 +2289,10 @@ fn focus_snake_direct(session: &mut FirmwareSession) -> Result<()> {
     dispatch_snake_message(session, 0x19, 0, "Snake direct focus")
 }
 
+fn focus_raycaster_direct(session: &mut FirmwareSession) -> Result<()> {
+    dispatch_raycaster_message(session, 0x19, 0, "Raycaster direct focus")
+}
+
 fn force_snake_tick(session: &mut FirmwareSession, label: &str) -> Result<()> {
     write_snake_u32(session, 396, 0);
     dispatch_snake_message(session, 0x00, 0, label)
@@ -2298,21 +2420,31 @@ fn send_write_or_die_key_direct(session: &mut FirmwareSession, key: u32) -> Resu
     dispatch_write_or_die_message(session, 0x21, key, "WriteOrDie key dispatch")
 }
 
-fn dispatch_write_or_die_message(
+fn dispatch_applet_message(
     session: &mut FirmwareSession,
+    applet_name: &str,
     message: u32,
     param: u32,
     label: &str,
 ) -> Result<()> {
     const VALIDATION_RETURN_PC: u32 = 0x0042_6752;
     session
-        .start_applet_message_with_param_for_validation("WriteOrDie", message, param)
-        .map_err(|error| anyhow::anyhow!("failed to dispatch WriteOrDie message: {error}"))?;
+        .start_applet_message_with_param_for_validation(applet_name, message, param)
+        .map_err(|error| anyhow::anyhow!("failed to dispatch {applet_name} message: {error}"))?;
     if !session.run_until_pc_or_steps(VALIDATION_RETURN_PC, 5_000_000) {
         bail_if_exception(session, label)?;
         anyhow::bail!("{label}: applet did not return to validation trampoline");
     }
     Ok(())
+}
+
+fn dispatch_write_or_die_message(
+    session: &mut FirmwareSession,
+    message: u32,
+    param: u32,
+    label: &str,
+) -> Result<()> {
+    dispatch_applet_message(session, "WriteOrDie", message, param, label)
 }
 
 fn dispatch_floppy_bird_message(
@@ -2321,15 +2453,7 @@ fn dispatch_floppy_bird_message(
     param: u32,
     label: &str,
 ) -> Result<()> {
-    const VALIDATION_RETURN_PC: u32 = 0x0042_6752;
-    session
-        .start_applet_message_with_param_for_validation("Floppy Bird", message, param)
-        .map_err(|error| anyhow::anyhow!("failed to dispatch Floppy Bird message: {error}"))?;
-    if !session.run_until_pc_or_steps(VALIDATION_RETURN_PC, 5_000_000) {
-        bail_if_exception(session, label)?;
-        anyhow::bail!("{label}: applet did not return to validation trampoline");
-    }
-    Ok(())
+    dispatch_applet_message(session, "Floppy Bird", message, param, label)
 }
 
 fn dispatch_snake_message(
@@ -2338,15 +2462,16 @@ fn dispatch_snake_message(
     param: u32,
     label: &str,
 ) -> Result<()> {
-    const VALIDATION_RETURN_PC: u32 = 0x0042_6752;
-    session
-        .start_applet_message_with_param_for_validation("Snake", message, param)
-        .map_err(|error| anyhow::anyhow!("failed to dispatch Snake message: {error}"))?;
-    if !session.run_until_pc_or_steps(VALIDATION_RETURN_PC, 5_000_000) {
-        bail_if_exception(session, label)?;
-        anyhow::bail!("{label}: applet did not return to validation trampoline");
-    }
-    Ok(())
+    dispatch_applet_message(session, "Snake", message, param, label)
+}
+
+fn dispatch_raycaster_message(
+    session: &mut FirmwareSession,
+    message: u32,
+    param: u32,
+    label: &str,
+) -> Result<()> {
+    dispatch_applet_message(session, "Raycaster", message, param, label)
 }
 
 fn tap_key_now(session: &mut FirmwareSession, code: u8) {

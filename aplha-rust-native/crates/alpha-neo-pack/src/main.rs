@@ -109,6 +109,17 @@ fn manifest_for(applet: AppletName) -> AppletManifest {
             file_count: 0,
             alphaword_write_metadata: true,
         },
+        AppletName::Raycaster => AppletManifest {
+            id: 0xA136,
+            name: "Raycaster",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x3000,
+            extra_memory_size: 0x1000,
+            copyright: "neo-re Betawise Raycaster SmartApplet",
+            file_count: 0,
+            alphaword_write_metadata: true,
+        },
     }
 }
 
@@ -126,6 +137,7 @@ enum AppletName {
     WriteOrDie,
     FloppyBird,
     Snake,
+    Raycaster,
 }
 
 impl AppletName {
@@ -137,6 +149,7 @@ impl AppletName {
             "write-or-die" => Some(Self::WriteOrDie),
             "floppy-bird" => Some(Self::FloppyBird),
             "snake" => Some(Self::Snake),
+            "raycaster" => Some(Self::Raycaster),
             _ => None,
         }
     }
@@ -152,7 +165,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Usage => f.write_str(
-                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die|floppy-bird|snake> <input-elf-or-a> <output.os3kapp>",
+                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die|floppy-bird|snake|raycaster> <input-elf-or-a> <output.os3kapp>",
             ),
             Self::UnknownApplet(name) => write!(f, "unknown applet: {name}"),
         }
@@ -183,6 +196,17 @@ mod tests {
 
         assert_eq!(manifest.id, 0xA135);
         assert_eq!(manifest.name, "Snake");
+        assert_eq!(manifest.file_count, 0);
+        assert!(manifest.alphaword_write_metadata);
+    }
+
+    #[test]
+    fn parses_raycaster_manifest() {
+        let applet = AppletName::parse("raycaster").expect("raycaster applet name");
+        let manifest = manifest_for(applet);
+
+        assert_eq!(manifest.id, 0xA136);
+        assert_eq!(manifest.name, "Raycaster");
         assert_eq!(manifest.file_count, 0);
         assert!(manifest.alphaword_write_metadata);
     }

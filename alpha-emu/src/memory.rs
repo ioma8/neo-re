@@ -7,9 +7,13 @@ use thiserror::Error;
 use crate::firmware::FirmwareRuntime;
 use crate::keyboard::{Keyboard, MatrixKey};
 use crate::lcd::{Lcd, LcdSnapshot};
+use crate::{read_be32, write_be32};
 
 const MEMORY_SIZE: usize = 0x0080_0000;
 const ROM_BASE: usize = 0x0040_0000;
+// 0x0000_0e0a: firmware pointer to the last system package in the ROM image
+// 0x0000_0e8a/0x0000_0e8e: applet storage start/end bounds
+// 0x0000_7dd8: firmware keyboard stack pointer area (configurable stack depth)
 const LOW_MMIO_START: u32 = 0x0000_f000;
 const LOW_MMIO_END: u32 = 0x0001_0000;
 const MMIO_BASE: u32 = 0xffff_0000;
@@ -32,6 +36,7 @@ const EXTRA_APPLET_PATHS: &[&str] = &[
     "../exports/applets/write-or-die.os3kapp",
     "../exports/applets/floppy-bird.os3kapp",
     "../exports/applets/snake.os3kapp",
+    "../exports/applets/raycaster.os3kapp",
 ];
 
 #[derive(Debug, Error)]
@@ -253,6 +258,7 @@ impl EmuMemory {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) fn find_applet_entry(&self, wanted_name: &str) -> Option<u32> {
         self.find_applet_launch_info(wanted_name).map(|info| info.entry)
     }
@@ -292,6 +298,9 @@ impl EmuMemory {
     }
 
     pub(crate) fn service_deferred_timers(&mut self) {
+        // Timer queue at 0x5d3c: 5 records × 14 bytes each.
+        // Record layout: byte 0 = pending flag (1=armed), bytes 2-3 = deadline (u16),
+        //                bytes 6-9 = completion callback address.
         const TIMER_QUEUE_BASE: usize = 0x0000_5d3c;
         const TIMER_QUEUE_RECORD_LEN: usize = 14;
         const TIMER_QUEUE_RECORDS: usize = 5;
@@ -301,7 +310,9 @@ impl EmuMemory {
             if self.bytes.get(record).copied() != Some(1) {
                 continue;
             }
-            let deadline = u16::from_be_bytes([self.bytes[record + 2], self.bytes[record + 3]]);
+            let Some(deadline) = self.peek_word((record + 2) as u32) else {
+                continue;
+            };
             if !timer_due(self.timer_counter as u16, deadline) {
                 continue;
             }
@@ -309,12 +320,10 @@ impl EmuMemory {
             if let Some(state) = self.bytes.get_mut(record) {
                 *state = 0;
             }
-            let completion_ptr = u32::from_be_bytes([
-                self.bytes[record + 6],
-                self.bytes[record + 7],
-                self.bytes[record + 8],
-                self.bytes[record + 9],
-            ]) as usize;
+            let Some(completion_ptr) = self.peek_long((record + 6) as u32) else {
+                continue;
+            };
+            let completion_ptr = completion_ptr as usize;
             if let Some(completion) = self.bytes.get_mut(completion_ptr) {
                 *completion = 0xff;
                 self.record_mmio(format!(
@@ -475,6 +484,7 @@ impl EmuMemory {
         self.timer_counter = self.timer_counter.wrapping_add(ticks);
         let current = self.timer_counter as u16;
         if current < previous {
+            // 0x0000_5d94: timer overflow high-word base (incremented when timer_counter wraps)
             const TIMER_HIGH_BASE: usize = 0x0000_5d94;
             let base = read_be32(&self.bytes, TIMER_HIGH_BASE)
                 .unwrap_or(0)
@@ -495,20 +505,6 @@ fn find_last_system_package(image: &[u8]) -> Option<usize> {
         .enumerate()
         .filter_map(|(offset, window)| (window == [0xc0, 0xff, 0xee, 0xad]).then_some(offset))
         .next_back()
-}
-
-fn write_be32(bytes: &mut [u8], addr: usize, value: u32) {
-    let value = value.to_be_bytes();
-    bytes[addr..addr + 4].copy_from_slice(&value);
-}
-
-fn read_be32(bytes: &[u8], addr: usize) -> Option<u32> {
-    Some(u32::from_be_bytes([
-        *bytes.get(addr)?,
-        *bytes.get(addr + 1)?,
-        *bytes.get(addr + 2)?,
-        *bytes.get(addr + 3)?,
-    ]))
 }
 
 fn applet_name(bytes: &[u8]) -> Option<String> {

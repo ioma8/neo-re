@@ -727,6 +727,7 @@ impl FirmwareSession {
         let info = self.memory.find_applet_launch_info(applet_name)?;
         let a5_adjust_addr = 0x0000_355e + info.slot * 4;
         let a5_adjust = self.memory.peek_long(a5_adjust_addr)?;
+        // +0x300: NEO SDK convention — the applet state structure base is at A5+0x300.
         Some(a5_adjust.saturating_add(0x300))
     }
 

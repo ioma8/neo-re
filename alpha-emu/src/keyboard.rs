@@ -411,7 +411,6 @@ impl Keyboard {
         self.push_phase([None, None, None, None], 4_096, true);
     }
 
-
     pub(crate) fn hold_small_rom_entry_chord(&mut self) {
         self.hold_keys_all_rows(
             &[

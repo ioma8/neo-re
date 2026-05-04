@@ -2,6 +2,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use crate::read_be32;
+
 const DEFAULT_SMALL_ROM_PATH: &str = "../analysis/cab/smallos3kneorom.os3kos";
 
 #[derive(Clone, Debug)]
@@ -113,15 +115,6 @@ fn resolve_firmware_path(path: &Path) -> PathBuf {
     }
 
     path.to_path_buf()
-}
-
-fn read_be32(bytes: &[u8], offset: usize) -> Option<u32> {
-    Some(u32::from_be_bytes([
-        *bytes.get(offset)?,
-        *bytes.get(offset + 1)?,
-        *bytes.get(offset + 2)?,
-        *bytes.get(offset + 3)?,
-    ]))
 }
 
 #[cfg(test)]

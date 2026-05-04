@@ -7,9 +7,12 @@ use crate::firmware::{FirmwareError, FirmwareRuntime};
 use crate::firmware_session::{FirmwareSession, FirmwareSessionError};
 
 const MAGIC: &[u8; 12] = b"NEOSEED1\0\0\0\0";
+// Calibrated for os3kneorom.os3kos: 9M steps to reach the "Y" confirmation prompt,
+// another 9M to reach the "press Enter" prompt after tapping 'Y'.
 const RECOVERY_Y_STEP: usize = 9_000_000;
 const RECOVERY_ENTER_STEP: usize = 18_000_000;
 const RECOVERY_MAX_STEPS_AFTER_ENTER: usize = 250_000_000;
+// PC 0x0043_5a26: post-recovery boot point where low-memory is fully initialized.
 const RECOVERY_READY_PC: u32 = 0x0043_5a26;
 const ENTER_CODE: u8 = 0x69;
 
@@ -187,6 +190,85 @@ impl RecoverySeed {
         }
         fs::write(path, bytes)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RecoverySeed, RecoverySeedError, MAGIC, RANGES};
+
+    #[test]
+    fn round_trip_through_file() {
+        let mut memory = vec![0u8; 0x10000];
+        // Write recognizable patterns at the range locations
+        for (i, byte) in memory[0x0400..0x0800].iter_mut().enumerate() {
+            *byte = (i & 0xff) as u8;
+        }
+        for (i, byte) in memory[0x0e00..0x1b00].iter_mut().enumerate() {
+            *byte = (0xff - (i & 0xff)) as u8;
+        }
+
+        let seed = RecoverySeed::from_memory(&memory);
+        assert_eq!(seed.ranges.len(), RANGES.len());
+
+        let dir = std::env::temp_dir().join("alpha-emu-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("test-recovery.seed");
+        seed.write(&path).unwrap();
+
+        let loaded = RecoverySeed::read(&path).unwrap();
+        assert_eq!(loaded.ranges.len(), seed.ranges.len());
+        for (a, b) in loaded.ranges.iter().zip(seed.ranges.iter()) {
+            assert_eq!(a.0, b.0);
+            assert_eq!(a.1, b.1);
+        }
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn from_memory_captures_correct_ranges() {
+        let memory = vec![0u8; 0x20000];
+        let seed = RecoverySeed::from_memory(&memory);
+
+        assert_eq!(seed.ranges.len(), RANGES.len());
+        for (i, range) in RANGES.iter().enumerate() {
+            assert_eq!(seed.ranges[i].0.start, range.start);
+            assert_eq!(seed.ranges[i].0.len, range.len);
+            assert_eq!(seed.ranges[i].1.len(), range.len as usize);
+        }
+    }
+
+    #[test]
+    fn read_rejects_invalid_magic() {
+        let dir = std::env::temp_dir().join("alpha-emu-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("bad-magic.seed");
+        std::fs::write(&path, b"BOGUS\0\0\0\0\0\0\0").unwrap();
+
+        let result = RecoverySeed::read(&path);
+        assert!(matches!(result, Err(RecoverySeedError::InvalidSeed)));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_rejects_truncated_data() {
+        let dir = std::env::temp_dir().join("alpha-emu-test");
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("truncated.seed");
+        // Valid magic but missing range data
+        let mut data = MAGIC.to_vec();
+        data.extend_from_slice(&1u32.to_be_bytes()); // count=1
+        data.extend_from_slice(&0u32.to_be_bytes()); // start
+        data.extend_from_slice(&100u32.to_be_bytes()); // len
+        // missing 100 bytes of range data
+        std::fs::write(&path, &data).unwrap();
+
+        let result = RecoverySeed::read(&path);
+        assert!(matches!(result, Err(RecoverySeedError::InvalidSeed)));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

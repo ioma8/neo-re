@@ -94,3 +94,80 @@ impl TextScreen {
         self.col
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TextScreen;
+
+    #[test]
+    fn render_returns_none_when_inactive() {
+        let screen = TextScreen::default();
+        assert_eq!(screen.render(), None);
+    }
+
+    #[test]
+    fn render_returns_text_after_draw_char() {
+        let mut screen = TextScreen::default();
+        screen.clear();
+        for b in b"hello" {
+            screen.draw_char(*b);
+        }
+        let output = screen.render().unwrap();
+        assert!(output.contains("hello"));
+    }
+
+    #[test]
+    fn render_trims_trailing_spaces() {
+        let mut screen = TextScreen::default();
+        screen.clear();
+        for b in b"abc" {
+            screen.draw_char(*b);
+        }
+        let output = screen.render().unwrap();
+        assert_eq!(output.lines().next(), Some("abc"));
+    }
+
+    #[test]
+    fn set_cursor_and_set_cursor_mode_activate() {
+        let mut screen = TextScreen::default();
+        // Render is None when inactive
+        assert_eq!(screen.render(), None);
+        assert!(!screen.cursor_visible());
+
+        screen.set_cursor(2, 3, 64);
+        screen.set_cursor_mode(0x0f);
+        assert!(screen.cursor_visible());
+        assert_eq!(screen.cursor_row(), 1);
+        assert_eq!(screen.cursor_col(), 2);
+    }
+
+    #[test]
+    fn draw_char_at_explicit_cursor_position() {
+        let mut screen = TextScreen::default();
+        screen.clear();
+        screen.set_cursor(2, 5, 64);
+        screen.draw_char(b'X');
+        let output = screen.render().unwrap();
+        assert_eq!(output.lines().nth(1).map(|line| line.as_bytes()[4]), Some(b'X'));
+    }
+
+    #[test]
+    fn draw_c_string_stops_at_null() {
+        let mut screen = TextScreen::default();
+        screen.clear();
+        screen.draw_c_string(b"ab\0cd");
+        let output = screen.render().unwrap();
+        assert!(output.contains("ab"));
+        assert!(!output.contains("cd"));
+    }
+
+    #[test]
+    fn sanitizes_non_ascii_bytes_in_render() {
+        let mut screen = TextScreen::default();
+        screen.clear();
+        screen.draw_char(0x00);
+        screen.draw_char(0x7f);
+        let output = screen.render().unwrap();
+        assert_eq!(output.trim(), "");
+    }
+}
