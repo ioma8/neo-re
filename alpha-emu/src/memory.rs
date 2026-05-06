@@ -30,6 +30,7 @@ const PLL_CLK32_CYCLES_PER_EDGE: u64 = CPU_HZ / PLL_CLK32_EDGE_HZ;
 const TIMER_PRESCALER: u64 = 0x20 + 1;
 const TIMER_COUNTER_DENOMINATOR: u64 = CPU_HZ * TIMER_PRESCALER;
 const EXTRA_APPLET_PATHS: &[&str] = &[
+    "../exports/applets/alpha-usb-bw.os3kapp",
     "../exports/applets/alpha-usb-native.os3kapp",
     "../exports/applets/forth-mini.os3kapp",
     "../exports/applets/basic-writer.os3kapp",
@@ -38,6 +39,7 @@ const EXTRA_APPLET_PATHS: &[&str] = &[
     "../exports/applets/snake.os3kapp",
     "../exports/applets/raycaster.os3kapp",
     "../exports/applets/file-fixer.os3kapp",
+    "../exports/applets/alpha-usb-bw.os3kapp",
 ];
 
 #[derive(Debug, Error)]

@@ -131,6 +131,17 @@ fn manifest_for(applet: AppletName) -> AppletManifest {
             file_count: 0,
             alphaword_write_metadata: true,
         },
+        AppletName::AlphaUsbBw => AppletManifest {
+            id: 0xA130,
+            name: "Alpha USB",
+            version: Version::decimal(1, 20),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x100,
+            extra_memory_size: 0x2000,
+            copyright: "neo-re Betawise Alpha USB SmartApplet",
+            file_count: 0,
+            alphaword_write_metadata: true,
+        },
     }
 }
 
@@ -150,6 +161,7 @@ enum AppletName {
     Snake,
     Raycaster,
     FileFixer,
+    AlphaUsbBw,
 }
 
 impl AppletName {
@@ -163,6 +175,7 @@ impl AppletName {
             "snake" => Some(Self::Snake),
             "raycaster" => Some(Self::Raycaster),
             "file-fixer" => Some(Self::FileFixer),
+            "alpha-usb-bw" => Some(Self::AlphaUsbBw),
             _ => None,
         }
     }
@@ -178,7 +191,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Usage => f.write_str(
-                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die|floppy-bird|snake|raycaster|file-fixer> <input-elf-or-a> <output.os3kapp>",
+                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die|floppy-bird|snake|raycaster|file-fixer|alpha-usb-bw> <input-elf-or-a> <output.os3kapp>",
             ),
             Self::UnknownApplet(name) => write!(f, "unknown applet: {name}"),
         }
