@@ -322,3 +322,6 @@ WriteOrDie menu validator can miss the applet when persisted grace differs from 
 WriteOrDie AlphaWord preselection messages can mutate non-target AlphaWord descriptor metadata during export	disproven
 Matrix File keys are globally handled by AlphaWord in the headless firmware path even when WriteOrDie completes export, so matrix validation cannot use descriptor-preservation as evidence about WriteOrDie's direct append helper	proven
 WriteOrDie snapshot/restore and handled-status experiments did not prevent AlphaWord's global matrix File-key descriptor updates in headless validation	disproven
+DOOM renderer camera-offset lookup table introduces forbidden __mulsi3 helper under m68k build	proven
+DOOM DDA reciprocal lookup needs bounds clamping for all ray vector magnitudes	proven
+DOOM wall ray setup can preserve identical rays while replacing per-column multiplies with accumulated plane products	proven
