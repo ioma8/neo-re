@@ -491,6 +491,8 @@ impl Keyboard {
         }
     }
 
+
+
     fn read_script_keys(&mut self) -> Vec<ScriptKey> {
         let Some(phase) = self.script.get(self.phase).copied() else {
             return Vec::new();
