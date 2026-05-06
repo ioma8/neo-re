@@ -329,7 +329,7 @@ fn main() -> Result<()> {
             session
                 .run_applet_message_for_validation("Alpha USB", 0x19, 200_000)
                 .map_err(|error| anyhow::anyhow!("Alpha USB native validation failed: {error}"))?;
-            /* Test that Escape key exits the applet */
+            /* Test that direct MSG_KEY dispatch exits the applet */
             const VALIDATION_RETURN_PC: u32 = 0x0042_6752;
             session
                 .start_applet_message_with_param_for_validation("Alpha USB", 0x21, 0x48)
@@ -341,6 +341,7 @@ fn main() -> Result<()> {
                 }
                 anyhow::bail!("Alpha USB key exit: applet did not return to trampoline");
             }
+
             let snapshot = session.snapshot();
             println!(
                 "alpha_usb_native_validation=ok pc=0x{:08x} steps={} exception={}",
