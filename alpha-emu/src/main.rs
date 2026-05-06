@@ -60,6 +60,7 @@ fn main() -> Result<()> {
     let mut sample_lcd_after = None;
     let mut launch_forth_mini = false;
     let mut launch_calculator = false;
+    let mut launch_file_fixer = false;
     let mut boot_left_shift_tab = false;
     let mut boot_keys = None;
     let mut boot_keys_exact = None;
@@ -95,6 +96,8 @@ fn main() -> Result<()> {
             launch_forth_mini = true;
         } else if arg == "--launch-calculator" {
             launch_calculator = true;
+        } else if arg == "--launch-file-fixer" {
+            launch_file_fixer = true;
         } else if arg == "--verbose" {
             verbose = true;
         } else if arg == "--validate-alpha-usb-native" {
@@ -279,7 +282,7 @@ fn main() -> Result<()> {
             FirmwareSession::boot_with_exact_keys(firmware, &keys, 50_000)?
         } else if let Some(keys) = boot_keys {
             FirmwareSession::boot_with_keys(firmware, &keys, 512)?
-        } else if (launch_forth_mini || launch_calculator) && is_full_system {
+        } else if (launch_forth_mini || launch_calculator || launch_file_fixer) && is_full_system {
             FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?
         } else if boot_left_shift_tab {
             FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?
@@ -303,6 +306,12 @@ fn main() -> Result<()> {
             }
             session.run_realtime_cycles(220_000_000, 25_000_000);
             launch_calculator_for_debugging(&mut session)?;
+        } else if launch_file_fixer {
+            if !is_full_system {
+                anyhow::bail!("--launch-file-fixer requires the full NEO system firmware image");
+            }
+            session.run_realtime_cycles(220_000_000, 25_000_000);
+            launch_file_fixer_internal(&mut session)?;
         }
         if let Some(path) = load_memory {
             let overlay = std::fs::read(&path)?;
@@ -1544,6 +1553,9 @@ fn raycaster_wall_top_variation(snapshot: &LcdSnapshot) -> usize {
 
 fn seed_write_or_die_completed_state(session: &mut FirmwareSession, text: &str) {
     let base = write_or_die_state_base(session).unwrap_or_default();
+    println!("SEED: base=0x{base:08x} text={text:?} caller={:?}", std::panic::Location::caller());
+    use std::io::Write;
+    std::io::stdout().flush().ok();
     let write_u32 = |session: &mut FirmwareSession, offset: u32, value: u32| {
         session.overlay_memory_range(base + offset, &value.to_be_bytes());
     };
@@ -2342,6 +2354,22 @@ fn focus_forth_mini_direct(session: &mut FirmwareSession) -> Result<()> {
         .start_applet_message_for_validation("Forth Mini", 0x19)
         .map_err(|error| anyhow::anyhow!("failed to focus Forth Mini: {error}"))?;
     session.run_steps(20_000);
+    Ok(())
+}
+
+fn launch_file_fixer_internal(session: &mut FirmwareSession) -> Result<()> {
+    session
+        .start_applet_message_for_validation("File Fixer", 0x19)
+        .map_err(|error| anyhow::anyhow!("failed to launch File Fixer: {error}"))?;
+    session.run_realtime_steps(50_000_000);
+    let snapshot = session.snapshot();
+    if let Some(text) = &snapshot.text_screen {
+        println!("LCD text output:\n{text}");
+    }
+    if let Some(exception) = &snapshot.last_exception {
+        anyhow::bail!("File Fixer exception: {exception}");
+    }
+    println!("File Fixer ran successfully!");
     Ok(())
 }
 

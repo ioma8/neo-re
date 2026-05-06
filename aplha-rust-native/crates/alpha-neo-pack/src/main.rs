@@ -120,6 +120,17 @@ fn manifest_for(applet: AppletName) -> AppletManifest {
             file_count: 0,
             alphaword_write_metadata: true,
         },
+        AppletName::FileFixer => AppletManifest {
+            id: 0xA137,
+            name: "File Fixer",
+            version: Version::decimal(0, 1),
+            flags: 0xFF00_00CE,
+            base_memory_size: 0x100,
+            extra_memory_size: 0x100,
+            copyright: "neo-re file MaxSize fixer",
+            file_count: 0,
+            alphaword_write_metadata: true,
+        },
     }
 }
 
@@ -138,6 +149,7 @@ enum AppletName {
     FloppyBird,
     Snake,
     Raycaster,
+    FileFixer,
 }
 
 impl AppletName {
@@ -150,6 +162,7 @@ impl AppletName {
             "floppy-bird" => Some(Self::FloppyBird),
             "snake" => Some(Self::Snake),
             "raycaster" => Some(Self::Raycaster),
+            "file-fixer" => Some(Self::FileFixer),
             _ => None,
         }
     }
@@ -165,7 +178,7 @@ impl std::fmt::Display for CliError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Usage => f.write_str(
-                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die|floppy-bird|snake|raycaster> <input-elf-or-a> <output.os3kapp>",
+                "usage: alpha-neo-pack <alpha-usb|forth-mini|basic-writer|write-or-die|floppy-bird|snake|raycaster|file-fixer> <input-elf-or-a> <output.os3kapp>",
             ),
             Self::UnknownApplet(name) => write!(f, "unknown applet: {name}"),
         }

@@ -19,8 +19,7 @@ enum {
     AW_RECORD_USED_MIRROR_OFFSET = 0x32,
     AW_RECORD_CAPACITY_OFFSET = 0x36,
     AW_RECORD_CAPACITY_MIRROR_OFFSET = 0x3a,
-    AW_SMALL_CAPACITY = 512,
-    AW_LARGE_CAPACITY = 9216
+    AW_MIN_CAPACITY = 256
 };
 
 static const uint8_t FILE_KEY_BY_SLOT[8] = {
@@ -123,7 +122,7 @@ static bool AppendBlock(uint8_t* buffer, uint16_t* offset, uint16_t limit, const
 static bool AppendToRecord(uint8_t* record, uint32_t pointer, uint16_t used, uint16_t capacity, const char* title, const char* text, uint32_t text_len) {
     uint8_t* buffer = (uint8_t*)pointer;
     uint16_t offset = used == capacity ? 0 : used;
-    if(pointer < 0x2000u || pointer >= 0x80000u || (capacity != AW_SMALL_CAPACITY && capacity != AW_LARGE_CAPACITY) || used > capacity) {
+    if(pointer < 0x2000u || pointer >= 0x80000u || capacity < AW_MIN_CAPACITY || used > capacity) {
         return false;
     }
     while(offset < capacity && buffer[offset] != 0 && buffer[offset] != 0xa7) {
@@ -169,8 +168,8 @@ static uint32_t AppendThroughAlphaWordBuffers(uint32_t visible_slot, const char*
         uint32_t capacity = ReadBigLong(&memory[record + AW_RECORD_CAPACITY_OFFSET]);
         uint32_t capacity_mirror = ReadBigLong(&memory[record + AW_RECORD_CAPACITY_MIRROR_OFFSET]);
         if(used != used_mirror) continue;
-        if(capacity != AW_SMALL_CAPACITY && capacity != AW_LARGE_CAPACITY) capacity = capacity_mirror;
-        if(used > capacity || (capacity != AW_SMALL_CAPACITY && capacity != AW_LARGE_CAPACITY)) continue;
+        if(capacity < AW_MIN_CAPACITY) capacity = capacity_mirror;
+        if(used > capacity || capacity < AW_MIN_CAPACITY) continue;
         candidates++;
         best_record = record;
         best_pointer = pointer;
