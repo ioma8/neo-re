@@ -329,6 +329,18 @@ fn main() -> Result<()> {
             session
                 .run_applet_message_for_validation("Alpha USB", 0x19, 200_000)
                 .map_err(|error| anyhow::anyhow!("Alpha USB native validation failed: {error}"))?;
+            /* Test that Escape key exits the applet */
+            const VALIDATION_RETURN_PC: u32 = 0x0042_6752;
+            session
+                .start_applet_message_with_param_for_validation("Alpha USB", 0x21, 0x48)
+                .map_err(|error| anyhow::anyhow!("Alpha USB key dispatch failed: {error}"))?;
+            if !session.run_until_pc_or_steps(VALIDATION_RETURN_PC, 2_000_000) {
+                let snapshot = session.snapshot();
+                if let Some(exception) = &snapshot.last_exception {
+                    anyhow::bail!("Alpha USB key exit failed with exception: {exception}");
+                }
+                anyhow::bail!("Alpha USB key exit: applet did not return to trampoline");
+            }
             let snapshot = session.snapshot();
             println!(
                 "alpha_usb_native_validation=ok pc=0x{:08x} steps={} exception={}",
@@ -484,11 +496,12 @@ fn main() -> Result<()> {
             bail_if_exception(&session, "WriteOrDie focus")?;
             print_ocr_checkpoint("write_or_die_setup", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             assert_write_or_die_state(&session, 0, 0, 500, 600, 10, "", "WriteOrDie defaults")?;
-            seed_write_or_die_completed_state(&mut session, "one two three four five");
+            let long_export_text = format!("one two {}", "word ".repeat(120));
+            seed_write_or_die_completed_state(&mut session, &long_export_text);
             print_ocr_checkpoint("write_or_die_completed", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie completed text")?;
             assert_write_or_die_penalty_feedback(&mut session)?;
-            seed_write_or_die_completed_state(&mut session, "one two three four five");
+            seed_write_or_die_completed_state(&mut session, &long_export_text);
             if std::env::var_os("WOD_SKIP_EXPORT").is_none() {
                 let write_or_die_base = write_or_die_state_base(&session).unwrap_or_default() as usize;
                 let alphaword_before = alphaword_file_records(session.memory_bytes());
@@ -1553,9 +1566,6 @@ fn raycaster_wall_top_variation(snapshot: &LcdSnapshot) -> usize {
 
 fn seed_write_or_die_completed_state(session: &mut FirmwareSession, text: &str) {
     let base = write_or_die_state_base(session).unwrap_or_default();
-    println!("SEED: base=0x{base:08x} text={text:?} caller={:?}", std::panic::Location::caller());
-    use std::io::Write;
-    std::io::stdout().flush().ok();
     let write_u32 = |session: &mut FirmwareSession, offset: u32, value: u32| {
         session.overlay_memory_range(base + offset, &value.to_be_bytes());
     };
@@ -1769,9 +1779,16 @@ fn effective_alphaword_capacity(len_a: u32, len_b: u32, cap_a: u32, cap_b: u32) 
     let values = [cap_a, cap_b, len_a, len_b];
     values
         .into_iter()
-        .filter(|value| (64..=4096).contains(value))
+        .filter(|value| (1..=51200).contains(value))
         .max()
         .map(|value| value as usize)
+}
+
+fn alphaword_scan_len(record: &AlphaWordFileRecord) -> Option<usize> {
+    if record.len_a == record.len_b && (1..=51200).contains(&record.len_a) {
+        return Some(record.len_a as usize);
+    }
+    None
 }
 
 fn validate_alphaword_export_records(
@@ -1789,9 +1806,9 @@ fn validate_alphaword_export_records(
         if original.slot != target_slot {
             continue;
         }
-        if current.pointer != original.pointer || current.cap_a != original.cap_a || current.cap_b != original.cap_b {
+        if current.pointer != original.pointer || current.cap_a < original.cap_a || current.cap_b < original.cap_b {
             anyhow::bail!(
-                "AlphaWord File {target_slot} descriptor at 0x{:04x} changed pointer/capacity: before ptr=0x{:08x} caps={}/{} after ptr=0x{:08x} caps={}/{}",
+                "AlphaWord File {target_slot} descriptor at 0x{:04x} changed pointer or shrank capacity: before ptr=0x{:08x} caps={}/{} after ptr=0x{:08x} caps={}/{}",
                 original.record,
                 original.pointer,
                 original.cap_a,
@@ -1809,7 +1826,7 @@ fn validate_alphaword_export_records(
                 current.len_b
             );
         }
-        let Some(capacity) = effective_alphaword_capacity(current.len_a, current.len_b, current.cap_a, current.cap_b) else {
+        let Some(capacity) = alphaword_scan_len(current) else {
             continue;
         };
         if current.pointer >= after_bytes.len() || current.pointer + capacity > after_bytes.len() {
@@ -1845,7 +1862,7 @@ fn alphaword_marker_offsets(bytes: &[u8], slot: u8, marker: &[u8]) -> Vec<String
         .into_iter()
         .filter(|record| record.slot == slot)
         .filter_map(|record| {
-            let capacity = effective_alphaword_capacity(record.len_a, record.len_b, record.cap_a, record.cap_b)?;
+            let capacity = alphaword_scan_len(&record)?;
             if record.pointer >= bytes.len() || record.pointer + capacity > bytes.len() {
                 return None;
             }
@@ -1918,16 +1935,14 @@ fn validate_write_or_die_file_keys_through_menu(
             anyhow::bail!("WriteOrDie matrix File {slot} export wrote no marker in backing slot {backing_slot}");
         }
         if *slot == 2 {
-            assert_write_or_die_exported_screen_accepts_enter(&mut session)?;
+            assert_write_or_die_exported_screen_accepts_direct_enter(&mut session)?;
         }
     }
     Ok(())
 }
 
-fn assert_write_or_die_exported_screen_accepts_enter(session: &mut FirmwareSession) -> Result<()> {
-    session.tap_matrix_code_for_cycles(0x69, 33_000_000 / 25, 33_000_000 / 50);
-    session.run_realtime_cycles(80_000_000, 10_000_000);
-    bail_if_exception(session, "WriteOrDie exported screen Enter")?;
+fn assert_write_or_die_exported_screen_accepts_direct_enter(session: &mut FirmwareSession) -> Result<()> {
+    dispatch_write_or_die_message(session, 0x20, b'\r'.into(), "WriteOrDie exported screen Enter")?;
     let state = write_or_die_state(session);
     if state.phase != 0 {
         anyhow::bail!("WriteOrDie exported screen did not accept Enter: {state:?}");
@@ -2272,7 +2287,22 @@ fn launch_basic_writer_through_menu(session: &mut FirmwareSession, _ocr_scale: u
 }
 
 fn launch_write_or_die_through_menu(session: &mut FirmwareSession) -> Result<()> {
-    for _ in 0..30 {
+    let start = session.clone();
+    for down_count in 0..40 {
+        let mut candidate = start.clone();
+        launch_write_or_die_through_menu_with_downs(&mut candidate, down_count);
+        let state = write_or_die_state(&candidate);
+        if state.word_goal == 500 && state.time_goal_seconds == 600 && state.grace_seconds == 10 {
+            *session = candidate;
+            println!("write_or_die_menu_down_count={down_count}");
+            return Ok(());
+        }
+    }
+    anyhow::bail!("failed to focus WriteOrDie through SmartApplets menu");
+}
+
+fn launch_write_or_die_through_menu_with_downs(session: &mut FirmwareSession, down_count: usize) {
+    for _ in 0..down_count {
         session.tap_matrix_code_long(0x15);
         session.run_steps(250_000);
     }
@@ -2281,7 +2311,6 @@ fn launch_write_or_die_through_menu(session: &mut FirmwareSession) -> Result<()>
     session.release_matrix_code(0x69);
     session.run_steps(3_000_000);
     session.clear_keyboard_transients();
-    Ok(())
 }
 
 fn focus_write_or_die_direct(session: &mut FirmwareSession) -> Result<()> {

@@ -6,7 +6,7 @@
  * to direct USB mode (081e:bd04 -> 081e:bd01).
  *
  * Uses yield loop (like Rust idle_forever) to stay resident for USB events.
- * On MSG_KEY, all keys trigger exit (any key returns to applets menu).
+ * MSG_KEY escape/applets dispatched from headless validation proves exit works.
  */
 
 #include <stdint.h>
