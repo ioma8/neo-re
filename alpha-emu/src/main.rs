@@ -787,6 +787,18 @@ fn main() -> Result<()> {
             if shot.enemy_alive != 0 {
                 anyhow::bail!("DOOM? Space should remove visible enemy, got {shot:?}");
             }
+            seed_doom_visible_enemy(&mut session);
+            dispatch_doom_message(&mut session, 0x20, b' ' as u32, "DOOM? char space shoot")?;
+            let char_shot = doom_state(&session);
+            if char_shot.enemy_alive != 0 {
+                anyhow::bail!("DOOM? MSG_CHAR Space should remove visible enemy, got {char_shot:?}");
+            }
+            seed_doom_visible_enemy(&mut session);
+            dispatch_doom_message(&mut session, 0x21, 0x79, "DOOM? raw space shoot")?;
+            let raw_space_shot = doom_state(&session);
+            if raw_space_shot.enemy_alive != 0 {
+                anyhow::bail!("DOOM? raw matrix Space should remove visible enemy, got {raw_space_shot:?}");
+            }
             dispatch_doom_message(&mut session, 0x21, 0x23, "DOOM? restart")?;
             let reset = doom_state(&session);
             if reset.player_x != 1152 || reset.player_y != 1664 || reset.angle != 56 {
@@ -1349,6 +1361,7 @@ struct FloppyBirdState {
     bird_y_q8: i16,
     barrier_x: i16,
     gap_row: u8,
+    gap_height: u8,
     score: u8,
     game_over: bool,
 }
@@ -1369,8 +1382,9 @@ fn floppy_bird_state(session: &FirmwareSession) -> FloppyBirdState {
         bird_y_q8: read_be_i16(bytes, base).unwrap_or_default(),
         barrier_x: read_be_i16(bytes, base + 4).unwrap_or_default(),
         gap_row: bytes.get(base + 6).copied().unwrap_or_default(),
-        score: bytes.get(base + 7).copied().unwrap_or_default(),
-        game_over: bytes.get(base + 10).copied().unwrap_or_default() != 0,
+        gap_height: bytes.get(base + 7).copied().unwrap_or_default(),
+        score: bytes.get(base + 8).copied().unwrap_or_default(),
+        game_over: bytes.get(base + 11).copied().unwrap_or_default() != 0,
     }
 }
 

@@ -5,15 +5,19 @@ enum {
     FLAP_Q8 = -96,
     MAX_FALL_Q8 = 120,
     BARRIER_WIDTH = 8,
-    BARRIER_SPEED = 3,
-    GAP_HEIGHT = 20,
+    BARRIER_SPEED_BASE = 3,
+    BARRIER_SPEED_MAX = 8,
+    GAP_HEIGHT_BASE = 20,
+    GAP_HEIGHT_MIN = 14,
     GAP_MARGIN = 6,
     BARRIER_RESET_X = BIRD_COLS - 1
 };
 
 static uint8_t NextGap(BirdGame_t* game) {
     game->seed = (uint8_t)(game->seed * 33u + 17u + game->score);
-    return (uint8_t)(GAP_MARGIN + game->seed % (BIRD_ROWS - GAP_HEIGHT - GAP_MARGIN * 2));
+    uint8_t range = (uint8_t)(BIRD_ROWS - game->gap_height - GAP_MARGIN * 2);
+    uint8_t offset = (uint8_t)((uint16_t)game->seed % (uint16_t)range);
+    return (uint8_t)(GAP_MARGIN + offset);
 }
 
 void bird_game_init(BirdGame_t* game) {
@@ -21,6 +25,7 @@ void bird_game_init(BirdGame_t* game) {
     game->velocity_q8 = 0;
     game->barrier_x = BIRD_COLS - 1;
     game->gap_row = 22;
+    game->gap_height = GAP_HEIGHT_BASE;
     game->score = 0;
     game->seed = 7;
     game->passed_barrier = false;
@@ -45,7 +50,7 @@ uint8_t bird_game_bird_row(const BirdGame_t* game) {
 bool bird_game_barrier_at(const BirdGame_t* game, uint8_t x, uint8_t row) {
     int16_t right = (int16_t)(game->barrier_x + BARRIER_WIDTH - 1);
     if((int16_t)x < game->barrier_x || (int16_t)x > right) return false;
-    return row < game->gap_row || row >= (uint8_t)(game->gap_row + GAP_HEIGHT);
+    return row < game->gap_row || row >= (uint8_t)(game->gap_row + game->gap_height);
 }
 
 void bird_game_tick(BirdGame_t* game) {
@@ -59,13 +64,21 @@ void bird_game_tick(BirdGame_t* game) {
         game->game_over = true;
     }
 
-    game->barrier_x = (int16_t)(game->barrier_x - BARRIER_SPEED);
+    uint8_t speed_inc = game->score / 5u;
+    uint8_t barrier_speed = BARRIER_SPEED_BASE + speed_inc;
+    if(barrier_speed > BARRIER_SPEED_MAX) barrier_speed = BARRIER_SPEED_MAX;
+    game->barrier_x = (int16_t)(game->barrier_x - barrier_speed);
     if(!game->passed_barrier && game->barrier_x + BARRIER_WIDTH - 1 < BIRD_X) {
         game->score++;
         game->passed_barrier = true;
     }
     if(game->barrier_x < -BARRIER_WIDTH) {
         game->barrier_x = BARRIER_RESET_X;
+        uint8_t gap_reduce = game->score / 3u;
+        if(gap_reduce > GAP_HEIGHT_BASE - GAP_HEIGHT_MIN) {
+            gap_reduce = GAP_HEIGHT_BASE - GAP_HEIGHT_MIN;
+        }
+        game->gap_height = (uint8_t)(GAP_HEIGHT_BASE - gap_reduce);
         game->gap_row = NextGap(game);
         game->passed_barrier = false;
     }

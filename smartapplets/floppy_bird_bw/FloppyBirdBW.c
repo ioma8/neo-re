@@ -5,8 +5,7 @@
 
 enum {
     TICK_MS = 55,
-    BARRIER_W = 8,
-    GAP_H = 20
+    BARRIER_W = 8
 };
 
 typedef struct {
@@ -48,27 +47,27 @@ static void DrawBird(uint8_t y, RopCode_e rop) {
     if(rop == ROP_BLACKNESS) FillSafe(BIRD_X + 1, (int16_t)y - 2, 1, 1, ROP_WHITENESS);
 }
 
-static void DrawBarrierAt(int16_t x, uint8_t gap_row, RopCode_e rop) {
+static void DrawBarrierAt(int16_t x, uint8_t gap_row, int16_t gap_h, RopCode_e rop) {
     FillSafe(x, 0, BARRIER_W, gap_row, rop);
     FillSafe(
         x,
-        (int16_t)(gap_row + GAP_H),
+        (int16_t)(gap_row + gap_h),
         BARRIER_W,
-        (int16_t)(BIRD_ROWS - gap_row - GAP_H),
+        (int16_t)(BIRD_ROWS - gap_row - gap_h),
         rop
     );
 }
 
 static void DrawBarrier(const BirdGame_t* game, RopCode_e rop) {
-    DrawBarrierAt(game->barrier_x, game->gap_row, rop);
+    DrawBarrierAt(game->barrier_x, game->gap_row, (int16_t)game->gap_height, rop);
 }
 
-static void ClearBarrierTrailingEdge(int16_t old_x, int16_t new_x, uint8_t gap_row) {
+static void ClearBarrierTrailingEdge(int16_t old_x, int16_t new_x, uint8_t gap_row, int16_t gap_h) {
     int16_t clear_x = (int16_t)(new_x + BARRIER_W);
     int16_t clear_w = (int16_t)(old_x + BARRIER_W - clear_x);
     if(clear_w <= 0) return;
     FillSafe(clear_x, 0, clear_w, gap_row, ROP_WHITENESS);
-    FillSafe(clear_x, (int16_t)(gap_row + GAP_H), clear_w, (int16_t)(BIRD_ROWS - gap_row - GAP_H), ROP_WHITENESS);
+    FillSafe(clear_x, (int16_t)(gap_row + gap_h), clear_w, (int16_t)(BIRD_ROWS - gap_row - gap_h), ROP_WHITENESS);
 }
 
 static void DrawGame(const FloppyState_t* state) {
@@ -88,16 +87,17 @@ static void DrawGameOver(const BirdGame_t* game) {
     bird_draw_text("ESC FOR CLOSE", 158, 50, 1);
 }
 
-static void DrawStep(const BirdGame_t* game, uint8_t old_y, int16_t old_barrier_x, uint8_t old_gap, uint8_t old_score) {
+static void DrawStep(const BirdGame_t* game, uint8_t old_y, int16_t old_barrier_x, uint8_t old_gap, uint8_t old_score, int16_t old_gap_h) {
     if(game->game_over) {
         DrawGameOver(game);
         return;
     }
     DrawBird(old_y, ROP_WHITENESS);
-    if(game->barrier_x > old_barrier_x || old_gap != game->gap_row) {
-        DrawBarrierAt(old_barrier_x, old_gap, ROP_WHITENESS);
+    int16_t gap_h = (int16_t)game->gap_height;
+    if(game->barrier_x > old_barrier_x || old_gap != game->gap_row || gap_h != old_gap_h) {
+        DrawBarrierAt(old_barrier_x, old_gap, old_gap_h, ROP_WHITENESS);
     } else {
-        ClearBarrierTrailingEdge(old_barrier_x, game->barrier_x, old_gap);
+        ClearBarrierTrailingEdge(old_barrier_x, game->barrier_x, old_gap, gap_h);
     }
     DrawBarrier(game, ROP_BLACKNESS);
     DrawBird(bird_game_bird_row(game), ROP_BLACKNESS);
@@ -135,8 +135,9 @@ static void TickIfDue(FloppyState_t* state) {
     int16_t old_barrier_x = state->game.barrier_x;
     uint8_t old_gap = state->game.gap_row;
     uint8_t old_score = state->game.score;
+    int16_t old_gap_h = (int16_t)state->game.gap_height;
     bird_game_tick(&state->game);
-    DrawStep(&state->game, old_y, old_barrier_x, old_gap, old_score);
+    DrawStep(&state->game, old_y, old_barrier_x, old_gap, old_score, old_gap_h);
 }
 
 void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* status) {
