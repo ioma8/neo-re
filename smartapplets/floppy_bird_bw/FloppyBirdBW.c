@@ -82,11 +82,20 @@ static void DrawBarrier(const BirdGame_t* game, RopCode_e rop) {
 }
 
 static void ClearBarrierTrailingEdge(int16_t old_x, int16_t new_x, uint8_t gap_row, int16_t gap_h) {
-    int16_t clear_x = (int16_t)(new_x + BARRIER_W);
-    int16_t clear_w = (int16_t)(old_x + BARRIER_W - clear_x);
+    int16_t cap_w = (int16_t)(BARRIER_W + 2);
+    int16_t cap_h = 3;
+    /* Clear the full barrier width including cap overhang */
+    int16_t clear_x = (int16_t)(new_x - 1);
+    int16_t clear_w = (int16_t)(old_x + cap_w - clear_x);
     if(clear_w <= 0) return;
-    FillSafe(clear_x, 0, clear_w, gap_row, ROP_WHITENESS);
-    FillSafe(clear_x, (int16_t)(gap_row + gap_h), clear_w, (int16_t)(BIRD_ROWS - gap_row - gap_h), ROP_WHITENESS);
+    /* Clear top section (above the cap) */
+    FillSafe(clear_x, 0, clear_w, (int16_t)(gap_row - cap_h), ROP_WHITENESS);
+    /* Clear top cap area */
+    FillSafe(clear_x, (int16_t)(gap_row - cap_h), clear_w, cap_h, ROP_WHITENESS);
+    /* Clear bottom cap area */
+    FillSafe(clear_x, (int16_t)(gap_row + gap_h), clear_w, cap_h, ROP_WHITENESS);
+    /* Clear bottom section (below the cap) */
+    FillSafe(clear_x, (int16_t)(gap_row + gap_h + cap_h), clear_w, (int16_t)(BIRD_ROWS - gap_row - gap_h - cap_h), ROP_WHITENESS);
 }
 
 static void DrawGround(void) {
