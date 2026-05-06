@@ -4,25 +4,22 @@
  * When launched, shows instructions to connect USB.
  * On USB plug (MSG_USB_PLUG), switches the NEO from HID keyboard mode
  * to direct USB mode (081e:bd04 -> 081e:bd01).
+ *
+ * Uses yield loop (like Rust idle_forever) to stay resident for USB events.
+ * On MSG_KEY, all keys trigger exit (any key returns to applets menu).
  */
 
 #include <stdint.h>
 #include "os3k.h"
 #include "applet.h"
 
-/* Message values > 0xFFFF that the Betawise SDK supports */
 #define MSG_USB_PLUG      0x30001u
 #define MSG_USB_MAC_INIT  0x10001u
 #define MSG_USB_PC_INIT   0x20001u
-
-/* Status codes matching the Rust SDK */
 #define STATUS_USB_HANDLED   0x11u
-#define STATUS_OK            0x00u
 
 void _OS3K_ClearScreen(void);
-void _OS3K_SetCursor(uint8_t row, uint8_t col, uint32_t mode);
 
-/* Call the firmware HID-to-direct complete sequence */
 __attribute__((used)) static void complete_hid_to_direct(void) {
     __asm__ volatile (
         ".short 0x42A7\n\t"
@@ -48,7 +45,6 @@ __attribute__((used)) static void complete_hid_to_direct(void) {
     );
 }
 
-/* Mark the direct USB connection as active in firmware state */
 __attribute__((used)) static void mark_direct_connected(void) {
     __asm__ volatile (
         ".short 0x4EB9\n\t"
@@ -76,20 +72,13 @@ __attribute__((used)) void handle_msg(uint32_t message, uint32_t param, uint32_t
         PutStringCentered(2, "Now connect the NEO");
         PutStringCentered(3, "to your computer or");
         PutStringCentered(4, "smartphone via USB.");
-        /* Idle forever, waiting for USB plug events */
-        /* SYS_A25C yields to the OS, which dispatches USB events */
         for (;;) {
             SYS_A25C(0, 0);
         }
     }
 
     if (message == MSG_KEY) {
-        uint32_t key = param & 0xffu;
-        if (key == KEY_ESC || key == KEY_APPLETS) {
-            *status = APPLET_EXIT_STATUS;
-        } else {
-            *status = APPLET_UNHANDLED_STATUS;
-        }
+        *status = APPLET_EXIT_STATUS;
         return;
     }
 
