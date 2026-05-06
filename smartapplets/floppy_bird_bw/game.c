@@ -5,12 +5,12 @@ enum {
     FLAP_Q8 = -96,
     MAX_FALL_Q8 = 120,
     BARRIER_WIDTH = 8,
-    BARRIER_SPEED_BASE = 3,
-    BARRIER_SPEED_MAX = 8,
+    BARRIER_SPEED_BASE = 5,
+    BARRIER_SPEED_MAX = 10,
     GAP_HEIGHT_BASE = 20,
     GAP_HEIGHT_MIN = 14,
     GAP_MARGIN = 6,
-    BARRIER_RESET_X = 130
+    BARRIER_RESET_X = BIRD_COLS - 1
 };
 
 static uint8_t NextGap(BirdGame_t* game) {
