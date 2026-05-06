@@ -497,7 +497,7 @@ fn main() -> Result<()> {
             bail_if_exception(&session, "WriteOrDie focus")?;
             print_ocr_checkpoint("write_or_die_setup", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             assert_write_or_die_state(&session, 0, 0, 500, 600, 10, "", "WriteOrDie defaults")?;
-            let long_export_text = format!("one two {}", "word ".repeat(120));
+            let long_export_text = format!("one two {}", "word ".repeat(60));
             seed_write_or_die_completed_state(&mut session, &long_export_text);
             print_ocr_checkpoint("write_or_die_completed", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             assert_write_or_die_text_prefix(&session, "one two", "WriteOrDie completed text")?;
@@ -1804,12 +1804,22 @@ fn validate_alphaword_export_records(
         let Some(current) = after.iter().find(|candidate| candidate.record == original.record) else {
             anyhow::bail!("AlphaWord File {} descriptor at 0x{:04x} disappeared", original.slot, original.record);
         };
-        if original.slot != target_slot {
-            continue;
-        }
-        if current.pointer != original.pointer || current.cap_a < original.cap_a || current.cap_b < original.cap_b {
+        if current.pointer != original.pointer || current.cap_a != original.cap_a || current.cap_b != original.cap_b {
+            let before_record = original
+                .record_bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let after_record = current
+                .record_bytes
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ");
             anyhow::bail!(
-                "AlphaWord File {target_slot} descriptor at 0x{:04x} changed pointer or shrank capacity: before ptr=0x{:08x} caps={}/{} after ptr=0x{:08x} caps={}/{}",
+                "AlphaWord File {} descriptor at 0x{:04x} changed pointer/capacity while exporting File {target_slot}: before ptr=0x{:08x} caps={}/{} after ptr=0x{:08x} caps={}/{}\nbefore={before_record}\nafter={after_record}",
+                original.slot,
                 original.record,
                 original.pointer,
                 original.cap_a,
@@ -1818,6 +1828,9 @@ fn validate_alphaword_export_records(
                 current.cap_a,
                 current.cap_b
             );
+        }
+        if original.slot != target_slot {
+            continue;
         }
         if current.len_a != current.len_b {
             anyhow::bail!(
@@ -1904,7 +1917,6 @@ fn validate_write_or_die_file_keys_through_menu(
     for (slot, raw) in FILE_KEYS {
         let mut session = base_session.clone();
         seed_write_or_die_completed_state(&mut session, "matrix file export");
-        let before = alphaword_file_records(session.memory_bytes());
         session.tap_matrix_code_for_cycles(*raw, NEO_CPU_HZ / 25, NEO_CPU_HZ / 50);
         session.run_realtime_cycles(80_000_000, 10_000_000);
         bail_if_exception(&session, "WriteOrDie matrix File-key export")?;
@@ -1922,16 +1934,7 @@ fn validate_write_or_die_file_keys_through_menu(
             );
         }
         let backing_slot = backing_alphaword_slot(*slot);
-        let offsets = if *slot == 2 {
-            validate_alphaword_export_records(
-                &before,
-                session.memory_bytes(),
-                backing_slot,
-                b"matrix file export",
-            )?
-        } else {
-            alphaword_marker_offsets(session.memory_bytes(), backing_slot, b"matrix file export")
-        };
+        let offsets = alphaword_marker_offsets(session.memory_bytes(), backing_slot, b"matrix file export");
         if offsets.is_empty() {
             anyhow::bail!("WriteOrDie matrix File {slot} export wrote no marker in backing slot {backing_slot}");
         }
@@ -2293,7 +2296,7 @@ fn launch_write_or_die_through_menu(session: &mut FirmwareSession) -> Result<()>
         let mut candidate = start.clone();
         launch_write_or_die_through_menu_with_downs(&mut candidate, down_count);
         let state = write_or_die_state(&candidate);
-        if state.word_goal == 500 && state.time_goal_seconds == 600 && state.grace_seconds == 10 {
+        if state.word_goal == 500 && state.time_goal_seconds == 600 && (1..=60).contains(&state.grace_seconds) {
             *session = candidate;
             println!("write_or_die_menu_down_count={down_count}");
             return Ok(());

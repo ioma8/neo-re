@@ -175,6 +175,10 @@ static bool IsExitKey(uint32_t key) {
     return key == KEY_APPLETS || key == KEY_ESC || key == 0x46;
 }
 
+static bool IsEnterKey(uint32_t key) {
+    return key == KEY_ENTER || key == 0x69;
+}
+
 static uint32_t FileSlotForKey(uint32_t key) {
     switch(key) {
         case KEY_FILE_1: return 1;
@@ -305,7 +309,7 @@ static void HandleCompletedKey(WodAppState_t* state, uint32_t key, uint32_t* sta
     uint32_t slot = FileSlotForKey(key);
     if(slot != 0) {
         ExportCompletedSession(state, slot);
-    } else if(key == KEY_ENTER) {
+    } else if(IsEnterKey(key)) {
         ResetToSetup(state);
     } else if(IsExitKey(key)) {
         SaveIfDirty(state);
@@ -314,7 +318,7 @@ static void HandleCompletedKey(WodAppState_t* state, uint32_t key, uint32_t* sta
 }
 
 static void HandleExportedKey(WodAppState_t* state, uint32_t key, uint32_t* status) {
-    if(key == KEY_ENTER) {
+    if(IsEnterKey(key)) {
         ResetToSetup(state);
     } else if(IsExitKey(key)) {
         SaveIfDirty(state);

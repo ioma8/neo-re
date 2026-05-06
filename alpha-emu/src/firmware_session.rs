@@ -711,9 +711,6 @@ impl FirmwareSession {
         self.memory
             .set_long(0x0000_3e8a, info.entry)
             .ok_or_else(|| "failed to write current applet callback entry".to_string())?;
-        println!("start_applet: {} msg=0x{message:02x} slot={} a5_adjust=0x{a5_adjust:08x} state_base=0x{:08x}", applet_name, info.slot, a5_adjust + 0x300);
-        use std::io::Write;
-        std::io::stdout().flush().ok();
         Ok(())
     }
 

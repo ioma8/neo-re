@@ -300,3 +300,25 @@ Raycaster enemy was only visual because Space was not wired to gameplay; visible
 Raycaster keyboard movement felt slow because each key changed one angle unit or about 16 px; two-angle turns and doubled movement distance make input responsive while retaining collision checks	proven
 Raycaster redraw was slow because wall faces were rendered as many 1-pixel RasterOp strips; 4-pixel ray columns and strip fills reduce redraw work while preserving the trapezoid projection	proven
 Raycaster walls merged visually because every wall face was solid black; lightweight per-face white highlights make adjacent wall planes easier to distinguish on the monochrome LCD	proven
+WriteOrDie package stale relative to patched AlphaWord helper	disproven
+WriteOrDie direct export failure is due to capacity exact-match checks still present in packaged binary	disproven
+WriteOrDie menu File-key export fails because completed-screen handler only accepts logical File-key codes while headless matrix path presents physical File-key codes	disproven
+WriteOrDie menu File-key export fails because hardcoded menu navigation no longer focuses WriteOrDie before matrix File-key taps	proven
+WriteOrDie menu File-key validator can stay robust by scanning menu down counts and accepting the first launch with expected WriteOrDie defaults	proven
+WriteOrDie real-device append failure was not caused by missing descriptor records; records existed but exposed stale small capacities	disproven
+WriteOrDie real-device append fails after reboot because AlphaWord live descriptors still expose 512-byte capacity and large sessions exceed it	proven
+WriteOrDie export helper must repair matching AlphaWord descriptor capacity mirrors as well as the file table before appending	proven
+WriteOrDie headless validator initially missed successful repaired-capacity exports because it ignored capacities above 4096 and used lengths below 64	proven
+WriteOrDie exported-screen matrix Enter validation is separate from append correctness and direct MSG_CHAR reset remains covered	proven
+WriteOrDie repaired-capacity append must not fill every byte through 51200 because emulator descriptors can be close together and only the used length plus one trailing marker is needed	proven
+WriteOrDie direct Enter validator was mislabeled as matrix coverage; renaming it avoids false coverage claims while preserving reset-path validation	proven
+WriteOrDie corrupts AlphaWord filesystem diagnostics because export helper changes live AlphaWord descriptor capacities to 51200 instead of treating them as owned allocation metadata	proven
+WriteOrDie append can fail without capacity mutation because duplicate AlphaWord descriptors include smaller stale buffers and the helper picked the last match instead of the largest valid buffer	proven
+WriteOrDie should reject AlphaWord descriptors with mismatched capacity mirrors instead of trusting the larger capacity value	proven
+WriteOrDie headless validation must compare pointer/capacity metadata for all AlphaWord descriptors and all File-key exports to catch non-target filesystem corruption	proven
+WriteOrDie preselecting the visible AlphaWord slot while appending to the rotated backing slot can let AlphaWord mutate non-target descriptor metadata during export	disproven
+WriteOrDie can corrupt AlphaWord metadata if a candidate append buffer overlaps the descriptor scan/table region	proven
+WriteOrDie menu validator can miss the applet when persisted grace differs from the default 10 seconds even though word/time goals identify the focused applet	proven
+WriteOrDie AlphaWord preselection messages can mutate non-target AlphaWord descriptor metadata during export	disproven
+Matrix File keys are globally handled by AlphaWord in the headless firmware path even when WriteOrDie completes export, so matrix validation cannot use descriptor-preservation as evidence about WriteOrDie's direct append helper	proven
+WriteOrDie snapshot/restore and handled-status experiments did not prevent AlphaWord's global matrix File-key descriptor updates in headless validation	disproven
