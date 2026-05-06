@@ -42,20 +42,39 @@ static bool TouchesScore(int16_t x, uint8_t gap_row) {
 }
 
 static void DrawBird(uint8_t y, RopCode_e rop) {
-    FillSafe(BIRD_X - 4, (int16_t)y - 3, 8, 7, rop);
-    FillSafe(BIRD_X + 4, (int16_t)y - 1, 3, 3, rop);
-    if(rop == ROP_BLACKNESS) FillSafe(BIRD_X + 1, (int16_t)y - 2, 1, 1, ROP_WHITENESS);
+    int16_t by = (int16_t)y;
+    /* Body - rounder shape */
+    FillSafe(BIRD_X - 4, by - 3, 3, 1, rop);   /* top of body */
+    FillSafe(BIRD_X - 5, by - 2, 7, 5, rop);   /* main body */
+    FillSafe(BIRD_X - 4, by + 3, 5, 1, rop);   /* bottom */
+    /* Wing */
+    FillSafe(BIRD_X - 2, by - 1, 4, 1, rop);   /* wing top */
+    FillSafe(BIRD_X - 1, by, 3, 2, rop);       /* wing body */
+    /* Beak */
+    FillSafe(BIRD_X + 4, by, 2, 2, rop);       /* beak */
+    /* Tail */
+    FillSafe(BIRD_X - 7, by - 1, 2, 3, rop);   /* tail */
+    if(rop == ROP_BLACKNESS) {
+        /* Eye */
+        FillSafe(BIRD_X + 1, by - 2, 2, 2, ROP_WHITENESS);
+        FillSafe(BIRD_X + 1, by - 2, 1, 1, ROP_BLACKNESS);
+    }
 }
 
 static void DrawBarrierAt(int16_t x, uint8_t gap_row, int16_t gap_h, RopCode_e rop) {
+    int16_t cap_h = 3;
+    /* Top barrier */
     FillSafe(x, 0, BARRIER_W, gap_row, rop);
-    FillSafe(
-        x,
-        (int16_t)(gap_row + gap_h),
-        BARRIER_W,
-        (int16_t)(BIRD_ROWS - gap_row - gap_h),
-        rop
-    );
+    /* Top cap (wider piece at the gap opening) */
+    if(rop == ROP_WHITENESS) {
+        FillSafe(x - 1, (int16_t)(gap_row - cap_h), BARRIER_W + 2, cap_h, rop);
+    } else {
+        FillSafe(x - 1, (int16_t)(gap_row - cap_h), BARRIER_W + 2, cap_h, rop);
+    }
+    /* Bottom barrier */
+    FillSafe(x, (int16_t)(gap_row + gap_h), BARRIER_W, (int16_t)(BIRD_ROWS - gap_row - gap_h), rop);
+    /* Bottom cap */
+    FillSafe(x - 1, (int16_t)(gap_row + gap_h), BARRIER_W + 2, cap_h, rop);
 }
 
 static void DrawBarrier(const BirdGame_t* game, RopCode_e rop) {
@@ -70,21 +89,37 @@ static void ClearBarrierTrailingEdge(int16_t old_x, int16_t new_x, uint8_t gap_r
     FillSafe(clear_x, (int16_t)(gap_row + gap_h), clear_w, (int16_t)(BIRD_ROWS - gap_row - gap_h), ROP_WHITENESS);
 }
 
+static void DrawGround(void) {
+    /* Ground line at row 60-63 */
+    FillSafe(0, 60, BIRD_COLS, 1, ROP_BLACKNESS);
+    FillSafe(0, 61, BIRD_COLS, 1, ROP_BLACKNESS);
+    /* Dotted pattern on ground */
+    for(uint16_t gx = 0; gx < (uint16_t)BIRD_COLS; gx = (uint16_t)(gx + 6)) {
+        FillSafe((int16_t)gx, 62, 2, 2, ROP_BLACKNESS);
+    }
+}
+
 static void DrawGame(const FloppyState_t* state) {
     FillSafe(0, 0, BIRD_COLS, BIRD_ROWS, ROP_WHITENESS);
     DrawBarrier(&state->game, ROP_BLACKNESS);
     DrawBird(bird_game_bird_row(&state->game), ROP_BLACKNESS);
     DrawScore(state->game.score);
+    DrawGround();
 }
 
 static void DrawGameOver(const BirdGame_t* game) {
     FillSafe(0, 0, BIRD_COLS, BIRD_ROWS, ROP_WHITENESS);
-    bird_draw_text("GAME OVER", 60, 8, 4);
-    bird_draw_text("SCORE", 94, 34, 2);
-    bird_draw_char((char)('0' + (game->score / 10u) % 10u), 146, 34, 2);
-    bird_draw_char((char)('0' + game->score % 10u), 154, 34, 2);
-    bird_draw_text("R FOR RESTART", 58, 50, 1);
-    bird_draw_text("ESC FOR CLOSE", 158, 50, 1);
+    /* Semi-transparent overlay */
+    FillSafe(40, 5, 184, 54, ROP_SRCINVERT);
+    bird_draw_text("GAME OVER", 72, 12, 4);
+    bird_draw_text("SCORE", 100, 36, 2);
+    uint8_t tens = (uint8_t)((game->score / 10u) % 10u);
+    uint8_t ones = (uint8_t)(game->score % 10u);
+    bird_draw_char((char)('0' + tens), 148, 36, 2);
+    bird_draw_char((char)('0' + ones), 158, 36, 2);
+    bird_draw_text("RESTART: R", 72, 50, 1);
+    bird_draw_text("EXIT: ESC", 164, 50, 1);
+    DrawGround();
 }
 
 static void DrawStep(const BirdGame_t* game, uint8_t old_y, int16_t old_barrier_x, uint8_t old_gap, uint8_t old_score, int16_t old_gap_h) {
@@ -104,6 +139,7 @@ static void DrawStep(const BirdGame_t* game, uint8_t old_y, int16_t old_barrier_
     if(game->score != old_score || TouchesScore(old_barrier_x, old_gap) || TouchesScore(game->barrier_x, game->gap_row)) {
         DrawScore(game->score);
     }
+    DrawGround();
 }
 
 static void Reset(FloppyState_t* state) {
