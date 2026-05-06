@@ -37,7 +37,7 @@ void snake_game_init(SnakeGame_t* game);
 void snake_game_init_seeded(SnakeGame_t* game, uint8_t seed);
 void snake_game_restart(SnakeGame_t* game);
 void snake_game_restart_seeded(SnakeGame_t* game, uint8_t seed);
-void snake_game_turn(SnakeGame_t* game, SnakeDirection_t direction);
+bool snake_game_turn(SnakeGame_t* game, SnakeDirection_t direction);
 void snake_game_toggle_pause(SnakeGame_t* game);
 void snake_game_tick(SnakeGame_t* game);
 bool snake_game_contains(const SnakeGame_t* game, uint8_t x, uint8_t y);

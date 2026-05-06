@@ -65,10 +65,12 @@ void snake_game_restart(SnakeGame_t* game) {
     snake_game_restart_seeded(game, 31);
 }
 
-void snake_game_turn(SnakeGame_t* game, SnakeDirection_t direction) {
+bool snake_game_turn(SnakeGame_t* game, SnakeDirection_t direction) {
     if(!Opposite(game->direction, direction)) {
         game->pending_direction = direction;
+        return true;
     }
+    return false;
 }
 
 void snake_game_toggle_pause(SnakeGame_t* game) {

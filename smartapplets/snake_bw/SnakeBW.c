@@ -4,8 +4,8 @@
 #include "os3k.h"
 
 enum {
-    TICK_BASE_MS = 145,
-    TICK_MIN_MS = 75
+    TICK_BASE_MS = 90,
+    TICK_MIN_MS = 50
 };
 
 typedef struct {
@@ -53,12 +53,28 @@ static void TickIfDue(SnakeState_t* state) {
     snake_draw_step(&state->game, old_tail_x, old_tail_y, old_food_x, old_food_y, old_length);
 }
 
+static void HandleDirection(SnakeState_t* state, SnakeDirection_t dir) {
+    if(state->game.direction == dir) return; /* same direction: ignore */
+    if(snake_game_turn(&state->game, dir)) {
+        /* Direction changed: advance one tick immediately for responsiveness */
+        state->last_tick_ms = GetUptimeMilliseconds();
+        uint8_t old_tail = (uint8_t)(state->game.length - 1);
+        uint8_t old_tail_x = state->game.body_x[old_tail];
+        uint8_t old_tail_y = state->game.body_y[old_tail];
+        uint8_t old_food_x = state->game.food_x;
+        uint8_t old_food_y = state->game.food_y;
+        uint8_t old_length = state->game.length;
+        snake_game_tick(&state->game);
+        snake_draw_step(&state->game, old_tail_x, old_tail_y, old_food_x, old_food_y, old_length);
+    }
+}
+
 static void HandleKey(SnakeState_t* state, uint32_t key, uint32_t* status) {
     switch(key & 0xffu) {
-        case KEY_UP: snake_game_turn(&state->game, SNAKE_UP); return;
-        case KEY_RIGHT: snake_game_turn(&state->game, SNAKE_RIGHT); return;
-        case KEY_DOWN: snake_game_turn(&state->game, SNAKE_DOWN); return;
-        case KEY_LEFT: snake_game_turn(&state->game, SNAKE_LEFT); return;
+        case KEY_UP: HandleDirection(state, SNAKE_UP); return;
+        case KEY_RIGHT: HandleDirection(state, SNAKE_RIGHT); return;
+        case KEY_DOWN: HandleDirection(state, SNAKE_DOWN); return;
+        case KEY_LEFT: HandleDirection(state, SNAKE_LEFT); return;
         case KEY_P:
             snake_game_toggle_pause(&state->game);
             break;
@@ -77,6 +93,14 @@ static void HandleKey(SnakeState_t* state, uint32_t key, uint32_t* status) {
 
 static void HandleChar(SnakeState_t* state, uint32_t param) {
     uint8_t byte = (uint8_t)(param & 0xffu);
+    /* Arrow keys sometimes arrive as MSG_CHAR on some firmware paths */
+    switch(byte) {
+        case 'w': case 'W': HandleDirection(state, SNAKE_UP); return;
+        case 'd': case 'D': HandleDirection(state, SNAKE_RIGHT); return;
+        case 's': case 'S': HandleDirection(state, SNAKE_DOWN); return;
+        case 'a': case 'A': HandleDirection(state, SNAKE_LEFT); return;
+        default: break;
+    }
     if(byte == 'p' || byte == 'P') snake_game_toggle_pause(&state->game);
     else if(byte == 'r' || byte == 'R') {
         snake_game_restart_seeded(&state->game, NewSeed());
@@ -85,6 +109,8 @@ static void HandleChar(SnakeState_t* state, uint32_t param) {
     else return;
     snake_draw_full(&state->game);
 }
+
+
 
 void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* status) {
     SnakeState_t* state = State();
