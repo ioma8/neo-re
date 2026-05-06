@@ -20,6 +20,7 @@
 #define STATUS_OK            0x00u
 
 void _OS3K_ClearScreen(void);
+void _OS3K_SetCursor(uint8_t row, uint8_t col, uint32_t mode);
 
 /* Call the firmware HID-to-direct complete sequence */
 __attribute__((used)) static void complete_hid_to_direct(void) {
@@ -80,6 +81,16 @@ __attribute__((used)) void handle_msg(uint32_t message, uint32_t param, uint32_t
         for (;;) {
             SYS_A25C(0, 0);
         }
+    }
+
+    if (message == MSG_KEY) {
+        uint32_t key = param & 0xffu;
+        if (key == KEY_ESC || key == KEY_APPLETS) {
+            *status = APPLET_EXIT_STATUS;
+        } else {
+            *status = APPLET_UNHANDLED_STATUS;
+        }
+        return;
     }
 
     if (message == MSG_USB_PLUG) {
