@@ -77,7 +77,7 @@ static void DrawSidebar(const SnakeGame_t* game) {
     DrawText("SNAKE", 210, 4, 2);
     DrawText("P PAUSE", 204, 22, 1);
     DrawText("R RESET", 204, 32, 1);
-    DrawText("LEN", 204, 48, 1);
+    DrawText("SCORE", 200, 48, 1);
     DrawNumber(game->length, 220, 48);
 }
 
