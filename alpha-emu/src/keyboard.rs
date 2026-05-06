@@ -491,6 +491,24 @@ impl Keyboard {
         }
     }
 
+    pub(crate) fn service_timed_script_keys(&mut self) {
+        if self.timed_script.is_empty() {
+            return;
+        }
+        let active: Vec<MatrixKey> = self.read_timed_script_keys().iter().map(|sk| sk.key).collect();
+        let all_timed: Vec<MatrixKey> = self
+            .timed_script
+            .iter()
+            .flat_map(|phase| phase.key_codes.iter().filter_map(|kc| *kc))
+            .collect();
+        for key in &active {
+            if !self.held.contains(key) {
+                self.held.push(*key);
+            }
+        }
+        self.held.retain(|key| !all_timed.contains(key) || active.contains(key));
+    }
+
 
 
     fn read_script_keys(&mut self) -> Vec<ScriptKey> {

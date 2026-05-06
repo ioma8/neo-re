@@ -336,6 +336,7 @@ impl EmuMemory {
 
     pub(crate) fn advance_cpu_cycles(&mut self, cycles: usize) {
         self.keyboard.advance_cycles(cycles as u64);
+        self.keyboard.service_timed_script_keys();
         self.pll_clk32_cycles = self.pll_clk32_cycles.saturating_add(cycles as u64);
         while self.pll_clk32_cycles >= PLL_CLK32_CYCLES_PER_EDGE {
             self.pll_clk32_cycles -= PLL_CLK32_CYCLES_PER_EDGE;
