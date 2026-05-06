@@ -10,7 +10,7 @@ enum {
     GAP_HEIGHT_BASE = 20,
     GAP_HEIGHT_MIN = 14,
     GAP_MARGIN = 6,
-    BARRIER_RESET_X = BIRD_COLS - 1
+    BARRIER_RESET_X = 130
 };
 
 static uint8_t NextGap(BirdGame_t* game) {
