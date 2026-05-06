@@ -325,6 +325,7 @@ pub(crate) struct Keyboard {
     phase: usize,
     reads_in_phase: usize,
     selected_rows: Option<u16>,
+    prior_timed_active: Vec<MatrixKey>,
 }
 
 impl Keyboard {
@@ -333,6 +334,8 @@ impl Keyboard {
         self.timed_script.clear();
         self.phase = 0;
         self.reads_in_phase = 0;
+        self.prior_timed_active.clear();
+        self.held.clear();
     }
 
     pub(crate) fn press(&mut self, key: MatrixKey) {
@@ -496,17 +499,15 @@ impl Keyboard {
             return;
         }
         let active: Vec<MatrixKey> = self.read_timed_script_keys().iter().map(|sk| sk.key).collect();
-        let all_timed: Vec<MatrixKey> = self
-            .timed_script
-            .iter()
-            .flat_map(|phase| phase.key_codes.iter().filter_map(|kc| *kc))
-            .collect();
+        /* Remove any previously-held timed keys that are no longer active */
+        self.held.retain(|key| !self.prior_timed_active.contains(key) || active.contains(key));
+        /* Add newly active timed keys */
         for key in &active {
             if !self.held.contains(key) {
                 self.held.push(*key);
             }
         }
-        self.held.retain(|key| !all_timed.contains(key) || active.contains(key));
+        self.prior_timed_active = active;
     }
 
 
