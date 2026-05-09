@@ -26,8 +26,8 @@ cargo run --manifest-path alpha-emu/Cargo.toml -- --headless --validate-write-or
 
 - `WriteOrDie` owns exactly one SmartApplet file.
 - Runtime file handle `1` works for applet-owned snapshot persistence.
-- Persist the whole `WodAppState_t` snapshot through the Betawise
-  `file_store` helper.
+- Persist the whole `WodAppState_t` snapshot through the SDK
+  `bw_store` helper.
 - Completed, exported, and setup phases are stored in the same snapshot.
 - Starting a new challenge clears the draft in memory before entering the
   running phase.
@@ -37,10 +37,11 @@ cargo run --manifest-path alpha-emu/Cargo.toml -- --headless --validate-write-or
 - Challenge countdown must be based on firmware uptime, not keypress count.
 - Reading low-level timer registers directly produced real-device jumps.
 - The applet should compute elapsed time as `now_ms - start_ms`, using
-  `GetUptimeMilliseconds()`.
+  `bw_now_ms()`.
 - Keypresses reset pressure timing, but must not advance countdown time.
 - The validated countdown, elapsed-time, penalty-interval, and pressure-stage
-  helpers now live in `smartapplets/betawise-sdk/challenge_timer.h`.
+  helpers now live behind `smartapplets/betawise-sdk/bw.h` in
+  `bw_challenge.h`.
 - Punishment timing follows the requested WriteOrDie loop:
   - safe idle phase lasts the configured grace period, default `10` seconds and
     configurable from `0` to `30` seconds
@@ -81,8 +82,8 @@ void _OS3K_SetCursor(uint8_t row, uint8_t col, CursorMode_e cursor_mode);
   stems for a cursor.
 - Cache rendered challenge rows and skip unchanged row writes. This reduces
   keypress flicker because stable rows are not redrawn for every typed byte.
-- The validated fixed-width row helpers now live in
-  `smartapplets/betawise-sdk/screen_lines.h`.
+- The validated fixed-width row helpers now live behind
+  `smartapplets/betawise-sdk/bw.h` in `bw_screen.h`.
 
 ## Text Layout Findings
 
@@ -101,8 +102,8 @@ void _OS3K_SetCursor(uint8_t row, uint8_t col, CursorMode_e cursor_mode);
   selected AlphaWord file. The applet can report success while no file buffer
   changes.
 - The working route is descriptor-based, not fixed-address based. The reusable
-  helper is `smartapplets/betawise-sdk/alphaword_export.h`:
-  `alphaword_append_text_block(slot, title, text, text_len)`.
+  helper is exposed by `smartapplets/betawise-sdk/bw.h`:
+  `bw_alphaword_append_text_block(slot, title, text, text_len)`.
 - The helper preselects AlphaWord and the requested visible File key, maps the
   visible slot to AlphaWord's backing slot rotation, scans low-RAM AlphaWord
   file descriptors for the last initialized matching `File N` record, reads

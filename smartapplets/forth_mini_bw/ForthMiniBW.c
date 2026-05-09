@@ -1,11 +1,12 @@
 #include "app_state.h"
 #include "app_storage.h"
+#include "../betawise-sdk/bw.h"
 #include "src/forth_util.h"
 
-APPLET_ENTRY(alpha_neo_process_message);
+BW_APP_ENTRY(alpha_neo_process_message);
 
 static void accept_printable(AppState* state, uint32_t param) {
-    char byte = (char)(param & 0xff);
+    char byte = (char)bw_key_id(param);
     if(byte < ' ' || byte > '~' || state->input_len >= INPUT_CAPACITY) return;
     state->input[state->input_len++] = byte;
     state->input[state->input_len] = '\0';
@@ -49,7 +50,7 @@ static void commit_line(AppState* state) {
 }
 
 static void handle_char(AppState* state, uint32_t param) {
-    char byte = (char)(param & 0xff);
+    char byte = (char)bw_key_id(param);
     ensure_storage_loaded(state);
     if(byte == '\r' || byte == '\n') commit_line(state);
     else if(byte == '\b' || byte == 0x7f) backspace(state);
@@ -57,9 +58,9 @@ static void handle_char(AppState* state, uint32_t param) {
 }
 
 static void handle_key(AppState* state, uint32_t param, uint32_t* status) {
-    switch(param & 0xff) {
+    switch(bw_key_id(param)) {
         case KEY_APPLETS:
-            *status = APPLET_EXIT_STATUS;
+            *status = BW_STATUS_EXIT;
             break;
         case KEY_BACKSPACE:
             backspace(state);
@@ -71,8 +72,9 @@ static void handle_key(AppState* state, uint32_t param, uint32_t* status) {
 
 void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* status) {
     AppState* state = State();
+    uint32_t base_message = bw_message_id(message);
     *status = 0;
-    switch(message) {
+    switch(base_message) {
         case MSG_SETFOCUS:
             app_reset(state);
             app_draw(state);
@@ -86,7 +88,7 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
             if(*status == 0) app_draw(state);
             break;
         default:
-            *status = APPLET_UNHANDLED_STATUS;
+            *status = BW_STATUS_UNHANDLED;
             break;
     }
 }

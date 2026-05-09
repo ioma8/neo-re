@@ -1,30 +1,29 @@
 #include "ui.h"
 
-#include "../betawise-sdk/os3k.h"
-#include "../betawise-sdk/screen_lines.h"
+#include "../betawise-sdk/bw.h"
 #include "editor.h"
 
 void _OS3K_ClearScreen(void);
 
 static void PutLine(uint8_t row, const char* text) {
-    applet_screen_put_line(row, text, WOD_SCREEN_COLS);
+    bw_screen_put_line(row, text, WOD_SCREEN_COLS);
 }
 
 static void PutCachedLine(uint8_t row, const char* text, char* cache) {
-    applet_screen_put_cached_line(row, text, cache, WOD_SCREEN_COLS);
+    bw_screen_put_cached_line(row, text, cache, WOD_SCREEN_COLS);
 }
 
 static void InvalidateChallengeCache(WodAppState_t* state) {
-    applet_screen_clear_reverse_cache(&state->display_flash_on);
-    applet_screen_invalidate_cache(state->display_status_line);
+    bw_screen_clear_reverse_cache(&state->display_flash_on);
+    bw_screen_invalidate_cache(state->display_status_line);
     for(uint8_t row = 0; row < WOD_TEXT_ROWS; row++) {
-        applet_screen_invalidate_cache(state->display_text_lines[row]);
+        bw_screen_invalidate_cache(state->display_text_lines[row]);
     }
 }
 
 static void PutSelectedLine(uint8_t row, uint32_t selected, const char* text) {
     char line[WOD_SCREEN_COLS + 1];
-    applet_screen_clear_line(line, WOD_SCREEN_COLS);
+    bw_screen_clear_line(line, WOD_SCREEN_COLS);
     line[0] = selected ? '>' : ' ';
     for(uint8_t i = 0; i + 2 < WOD_SCREEN_COLS && text[i] != '\0'; i++) {
         line[i + 2] = text[i];
@@ -105,7 +104,7 @@ void ui_update_challenge_text(WodAppState_t* state) {
 }
 
 void ui_set_challenge_text_highlight(WodAppState_t* state, bool enabled) {
-    applet_screen_set_reverse_cached(&state->display_flash_on, enabled);
+    bw_screen_set_reverse_cached(&state->display_flash_on, enabled);
 }
 
 void ui_draw_completed(WodAppState_t* state) {

@@ -1,6 +1,6 @@
 #include "draw.h"
 
-#include "os3k.h"
+#include "../betawise-sdk/bw.h"
 
 enum {
     CELL_W = 4,
@@ -11,7 +11,7 @@ enum {
 };
 
 static void Fill(uint16_t x, uint16_t y, uint16_t w, uint16_t h, RopCode_e rop) {
-    RasterOp(x, y, w, h, 0, rop);
+    bw_fill_rect(x, y, w, h, rop);
 }
 
 static void DrawCell(uint8_t x, uint8_t y, RopCode_e rop) {
@@ -26,50 +26,12 @@ static void ClearCell(uint8_t x, uint8_t y) {
     DrawCell(x, y, ROP_WHITENESS);
 }
 
-static uint8_t Glyph(char c, uint8_t row) {
-    static const uint8_t digits[10][5] = {
-        {7, 5, 5, 5, 7}, {2, 6, 2, 2, 7}, {7, 1, 7, 4, 7}, {7, 1, 7, 1, 7}, {5, 5, 7, 1, 1},
-        {7, 4, 7, 1, 7}, {7, 4, 7, 5, 7}, {7, 1, 1, 1, 1}, {7, 5, 7, 5, 7}, {7, 5, 7, 1, 7}
-    };
-    if(c >= '0' && c <= '9') return digits[(uint8_t)(c - '0')][row];
-    switch(c) {
-        case 'A': { static const uint8_t v[5] = {2, 5, 7, 5, 5}; return v[row]; }
-        case 'E': { static const uint8_t v[5] = {7, 4, 6, 4, 7}; return v[row]; }
-        case 'K': { static const uint8_t v[5] = {5, 6, 4, 6, 5}; return v[row]; }
-        case 'L': { static const uint8_t v[5] = {4, 4, 4, 4, 7}; return v[row]; }
-        case 'N': { static const uint8_t v[5] = {5, 7, 7, 7, 5}; return v[row]; }
-        case 'P': { static const uint8_t v[5] = {6, 5, 6, 4, 4}; return v[row]; }
-        case 'R': { static const uint8_t v[5] = {6, 5, 6, 5, 5}; return v[row]; }
-        case 'S': { static const uint8_t v[5] = {7, 4, 7, 1, 7}; return v[row]; }
-        case 'T': { static const uint8_t v[5] = {7, 2, 2, 2, 2}; return v[row]; }
-        case 'U': { static const uint8_t v[5] = {5, 5, 5, 5, 7}; return v[row]; }
-        default: return 0;
-    }
-}
-
-static void DrawChar(char c, uint16_t x, uint16_t y, uint8_t scale) {
-    for(uint8_t row = 0; row < 5; row++) {
-        uint8_t bits = Glyph(c, row);
-        for(uint8_t col = 0; col < 3; col++) {
-            if((bits & (1u << (2u - col))) != 0) {
-                Fill((uint16_t)(x + col * scale), (uint16_t)(y + row * scale), scale, scale, ROP_BLACKNESS);
-            }
-        }
-    }
-}
-
 static void DrawText(const char* text, uint16_t x, uint16_t y, uint8_t scale) {
-    while(*text != '\0') {
-        DrawChar(*text, x, y, scale);
-        x = (uint16_t)(x + 4u * scale);
-        text++;
-    }
+    bw_draw_text_3x5(text, x, y, scale);
 }
 
 static void DrawNumber(uint8_t value, uint16_t x, uint16_t y) {
-    DrawChar((char)('0' + (value / 100u) % 10u), x, y, 1);
-    DrawChar((char)('0' + (value / 10u) % 10u), (uint16_t)(x + 4), y, 1);
-    DrawChar((char)('0' + value % 10u), (uint16_t)(x + 8), y, 1);
+    bw_draw_u8_3digits(value, x, y, 1);
 }
 
 static void DrawSidebar(const SnakeGame_t* game) {
@@ -77,8 +39,8 @@ static void DrawSidebar(const SnakeGame_t* game) {
     DrawText("SNAKE", 210, 4, 2);
     DrawText("P PAUSE", 204, 22, 1);
     DrawText("R RESET", 204, 32, 1);
-    DrawText("SCORE", 200, 48, 1);
-    DrawNumber(game->length, 220, 48);
+    DrawText("SCORE", 204, 48, 1);
+    DrawNumber(game->score, 228, 48);
 }
 
 static void DrawPauseMark(void) {

@@ -12,19 +12,18 @@ reliable applet path.
 ## Current Status
 
 - Build with `./scripts/build-smartapplet.sh basic_writer_bw --no-validate`.
-- Use the Betawise syscall stubs and headers, but replace the Betawise wrapper
-  with the repo-owned no-global runtime.
+- Include `smartapplets/betawise-sdk/bw.h` for the repo-owned no-global applet
+  runtime and normal SDK helpers.
 - Keep applet state at `A5 + 0x300`.
 - Package with local `alpha-neo-pack`.
-- Use `smartapplets/betawise-sdk/file_store.h` for applet-owned retrievable
-  file snapshots.
-- Use `smartapplets/betawise-sdk/screen_lines.h` for stable four-row rendering.
+- Use `bw_store_load_snapshot(...)` / `bw_store_save_snapshot(...)` for
+  applet-owned retrievable file snapshots.
+- Use `bw_screen_*` helpers for stable fixed-width row rendering.
 - Basic Writer owns eight retrievable SmartApplet files and switches them from
   physical File keys.
-- The current full Basic Writer validator has a known menu-selection caveat
-  when multiple repo applets are installed; build validation is reliable, and
-  shared SDK behavior is covered through the Forth Mini and WriteOrDie
-  validators until that path is tightened.
+- The current full Basic Writer validator dynamically locates the applet in the
+  SmartApplets menu before running state, file-switching, and persistence
+  checks.
 
 ## Historical Rust Prototype Findings
 

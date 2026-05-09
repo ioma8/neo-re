@@ -10,8 +10,8 @@
  */
 
 #include <stdint.h>
+#include "bw.h"
 #include "os3k.h"
-#include "applet.h"
 
 #define MSG_USB_PLUG      0x30001u
 #define MSG_USB_MAC_INIT  0x10001u
@@ -57,13 +57,13 @@ __attribute__((used)) static void mark_direct_connected(void) {
 
 void handle_msg(uint32_t message, uint32_t param, uint32_t* status);
 
-APPLET_ENTRY(handle_msg);
+BW_APP_ENTRY(handle_msg);
 
 __attribute__((used)) void handle_msg(uint32_t message, uint32_t param, uint32_t* status) {
     (void)param;
 
     if (message == MSG_INIT) {
-        *status = APPLET_UNHANDLED_STATUS;
+        *status = BW_STATUS_UNHANDLED;
         return;
     }
 
@@ -77,8 +77,8 @@ __attribute__((used)) void handle_msg(uint32_t message, uint32_t param, uint32_t
         }
     }
 
-    if (message == MSG_KEY) {
-        *status = APPLET_EXIT_STATUS;
+    if (bw_message_id(message) == MSG_KEY) {
+        *status = BW_STATUS_EXIT;
         return;
     }
 
@@ -94,5 +94,5 @@ __attribute__((used)) void handle_msg(uint32_t message, uint32_t param, uint32_t
         return;
     }
 
-    *status = APPLET_UNHANDLED_STATUS;
+    *status = BW_STATUS_UNHANDLED;
 }

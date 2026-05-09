@@ -325,3 +325,34 @@ WriteOrDie snapshot/restore and handled-status experiments did not prevent Alpha
 DOOM renderer camera-offset lookup table introduces forbidden __mulsi3 helper under m68k build	proven
 DOOM DDA reciprocal lookup needs bounds clamping for all ray vector magnitudes	proven
 DOOM wall ray setup can preserve identical rays while replacing per-column multiplies with accumulated plane products	proven
+DOOM shooting fails on live/text space paths because the applet handles only MSG_KEY KEY_SPACE and ignores MSG_CHAR space	proven
+DOOM shooting also fails on GUI/raw matrix space because MSG_KEY 0x79 is not accepted as Space	proven
+Floppy Bird forced tick does not fire because validator writes last_tick_ms at offset 20 while the current C state layout places it at offset 18	proven
+Floppy Bird dual-barrier validator reaches second-barrier scoring; the following crash checkpoint must expect score 2 instead of the old single-score value	proven
+Floppy Bird half-width moving barriers are caused by optimized clear erasing the full old/new pole span while leading-edge redraw restores only the new left strip	proven
+Floppy Bird space key speed burst is caused by Flap leaving last_tick_ms overdue so the following idle consumes an immediate world tick	proven
+Snake arrow key speed burst is caused by HandleDirection calling snake_game_tick immediately on accepted turns	proven
+Snake and Floppy Bird held arbitrary keys perturb game speed because ignored MSG_KEY/MSG_CHAR inputs return handled status instead of APPLET_UNHANDLED_STATUS	proven
+Snake and Floppy Bird held-key acceleration also requires suppressing the first idle callback after any key/char message so input callback cadence cannot drive simulation ticks	proven
+Snake and Floppy Bird held arbitrary keys still accelerated because ignored and repeated key callbacks did not refresh last_tick_ms, leaving the next idle overdue	proven
+Snake and Floppy Bird held-key repeat may arrive as MSG_MOD_SYNTHETIC|MSG_KEY or MSG_MOD_SYNTHETIC|MSG_CHAR, bypassing exact message switches and leaving tick timing stale	proven
+Snake and Floppy Bird held-key repeat may arrive through other private non-idle messages, so unknown non-idle events must also refresh the idle baseline	proven
+Snake and Floppy Bird gameplay speed is correct only if input callbacks never reset, suppress, or consume simulation time; GetUptimeMilliseconds deadlines must be authoritative	proven
+SYS_A0E8 arms a five-slot firmware timer record with delay clamp, completion-byte pointer, optional callback pointer, and a returned record token	proven
+SYS_A0EC clears a SYS_A0E8 timer by validating the low-byte slot and full returned token against the firmware timer record	proven
+SYS_A0E8 callbacks are safe for direct game rendering from a SmartApplet callback context	needs further investigation
+DOOM movement timing should use GetUptimeMilliseconds deadlines instead of mutating movement/turn state directly in MSG_KEY callbacks	proven
+doom_bw timer migration build failure is caused by a leftover next_step_ms assignment in KEY_R reset path	proven
+Basic Writer validator state mismatch is caused by fixed SmartApplets menu down-count launching Alpha USB after package order changes	proven
+Forth Mini validator has the same stale menu down-count targeting risk as Basic Writer	proven
+Basic Writer direct validator focus address error is caused by stepping past the validation return STOP trampoline after MSG_SETFOCUS returns	proven
+Basic Writer direct char validation reads stale or wrong state because state helpers use current CPU A5 instead of Basic Writer launch A5	disproven
+Basic Writer validator should keep firmware matrix dispatch and replace fixed menu down-count with a state-checked menu search	proven
+Forth Mini validator should keep firmware matrix dispatch and replace fixed menu down-count with a slot-checked menu search	proven
+Forth Mini menu search timeout is caused by checking snapshot debug_words instead of live current-applet slot memory	proven
+Forth Mini menu search needs applet state evidence because current-slot memory does not identify menu-launched applet reliably	proven
+Forth Mini validator hangs before focus because it boots normally instead of entering the SmartApplets menu with the full-system boot chord	disproven
+Forth Mini menu launch should be detected by a cloned behavioral Forth expression probe instead of current-slot or private state offsets	proven
+Forth Mini launch probe missed the known-good menu target because menu-launched state lives at live A5+0x300, not the package launch-info A5 table	proven
+Forth Mini menu search kept launching AlphaQuiz because 250000 steps between Down taps is too short for this menu path	proven
+Forth Mini launch detection is reliable when the cloned probe searches all memory for the unique evaluated transcript instead of a guessed state window	proven

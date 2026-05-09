@@ -105,7 +105,7 @@ On completion:
 
 The applet owns exactly one file.
 
-Use runtime file handle `1` through the validated Betawise-side `file_store` snapshot helper. The persisted snapshot stores:
+Use runtime file handle `1` through the validated Betawise-side `bw_store` snapshot helper. The persisted snapshot stores:
 
 - magic and version
 - phase: setup, running, completed

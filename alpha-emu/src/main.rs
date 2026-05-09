@@ -356,11 +356,11 @@ fn main() -> Result<()> {
                 anyhow::bail!("Forth Mini validation requires the full NEO system firmware image");
             }
             let firmware = FirmwareRuntime::load_small_rom(&path)?;
-            let mut session = FirmwareSession::boot_small_rom(firmware)?;
+            let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
             session.set_trace_stack_at_pc(trace_stack_at_pc, trace_stack_at_pc_hit);
             recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
             session.run_realtime_cycles(220_000_000, 25_000_000);
-            launch_forth_mini_through_menu(&mut session);
+            launch_forth_mini_through_menu(&mut session)?;
             bail_if_exception(&session, "Forth Mini focus")?;
             print_ocr_checkpoint("forth_mini_focus", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             enter_forth_line_and_assert(
@@ -441,8 +441,7 @@ fn main() -> Result<()> {
             let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
             recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
             session.run_realtime_cycles(220_000_000, 25_000_000);
-            launch_basic_writer_through_menu(&mut session, lcd_ocr_scale)?;
-            session.run_steps(1_500_000);
+            launch_basic_writer_through_menu(&mut session)?;
             bail_if_exception(&session, "Basic Writer focus")?;
             print_ocr_checkpoint("basic_writer_focus", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             assert_basic_writer_state(&session, 1, "", 0, 0)?;
@@ -631,6 +630,47 @@ fn main() -> Result<()> {
                 anyhow::bail!("Floppy Bird should render full-LCD pixel graphics, got only {initial_pixels} lit pixels");
             }
             assert_floppy_bird_state(&session, 0, false, "Floppy Bird initial state")?;
+            let initial_state = floppy_bird_state(&session);
+            if initial_state.barrier_x - initial_state.barrier2_x != 140 {
+                anyhow::bail!("Floppy Bird barriers should start 140px apart, got {initial_state:?}");
+            }
+            let barrier1_pixels = lcd_lit_pixels_in_rect(
+                &session.snapshot().lcd,
+                initial_state.barrier_x as usize,
+                0,
+                10,
+                64,
+            );
+            let barrier2_pixels = lcd_lit_pixels_in_rect(
+                &session.snapshot().lcd,
+                initial_state.barrier2_x as usize,
+                0,
+                10,
+                64,
+            );
+            if barrier1_pixels < 20 || barrier2_pixels < 20 {
+                anyhow::bail!(
+                    "Floppy Bird should render two visible barriers, got barrier1={barrier1_pixels} barrier2={barrier2_pixels} state={initial_state:?}"
+                );
+            }
+            let mut idle_probe = session.clone();
+            idle_probe.run_realtime_cycles(30_000_000, 5_000_000);
+            let idle_probe_state = floppy_bird_state(&idle_probe);
+            let mut held_probe = session.clone();
+            held_probe.press_matrix_code(0x38);
+            held_probe.run_realtime_cycles(30_000_000, 5_000_000);
+            held_probe.release_matrix_code(0x38);
+            let held_probe_state = floppy_bird_state(&held_probe);
+            println!(
+                "floppy_bird_hold_probe idle={idle_probe_state:?} held={held_probe_state:?}"
+            );
+            if initial_state.barrier_x - held_probe_state.barrier_x
+                > initial_state.barrier_x - idle_probe_state.barrier_x + 3
+            {
+                anyhow::bail!(
+                    "Floppy Bird unrelated held key should not advance barriers faster: initial={initial_state:?} idle={idle_probe_state:?} held={held_probe_state:?}"
+                );
+            }
             let before_flap = floppy_bird_state(&session);
             dispatch_floppy_bird_message(&mut session, 0x21, 0x4c, "Floppy Bird space flap")?;
             force_floppy_bird_tick(&mut session, "Floppy Bird post-flap tick")?;
@@ -638,16 +678,75 @@ fn main() -> Result<()> {
             if after_flap.bird_y_q8 >= before_flap.bird_y_q8 {
                 anyhow::bail!("Floppy Bird flap did not move upward: before={before_flap:?} after={after_flap:?}");
             }
+            write_floppy_u32(&mut session, 18, 0x4000_0000);
+            let before_key_idle = floppy_bird_state(&session);
+            dispatch_floppy_bird_message(&mut session, 0x01000021, 0x31, "Floppy Bird synthetic ignored key")?;
+            let ignored_status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
+            if ignored_status != 4 {
+                anyhow::bail!("Floppy Bird synthetic ignored key should return unhandled status 4, got {ignored_status}");
+            }
+            dispatch_floppy_bird_message(&mut session, 0x00, 0, "Floppy Bird immediate post-ignored-key idle")?;
+            let after_key_idle = floppy_bird_state(&session);
+            if after_key_idle.barrier_x != before_key_idle.barrier_x
+                || after_key_idle.barrier2_x != before_key_idle.barrier2_x
+            {
+                anyhow::bail!(
+                    "Floppy Bird ignored key should not make a future-scheduled idle tick: before={before_key_idle:?} after={after_key_idle:?}"
+                );
+            }
+            write_floppy_u32(&mut session, 18, 0x4000_0000);
+            let before_unknown_event = floppy_bird_state(&session);
+            dispatch_floppy_bird_message(&mut session, 0x02000055, 0x31, "Floppy Bird unknown held-key event")?;
+            let unknown_status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
+            if unknown_status != 4 {
+                anyhow::bail!("Floppy Bird unknown held-key event should return unhandled status 4, got {unknown_status}");
+            }
+            dispatch_floppy_bird_message(&mut session, 0x00, 0, "Floppy Bird immediate post-unknown-event idle")?;
+            let after_unknown_event = floppy_bird_state(&session);
+            if after_unknown_event.barrier_x != before_unknown_event.barrier_x
+                || after_unknown_event.barrier2_x != before_unknown_event.barrier2_x
+            {
+                anyhow::bail!(
+                    "Floppy Bird unknown held-key event should not make a future-scheduled idle tick: before={before_unknown_event:?} after={after_unknown_event:?}"
+                );
+            }
+            write_floppy_u32(&mut session, 18, 0x4000_0000);
+            let before_space_idle = floppy_bird_state(&session);
+            dispatch_floppy_bird_message(&mut session, 0x21, 0x4c, "Floppy Bird overdue space flap")?;
+            dispatch_floppy_bird_message(&mut session, 0x00, 0, "Floppy Bird immediate post-space idle")?;
+            let after_space_idle = floppy_bird_state(&session);
+            if after_space_idle.barrier_x != before_space_idle.barrier_x
+                || after_space_idle.barrier2_x != before_space_idle.barrier2_x
+            {
+                anyhow::bail!(
+                    "Floppy Bird space press should not make a future-scheduled idle tick: before={before_space_idle:?} after={after_space_idle:?}"
+                );
+            }
+            let moved_barrier_pixels = lcd_lit_pixels_in_rect(
+                &session.snapshot().lcd,
+                after_flap.barrier2_x as usize,
+                0,
+                10,
+                64,
+            );
+            if moved_barrier_pixels < 300 {
+                anyhow::bail!(
+                    "Floppy Bird moving second barrier should remain full width, got {moved_barrier_pixels} pixels after={after_flap:?}"
+                );
+            }
             seed_floppy_bird_near_score(&mut session);
             force_floppy_bird_tick(&mut session, "Floppy Bird score tick")?;
             assert_floppy_bird_state(&session, 1, false, "Floppy Bird scoring")?;
+            seed_floppy_bird_second_barrier_near_score(&mut session);
+            force_floppy_bird_tick(&mut session, "Floppy Bird second barrier score tick")?;
+            assert_floppy_bird_state(&session, 2, false, "Floppy Bird second barrier scoring")?;
             let score_pixels = lcd_lit_pixels_in_rect(&session.snapshot().lcd, 0, 0, 24, 12);
             if score_pixels < 20 {
                 anyhow::bail!("Floppy Bird score should stay visible after barrier crosses score area, got {score_pixels} lit score pixels");
             }
             seed_floppy_bird_crash(&mut session);
             force_floppy_bird_tick(&mut session, "Floppy Bird crash tick")?;
-            assert_floppy_bird_state(&session, 1, true, "Floppy Bird game over")?;
+            assert_floppy_bird_state(&session, 2, true, "Floppy Bird game over")?;
             let game_over_pixels = lcd_lit_pixels_in_rect(&session.snapshot().lcd, 40, 0, 190, 64);
             if game_over_pixels < 600 {
                 anyhow::bail!("Floppy Bird game-over screen should show large title/help pixels, got {game_over_pixels}");
@@ -697,8 +796,80 @@ fn main() -> Result<()> {
             if sidebar_pixels < 300 {
                 anyhow::bail!("Snake should render title/help/length in the 64px sidebar, got {sidebar_pixels} lit sidebar pixels");
             }
+            assert_snake_sidebar_score(&session.snapshot().lcd, "000", "Snake initial score render")?;
+            let mut idle_probe = session.clone();
+            idle_probe.run_realtime_cycles(30_000_000, 5_000_000);
+            let idle_probe_state = snake_state(&idle_probe);
+            let mut held_probe = session.clone();
+            held_probe.press_matrix_code(0x38);
+            held_probe.run_realtime_cycles(30_000_000, 5_000_000);
+            held_probe.release_matrix_code(0x38);
+            let held_probe_state = snake_state(&held_probe);
+            println!("snake_hold_probe idle={idle_probe_state:?} held={held_probe_state:?}");
+            let initial_snake = snake_state(&session);
+            let idle_distance = snake_axis_distance(initial_snake.head_x, idle_probe_state.head_x, 50);
+            let held_distance = snake_axis_distance(initial_snake.head_x, held_probe_state.head_x, 50);
+            if held_distance > idle_distance + 1 {
+                anyhow::bail!(
+                    "Snake unrelated held key should not advance faster: initial={initial_snake:?} idle={idle_probe_state:?} held={held_probe_state:?}"
+                );
+            }
+            write_snake_u32(&mut session, 396, 0x4000_0000);
+            let before_ignored_key = snake_state(&session);
+            dispatch_snake_message(&mut session, 0x01000021, 0x31, "Snake synthetic ignored key")?;
+            let ignored_status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
+            if ignored_status != 4 {
+                anyhow::bail!("Snake synthetic ignored key should return unhandled status 4, got {ignored_status}");
+            }
+            dispatch_snake_message(&mut session, 0x00, 0, "Snake immediate post-ignored-key idle")?;
+            let after_ignored_key = snake_state(&session);
+            if after_ignored_key.head_x != before_ignored_key.head_x || after_ignored_key.head_y != before_ignored_key.head_y {
+                anyhow::bail!(
+                    "Snake ignored key should not make a future-scheduled idle tick: before={before_ignored_key:?} after={after_ignored_key:?}"
+                );
+            }
+            write_snake_u32(&mut session, 396, 0x4000_0000);
+            let before_unknown_event = snake_state(&session);
+            dispatch_snake_message(&mut session, 0x02000055, 0x31, "Snake unknown held-key event")?;
+            let unknown_status = read_be_u32(session.memory_bytes(), 0x1200).unwrap_or_default();
+            if unknown_status != 4 {
+                anyhow::bail!("Snake unknown held-key event should return unhandled status 4, got {unknown_status}");
+            }
+            dispatch_snake_message(&mut session, 0x00, 0, "Snake immediate post-unknown-event idle")?;
+            let after_unknown_event = snake_state(&session);
+            if after_unknown_event.head_x != before_unknown_event.head_x || after_unknown_event.head_y != before_unknown_event.head_y {
+                anyhow::bail!(
+                    "Snake unknown held-key event should not make a future-scheduled idle tick: before={before_unknown_event:?} after={after_unknown_event:?}"
+                );
+            }
+            write_snake_u32(&mut session, 396, 0x4000_0000);
+            let before_same_direction = snake_state(&session);
+            dispatch_snake_message(&mut session, 0x21, 0x4a, "Snake same-direction key")?;
+            dispatch_snake_message(&mut session, 0x00, 0, "Snake immediate post-same-direction idle")?;
+            let after_same_direction = snake_state(&session);
+            if after_same_direction.head_x != before_same_direction.head_x
+                || after_same_direction.head_y != before_same_direction.head_y
+            {
+                anyhow::bail!(
+                    "Snake repeated current-direction key should not make a future-scheduled idle tick: before={before_same_direction:?} after={after_same_direction:?}"
+                );
+            }
+            write_snake_u32(&mut session, 396, 0x4000_0000);
             let before_turn = snake_state(&session);
             dispatch_snake_message(&mut session, 0x21, 0x0d, "Snake down arrow")?;
+            let after_turn_key = snake_state(&session);
+            if after_turn_key.head_x != before_turn.head_x || after_turn_key.head_y != before_turn.head_y {
+                anyhow::bail!(
+                    "Snake direction key should not advance the head immediately: before={before_turn:?} after_key={after_turn_key:?}"
+                );
+            }
+            dispatch_snake_message(&mut session, 0x00, 0, "Snake immediate post-turn idle")?;
+            let after_turn_idle = snake_state(&session);
+            if after_turn_idle.head_x != before_turn.head_x || after_turn_idle.head_y != before_turn.head_y {
+                anyhow::bail!(
+                    "Snake direction key should not make a future-scheduled idle tick: before={before_turn:?} after_idle={after_turn_idle:?}"
+                );
+            }
             force_snake_tick(&mut session, "Snake down movement")?;
             let after_turn = snake_state(&session);
             if after_turn.head_y <= before_turn.head_y {
@@ -707,6 +878,7 @@ fn main() -> Result<()> {
             seed_snake_food_ahead(&mut session);
             force_snake_tick(&mut session, "Snake food tick")?;
             assert_snake_state(&session, 1, 4, false, false, "Snake scoring/growth")?;
+            assert_snake_sidebar_score(&session.snapshot().lcd, "001", "Snake score render after food")?;
             dispatch_snake_message(&mut session, 0x21, 0x1e, "Snake pause key")?;
             let paused = snake_state(&session);
             force_snake_tick(&mut session, "Snake paused tick")?;
@@ -768,14 +940,30 @@ fn main() -> Result<()> {
             let before = doom_state(&session);
             let before_lcd = session.snapshot().lcd.clone();
             dispatch_doom_message(&mut session, 0x21, 0x4a, "DOOM? right turn")?;
+            let after_turn_key = doom_state(&session);
+            if after_turn_key.angle != before.angle
+                || after_turn_key.player_x != before.player_x
+                || after_turn_key.player_y != before.player_y
+            {
+                anyhow::bail!("DOOM? right arrow should not advance immediately: before={before:?} after_key={after_turn_key:?}");
+            }
+            force_doom_tick(&mut session, "DOOM? right turn tick")?;
             let turned = doom_state(&session);
             if turned.angle == before.angle {
-                anyhow::bail!("DOOM? right arrow should rotate: before={before:?} after={turned:?}");
+                anyhow::bail!("DOOM? right arrow should rotate on timed tick: before={before:?} after={turned:?}");
             }
             dispatch_doom_message(&mut session, 0x21, 0x4b, "DOOM? forward")?;
+            let after_move_key = doom_state(&session);
+            if after_move_key.player_x != turned.player_x
+                || after_move_key.player_y != turned.player_y
+                || after_move_key.angle != turned.angle
+            {
+                anyhow::bail!("DOOM? up arrow should not move immediately: before={turned:?} after_key={after_move_key:?}");
+            }
+            force_doom_tick(&mut session, "DOOM? forward tick")?;
             let moved = doom_state(&session);
             if moved.player_x == turned.player_x && moved.player_y == turned.player_y {
-                anyhow::bail!("DOOM? up arrow should move player: before={turned:?} after={moved:?}");
+                anyhow::bail!("DOOM? up arrow should move player on timed tick: before={turned:?} after={moved:?}");
             }
             let minimap_diff = lcd_diff_pixels_in_rect(&before_lcd, &session.snapshot().lcd, 160, 0, 104, 64);
             if minimap_diff == 0 {
@@ -826,7 +1014,7 @@ fn main() -> Result<()> {
             let mut session = FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
             recovery_seed::apply_seed_file_if_present(&mut session, &recovery_seed_path)?;
             session.run_realtime_cycles(220_000_000, 25_000_000);
-            launch_basic_writer_through_menu(&mut session, lcd_ocr_scale)?;
+            launch_basic_writer_through_menu(&mut session)?;
             bail_if_exception(&session, "Basic Writer focus")?;
             print_ocr_checkpoint("basic_writer_probe_focus", &session.snapshot(), lcd_ocr, lcd_ocr_scale)?;
             print_basic_writer_state("basic_writer_probe_focus_state", &session);
@@ -1074,9 +1262,9 @@ fn basic_writer_state(session: &FirmwareSession) -> BasicWriterState {
 }
 
 fn basic_writer_active_slot(session: &FirmwareSession) -> u32 {
-    let snapshot = session.snapshot();
-    let a5 = snapshot.a[5];
-    let state_base = a5.saturating_add(0x300) as usize;
+    let state_base = session
+        .applet_state_base_for_validation("Basic Writer")
+        .unwrap_or_default() as usize;
     let bytes = session.memory_bytes();
     let read_u32 = |offset: usize| -> Option<u32> {
         let start = state_base.checked_add(offset)?;
@@ -1087,9 +1275,9 @@ fn basic_writer_active_slot(session: &FirmwareSession) -> u32 {
 }
 
 fn basic_writer_banner_slot(session: &FirmwareSession) -> u32 {
-    let snapshot = session.snapshot();
-    let a5 = snapshot.a[5];
-    let state_base = a5.saturating_add(0x300) as usize;
+    let state_base = session
+        .applet_state_base_for_validation("Basic Writer")
+        .unwrap_or_default() as usize;
     let bytes = session.memory_bytes();
     let start = state_base + 4;
     bytes
@@ -1099,9 +1287,9 @@ fn basic_writer_banner_slot(session: &FirmwareSession) -> u32 {
 }
 
 fn basic_writer_banner_until_ms(session: &FirmwareSession) -> u32 {
-    let snapshot = session.snapshot();
-    let a5 = snapshot.a[5];
-    let state_base = a5.saturating_add(0x300) as usize;
+    let state_base = session
+        .applet_state_base_for_validation("Basic Writer")
+        .unwrap_or_default() as usize;
     let bytes = session.memory_bytes();
     let start = state_base + 8;
     bytes
@@ -1111,9 +1299,9 @@ fn basic_writer_banner_until_ms(session: &FirmwareSession) -> u32 {
 }
 
 fn basic_writer_slot_state(session: &FirmwareSession, slot: u32) -> BasicWriterState {
-    let snapshot = session.snapshot();
-    let a5 = snapshot.a[5];
-    let state_base = a5.saturating_add(0x300) as usize;
+    let state_base = session
+        .applet_state_base_for_validation("Basic Writer")
+        .unwrap_or_default() as usize;
     let bytes = session.memory_bytes();
     const SLOT_OFFSET: usize = 20;
     const SLOT_BYTES: usize = 268;
@@ -1360,9 +1548,15 @@ fn assert_write_or_die_screen_contains(session: &FirmwareSession, needle: &str, 
 struct FloppyBirdState {
     bird_y_q8: i16,
     barrier_x: i16,
+    barrier2_x: i16,
     gap_row: u8,
+    gap2_row: u8,
     gap_height: u8,
+    gap2_height: u8,
     score: u8,
+    seed: u8,
+    passed_barrier: bool,
+    passed_barrier2: bool,
     game_over: bool,
 }
 
@@ -1381,10 +1575,16 @@ fn floppy_bird_state(session: &FirmwareSession) -> FloppyBirdState {
     FloppyBirdState {
         bird_y_q8: read_be_i16(bytes, base).unwrap_or_default(),
         barrier_x: read_be_i16(bytes, base + 4).unwrap_or_default(),
-        gap_row: bytes.get(base + 6).copied().unwrap_or_default(),
-        gap_height: bytes.get(base + 7).copied().unwrap_or_default(),
-        score: bytes.get(base + 8).copied().unwrap_or_default(),
-        game_over: bytes.get(base + 11).copied().unwrap_or_default() != 0,
+        barrier2_x: read_be_i16(bytes, base + 6).unwrap_or_default(),
+        gap_row: bytes.get(base + 8).copied().unwrap_or_default(),
+        gap2_row: bytes.get(base + 9).copied().unwrap_or_default(),
+        gap_height: bytes.get(base + 10).copied().unwrap_or_default(),
+        gap2_height: bytes.get(base + 11).copied().unwrap_or_default(),
+        score: bytes.get(base + 12).copied().unwrap_or_default(),
+        seed: bytes.get(base + 13).copied().unwrap_or_default(),
+        passed_barrier: bytes.get(base + 14).copied().unwrap_or_default() != 0,
+        passed_barrier2: bytes.get(base + 15).copied().unwrap_or_default() != 0,
+        game_over: bytes.get(base + 16).copied().unwrap_or_default() != 0,
     }
 }
 
@@ -1415,22 +1615,48 @@ fn seed_floppy_bird_near_score(session: &mut FirmwareSession) {
     write_floppy_i16(session, 0, 8192);
     write_floppy_i16(session, 2, 0);
     write_floppy_i16(session, 4, 20);
-    write_floppy_u8(session, 6, 22);
-    write_floppy_u8(session, 7, 0);
-    write_floppy_u8(session, 9, 0);
-    write_floppy_u8(session, 10, 0);
-    write_floppy_u32(session, 12, 0);
-    write_floppy_u8(session, 16, 1);
+    write_floppy_i16(session, 6, 160);
+    write_floppy_u8(session, 8, 22);
+    write_floppy_u8(session, 9, 22);
+    write_floppy_u8(session, 10, 20);
+    write_floppy_u8(session, 11, 20);
+    write_floppy_u8(session, 14, 0);
+    write_floppy_u8(session, 15, 0);
+    write_floppy_u8(session, 16, 0);
+    write_floppy_u32(session, 18, 0);
+    write_floppy_u8(session, 22, 1);
+}
+
+fn seed_floppy_bird_second_barrier_near_score(session: &mut FirmwareSession) {
+    write_floppy_i16(session, 0, 8192);
+    write_floppy_i16(session, 2, 0);
+    write_floppy_i16(session, 4, 160);
+    write_floppy_i16(session, 6, 20);
+    write_floppy_u8(session, 8, 22);
+    write_floppy_u8(session, 9, 22);
+    write_floppy_u8(session, 10, 20);
+    write_floppy_u8(session, 11, 20);
+    write_floppy_u8(session, 14, 0);
+    write_floppy_u8(session, 15, 0);
+    write_floppy_u8(session, 16, 0);
+    write_floppy_u32(session, 18, 0);
+    write_floppy_u8(session, 22, 1);
 }
 
 fn seed_floppy_bird_crash(session: &mut FirmwareSession) {
     write_floppy_i16(session, 0, 10240);
     write_floppy_i16(session, 2, 120);
     write_floppy_i16(session, 4, 30);
-    write_floppy_u8(session, 6, 8);
+    write_floppy_i16(session, 6, 160);
+    write_floppy_u8(session, 8, 8);
+    write_floppy_u8(session, 9, 22);
     write_floppy_u8(session, 10, 0);
-    write_floppy_u32(session, 12, 0);
-    write_floppy_u8(session, 16, 1);
+    write_floppy_u8(session, 11, 20);
+    write_floppy_u8(session, 14, 0);
+    write_floppy_u8(session, 15, 0);
+    write_floppy_u8(session, 16, 0);
+    write_floppy_u32(session, 18, 0);
+    write_floppy_u8(session, 22, 1);
 }
 
 #[derive(Debug)]
@@ -1506,6 +1732,67 @@ fn assert_snake_state(
     let state = snake_state(session);
     if state.score != score || state.length != length || state.paused != paused || state.game_over != game_over {
         anyhow::bail!("{label}: expected score={score} length={length} paused={paused} game_over={game_over}, got {state:?}");
+    }
+    Ok(())
+}
+
+fn snake_axis_distance(start: u8, end: u8, size: u8) -> u8 {
+    if end >= start {
+        end - start
+    } else {
+        size - start + end
+    }
+}
+
+fn expected_snake_glyph(c: char, row: usize) -> u8 {
+    match c {
+        '0' => [7, 5, 5, 5, 7][row],
+        '1' => [2, 6, 2, 2, 7][row],
+        '2' => [7, 1, 7, 4, 7][row],
+        '3' => [7, 1, 7, 1, 7][row],
+        '4' => [5, 5, 7, 1, 1][row],
+        '5' => [7, 4, 7, 1, 7][row],
+        '6' => [7, 4, 7, 5, 7][row],
+        '7' => [7, 1, 1, 1, 1][row],
+        '8' => [7, 5, 7, 5, 7][row],
+        '9' => [7, 5, 7, 1, 7][row],
+        'C' => [7, 4, 4, 4, 7][row],
+        'E' => [7, 4, 6, 4, 7][row],
+        'O' => [7, 5, 5, 5, 7][row],
+        'R' => [6, 5, 6, 5, 5][row],
+        'S' => [7, 4, 7, 1, 7][row],
+        _ => 0,
+    }
+}
+
+fn assert_snake_glyph(snapshot: &LcdSnapshot, c: char, x: usize, y: usize, label: &str) -> Result<()> {
+    for row in 0..5 {
+        let bits = expected_snake_glyph(c, row);
+        for col in 0..3 {
+            let expected = bits & (1 << (2 - col)) != 0;
+            let pixel_x = x + col;
+            let pixel_y = y + row;
+            let actual = snapshot
+                .pixels
+                .get(pixel_y * snapshot.width + pixel_x)
+                .copied()
+                .unwrap_or(false);
+            if actual != expected {
+                anyhow::bail!(
+                    "{label}: glyph '{c}' mismatch at glyph_col={col} glyph_row={row} screen=({pixel_x},{pixel_y}) expected={expected} actual={actual}"
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn assert_snake_sidebar_score(snapshot: &LcdSnapshot, digits: &str, label: &str) -> Result<()> {
+    for (i, c) in "SCORE".chars().enumerate() {
+        assert_snake_glyph(snapshot, c, 204 + i * 4, 48, label)?;
+    }
+    for (i, c) in digits.chars().enumerate() {
+        assert_snake_glyph(snapshot, c, 228 + i * 4, 48, label)?;
     }
     Ok(())
 }
@@ -2172,6 +2459,11 @@ fn read_be_u32(bytes: &[u8], addr: usize) -> Option<u32> {
     Some(u32::from_be_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
 
+fn read_be_u16(bytes: &[u8], addr: usize) -> Option<u16> {
+    let slice = bytes.get(addr..addr + 2)?;
+    Some(u16::from_be_bytes([slice[0], slice[1]]))
+}
+
 fn print_forth_state_ascii_runs(session: &FirmwareSession, label: &str) {
     const FORTH_SOURCE_OFFSET: usize = 5772;
     let snapshot = session.snapshot();
@@ -2239,10 +2531,43 @@ fn print_lcd_samples(session: &mut FirmwareSession, interval_steps: usize, count
     }
 }
 
-fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
-    for _ in 0..19 {
+fn launch_forth_mini_through_menu(session: &mut FirmwareSession) -> Result<()> {
+    let Some(target_slot) = session.applet_slot_for_validation("Forth Mini") else {
+        anyhow::bail!("Forth Mini applet is not installed");
+    };
+    let start = session.clone();
+    let preferred_down_count = target_slot.saturating_sub(1) as usize;
+    for down_count in (preferred_down_count..=preferred_down_count).chain(0..90) {
+        let mut candidate = start.clone();
+        launch_forth_mini_through_menu_with_downs(&mut candidate, down_count);
+        let matched = forth_mini_probe_evaluates(&mut candidate);
+        if matched {
+            let mut clean = start.clone();
+            launch_forth_mini_through_menu_with_downs(&mut clean, down_count);
+            *session = clean;
+            println!("forth_mini_menu_down_count={down_count}");
+            return Ok(());
+        }
+    }
+    anyhow::bail!("failed to focus Forth Mini through SmartApplets menu")
+}
+
+fn forth_mini_probe_evaluates(session: &mut FirmwareSession) -> bool {
+    enter_forth_line(session, "37 5 + .");
+    if bail_if_exception(session, "Forth Mini launch probe").is_err() {
+        return false;
+    }
+    let needle = b"37 5 + . 42";
+    session
+        .memory_bytes()
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+fn launch_forth_mini_through_menu_with_downs(session: &mut FirmwareSession, down_count: usize) {
+    for _ in 0..down_count {
         session.tap_matrix_code_long(0x15);
-        session.run_steps(250_000);
+        session.run_steps(500_000);
     }
     session.press_matrix_code(0x69);
     session.run_steps(3_000_000);
@@ -2273,7 +2598,8 @@ fn relaunch_current_menu_item(session: &mut FirmwareSession) {
 }
 
 fn assert_forth_screen_contains(session: &FirmwareSession, needle: &str, label: &str) -> Result<()> {
-    let text = session.snapshot().text_screen.unwrap_or_default();
+    let snapshot = session.snapshot();
+    let text = ocr_visible_lcd(snapshot.text_screen.as_deref(), &snapshot.lcd, 4)?;
     if text.contains(needle) {
         return Ok(());
     }
@@ -2291,8 +2617,24 @@ fn enter_forth_line_and_assert(
     assert_forth_screen_contains(session, needle, label)
 }
 
-fn launch_basic_writer_through_menu(session: &mut FirmwareSession, _ocr_scale: usize) -> Result<()> {
-    for _ in 0..29 {
+fn launch_basic_writer_through_menu(session: &mut FirmwareSession) -> Result<()> {
+    let start = session.clone();
+    for down_count in 0..90 {
+        let mut candidate = start.clone();
+        launch_basic_writer_through_menu_with_downs(&mut candidate, down_count);
+        let state = basic_writer_state(&candidate);
+        let text = candidate.snapshot().text_screen.unwrap_or_default();
+        if state.active_slot == 1 && state.len == 0 && text.contains('|') && !text.contains("Now connect") {
+            *session = candidate;
+            println!("basic_writer_menu_down_count={down_count}");
+            return Ok(());
+        }
+    }
+    anyhow::bail!("failed to focus Basic Writer through SmartApplets menu")
+}
+
+fn launch_basic_writer_through_menu_with_downs(session: &mut FirmwareSession, down_count: usize) {
+    for _ in 0..down_count {
         session.tap_matrix_code_long(0x15);
         session.run_steps(250_000);
     }
@@ -2301,12 +2643,11 @@ fn launch_basic_writer_through_menu(session: &mut FirmwareSession, _ocr_scale: u
     session.release_matrix_code(0x69);
     session.run_steps(3_000_000);
     session.clear_keyboard_transients();
-    Ok(())
 }
 
 fn launch_write_or_die_through_menu(session: &mut FirmwareSession) -> Result<()> {
     let start = session.clone();
-    for down_count in 0..40 {
+    for down_count in 0..90 {
         let mut candidate = start.clone();
         launch_write_or_die_through_menu_with_downs(&mut candidate, down_count);
         let state = write_or_die_state(&candidate);
@@ -2340,7 +2681,7 @@ fn focus_floppy_bird_direct(session: &mut FirmwareSession) -> Result<()> {
 }
 
 fn force_floppy_bird_tick(session: &mut FirmwareSession, label: &str) -> Result<()> {
-    write_floppy_u32(session, 12, 0);
+    write_floppy_u32(session, 18, 0);
     dispatch_floppy_bird_message(session, 0x00, 0, label)
 }
 
@@ -2350,6 +2691,12 @@ fn focus_snake_direct(session: &mut FirmwareSession) -> Result<()> {
 
 fn focus_doom_direct(session: &mut FirmwareSession) -> Result<()> {
     dispatch_doom_message(session, 0x19, 0, "DOOM? direct focus")
+}
+
+fn force_doom_tick(session: &mut FirmwareSession, label: &str) -> Result<()> {
+    let base = doom_state_base(session).unwrap_or_default();
+    session.overlay_memory_range(base + 8, &0u32.to_be_bytes());
+    dispatch_doom_message(session, 0x00, 0, label)
 }
 
 fn force_snake_tick(session: &mut FirmwareSession, label: &str) -> Result<()> {
@@ -2397,11 +2744,7 @@ fn launch_forth_mini_for_debugging(session: &mut FirmwareSession) -> Result<()> 
 }
 
 fn focus_forth_mini_direct(session: &mut FirmwareSession) -> Result<()> {
-    session
-        .start_applet_message_for_validation("Forth Mini", 0x19)
-        .map_err(|error| anyhow::anyhow!("failed to focus Forth Mini: {error}"))?;
-    session.run_steps(20_000);
-    Ok(())
+    dispatch_applet_message(session, "Forth Mini", 0x19, 0, "Forth Mini focus")
 }
 
 fn launch_file_fixer_internal(session: &mut FirmwareSession) -> Result<()> {
@@ -2594,40 +2937,20 @@ fn exit_write_or_die_to_menu(session: &mut FirmwareSession) {
 
 fn type_text_direct_to_forth(session: &mut FirmwareSession, text: &str) -> Result<()> {
     for value in text.bytes() {
-        session
-            .start_applet_message_with_param_for_validation("Forth Mini", 0x20, u32::from(value))
-            .map_err(|error| anyhow::anyhow!("failed to send Forth Mini char: {error}"))?;
-        session.run_steps(200_000);
-        if let Some(exception) = session.snapshot().last_exception {
-            anyhow::bail!("Forth Mini char dispatch failed: {exception}");
-        }
+        dispatch_applet_message(session, "Forth Mini", 0x20, u32::from(value), "Forth Mini char")?;
     }
     Ok(())
 }
 
 fn submit_forth_line_direct(session: &mut FirmwareSession, text: &str) -> Result<()> {
     type_text_direct_to_forth(session, text)?;
-    session
-        .start_applet_message_with_param_for_validation("Forth Mini", 0x20, u32::from(b'\r'))
-        .map_err(|error| anyhow::anyhow!("failed to submit Forth Mini line: {error}"))?;
-    session.run_steps(20_000);
-    if let Some(exception) = session.snapshot().last_exception {
-        anyhow::bail!("Forth Mini submit failed: {exception}");
-    }
-    Ok(())
+    dispatch_applet_message(session, "Forth Mini", 0x20, u32::from(b'\r'), "Forth Mini submit")
 }
 
 fn send_key_direct_to_forth(session: &mut FirmwareSession, matrix_code: u8) -> Result<()> {
     let logical = logical_key_for_matrix_code(matrix_code)
         .ok_or_else(|| anyhow::anyhow!("no logical key for matrix code 0x{matrix_code:02x}"))?;
-    session
-        .start_applet_message_with_param_for_validation("Forth Mini", 0x21, u32::from(logical))
-        .map_err(|error| anyhow::anyhow!("failed to send Forth Mini key: {error}"))?;
-    session.run_steps(200_000);
-    if let Some(exception) = session.snapshot().last_exception {
-        anyhow::bail!("Forth Mini key dispatch failed: {exception}");
-    }
-    Ok(())
+    dispatch_applet_message(session, "Forth Mini", 0x21, u32::from(logical), "Forth Mini key")
 }
 
 fn lcd_hash(snapshot: &LcdSnapshot) -> u64 {

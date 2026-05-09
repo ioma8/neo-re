@@ -90,7 +90,7 @@ preserve state across exits or applet switches.
 - `Enter`: evaluate the current input line, update stack/output, clear input,
   redraw
 - `Backspace`: delete one byte from the input buffer, redraw
-- `Esc` or applet-exit keys: return `APPLET_EXIT`
+- `Esc` or applet-exit keys: return `BW_STATUS_EXIT`
 - all other keys: ignore or return unhandled
 
 There is no custom event loop, no manual `pump_events`, and no `yield_once`

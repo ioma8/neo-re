@@ -731,6 +731,12 @@ impl FirmwareSession {
         Some(a5_adjust.saturating_add(0x300))
     }
 
+    pub fn applet_slot_for_validation(&self, applet_name: &str) -> Option<u32> {
+        self.memory
+            .find_applet_launch_info(applet_name)
+            .map(|info| info.slot)
+    }
+
     #[must_use]
     pub fn validation_applet_memory_hex(&self, offset: u32, len: usize) -> String {
         const VALIDATION_APPLET_MEMORY: u32 = 0x0007_8000;

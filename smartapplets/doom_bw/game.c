@@ -75,7 +75,11 @@ static uint16_t ScaleByInvRay(uint16_t value, uint16_t ray_abs) {
     if(ray_abs >= 192) ray_abs = 191;
     uint32_t product = value;
     uint16_t scale = INV_RAY[ray_abs];
+#ifdef __m68k__
     __asm__ volatile ("mulu.w %1,%0" : "+d"(product) : "d"(scale));
+#else
+    product *= scale;
+#endif
     return (uint16_t)(product >> 8);
 }
 

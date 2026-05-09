@@ -60,24 +60,17 @@ Use these rules. They come directly from the working path:
 
 In practice that means:
 
-- include `smartapplets/betawise-sdk/os3k.h`
-- include `smartapplets/betawise-sdk/applet.h` for the entry shim, state macro,
-  and shared applet status constants
-- include `smartapplets/betawise-sdk/file_store.h` for the validated one-file
-  snapshot persistence path
-- include `smartapplets/betawise-sdk/screen_lines.h` for fixed-width row
-  rendering with cursor hiding and cached redraws
-- include `smartapplets/betawise-sdk/challenge_timer.h` for uptime-based
-  elapsed/remaining/pressure timing
+- include `smartapplets/betawise-sdk/bw.h` for normal applets
 - link `smartapplets/betawise-sdk/syscall.c`
-- link `smartapplets/betawise-sdk/file_store.c` if the applet persists state
-- link `smartapplets/betawise-sdk/screen_lines.c` if the applet writes full LCD
+- link `smartapplets/betawise-sdk/bw_store.c` if the applet persists state
+- link `smartapplets/betawise-sdk/bw_screen.c` if the applet writes full LCD
   rows
-- link `smartapplets/betawise-sdk/challenge_timer.c` if the applet has
+- link `smartapplets/betawise-sdk/bw_challenge.c` if the applet has
   countdown or pressure timing
-- link `smartapplets/betawise-sdk/alphaword_export.c` if the applet appends
+- link `smartapplets/betawise-sdk/bw_alphaword.c` if the applet appends
   text into visible AlphaWord File slots
-- provide your own entry shim in `.text.alpha_usb_entry`
+- include `smartapplets/betawise-sdk/os3k.h` directly only for low-level
+  firmware-specific work
 - dispatch `MSG_SETFOCUS`, `MSG_CHAR`, and `MSG_KEY` yourself
 - handle Enter as `MSG_CHAR` byte `0x0d`/`0x0a` where the screen flow expects
   a confirmation key; under full firmware dispatch it is not guaranteed to
@@ -87,34 +80,45 @@ In practice that means:
 
 ## Shared SDK pieces
 
-The repo-owned Betawise-side SDK now exposes these validated low-level helpers:
+The repo-owned Betawise-side SDK now exposes these validated helpers through
+`bw.h`:
 
-- `applet.h`
-  - `APPLET_ENTRY(handler)`
-  - `APPLET_STATE(Type)`
-  - `APPLET_EXIT_STATUS`
-  - `APPLET_UNHANDLED_STATUS`
-- `file_store.h` / `file_store.c`
-  - `applet_load_snapshot(...)`
-  - `applet_save_snapshot(...)`
-- `screen_lines.h` / `screen_lines.c`
-  - `APPLET_SCREEN_SAFE_COLS`
-  - `applet_screen_put_line(...)`
-  - `applet_screen_put_cached_line(...)`
-  - `applet_screen_set_reverse(...)`
-  - `applet_screen_set_reverse_cached(...)`
-  - `applet_screen_clear_reverse_cache(...)`
+- app entry and status helpers
+  - `BW_APP_ENTRY(handler)`
+  - `BW_APP_STATE(Type)`
+  - `BW_STATUS_EXIT`
+  - `BW_STATUS_UNHANDLED`
+  - `bw_message_id(...)`
+  - `bw_key_id(...)`
+- timers and drawing
+  - `BwTimer`
+  - `bw_now_ms(...)`
+  - `bw_timer_reset(...)`
+  - `bw_timer_due_and_advance(...)`
+  - `BwRect`
+  - `bw_fill_rect(...)`
+  - `bw_fill_rect_clipped(...)`
+- `bw_store.h` / `bw_store.c`
+  - `bw_store_load_snapshot(...)`
+  - `bw_store_save_snapshot(...)`
+- `bw_screen.h` / `bw_screen.c`
+  - `BW_SCREEN_SAFE_COLS`
+  - `bw_screen_put_line(...)`
+  - `bw_screen_put_cached_line(...)`
+  - `bw_screen_set_reverse(...)`
+  - `bw_screen_set_reverse_cached(...)`
+  - `bw_screen_clear_reverse_cache(...)`
   - row formatting, cache invalidation, and fixed-width line copying helpers
-- `challenge_timer.h` / `challenge_timer.c`
-  - `applet_seconds_to_milliseconds(...)`
-  - `applet_milliseconds_to_seconds(...)`
-  - `applet_elapsed_milliseconds(...)`
-  - `applet_remaining_seconds(...)`
-  - `applet_penalty_interval_milliseconds(...)`
-  - `applet_pressure_stage(...)`
-  - `applet_flash_phase(...)`
-- `alphaword_export.h` / `alphaword_export.c`
-  - `alphaword_append_text_block(...)`
+- `bw_challenge.h` / `bw_challenge.c`
+  - `bw_seconds_to_milliseconds(...)`
+  - `bw_milliseconds_to_seconds(...)`
+  - `bw_elapsed_milliseconds(...)`
+  - `bw_remaining_seconds(...)`
+  - `bw_penalty_interval_milliseconds(...)`
+  - `bw_pressure_stage(...)`
+  - `bw_flash_phase(...)`
+- `bw_alphaword.h` / `bw_alphaword.c`
+  - `bw_alphaword_append_text_block(...)`
 
 This means applet code no longer needs to carry:
 
@@ -192,10 +196,7 @@ typedef struct {
     /* applet state */
 } AppState_t;
 
-static inline AppState_t* State(void) {
-    register char* a5 __asm__("a5");
-    return (AppState_t*)(a5 + 0x300);
-}
+BW_APP_STATE(AppState_t);
 ```
 
 Everything mutable should hang off that state block.
@@ -217,24 +218,24 @@ Everything mutable should hang off that state block.
 
 ## Validated screen feedback helpers
 
-Use `applet_screen_set_reverse(true)` for strong whole-display highlight
-feedback, and always call `applet_screen_set_reverse(false)` before leaving a
+Use `bw_screen_set_reverse(true)` for strong whole-display highlight
+feedback, and always call `bw_screen_set_reverse(false)` before leaving a
 screen, redrawing cached text from a normal baseline, or returning to another
 applet. The helper writes both LCD controllers, turns the display on first, and
 uses the same command path that validates in the headless emulator.
 
 For applets that store display state in their `A5 + 0x300` state block, prefer
-`applet_screen_set_reverse_cached(&state->reverse_flag, enabled)` and
-`applet_screen_clear_reverse_cache(&state->reverse_flag)`. That avoids redundant
+`bw_screen_set_reverse_cached(&state->reverse_flag, enabled)` and
+`bw_screen_clear_reverse_cache(&state->reverse_flag)`. That avoids redundant
 LCD command writes and prevents stale reverse mode from leaking across screens.
 
 For periodic visual feedback, use:
 
 ```c
-bool on = applet_flash_phase(idle_ms, 500u);
+bool on = bw_flash_phase(idle_ms, 500u);
 ```
 
-`write_or_die_bw` combines that with `applet_pressure_stage(...)`: the full
+`write_or_die_bw` combines that with `bw_pressure_stage(...)`: the full
 grace period is safe, the next four seconds flash as a warning, and the penalty
 state flashes while deleting one trailing character every 700 ms. Normal typing
 clears the highlight immediately and starts a new full grace period. The
@@ -243,7 +244,7 @@ repeated character deletion, and immediate recovery.
 
 ## Validated AlphaWord append helper
 
-Use `alphaword_append_text_block(slot, title, text, text_len)` when an applet
+Use `bw_alphaword_append_text_block(slot, title, text, text_len)` when an applet
 needs to append plain text to a visible AlphaWord File key slot. `slot` is the
 user-visible file number, `1..8`; the helper handles the backing descriptor
 rotation discovered from AlphaWord. Newlines in `text` are written as AlphaWord

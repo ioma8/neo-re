@@ -1,8 +1,7 @@
 #ifndef FORTH_MINI_APP_STATE_H
 #define FORTH_MINI_APP_STATE_H
 
-#include "../betawise-sdk/applet.h"
-#include "os3k.h"
+#include "../betawise-sdk/bw.h"
 #include "src/forth_core.h"
 
 enum { INPUT_CAPACITY = 96, LINE_WIDTH = 28, OUTPUT_LINES = 3 };
@@ -15,7 +14,7 @@ typedef struct {
     char transcript[OUTPUT_LINES][LINE_WIDTH + 1];
 } AppState;
 
-APPLET_STATE(AppState);
+BW_APP_STATE(AppState);
 
 void app_reset(AppState* state);
 void app_draw(const AppState* state);

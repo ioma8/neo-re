@@ -1,22 +1,20 @@
-#include "../betawise-sdk/applet.h"
-#include "../betawise-sdk/challenge_timer.h"
+#include "../betawise-sdk/bw.h"
 #include "alpha_export.h"
 #include "app_state.h"
 #include "challenge.h"
 #include "editor.h"
-#include "os3k.h"
 #include "storage.h"
 #include "ui.h"
 
-APPLET_ENTRY(alpha_neo_process_message);
-APPLET_STATE(WodAppState_t);
+BW_APP_ENTRY(alpha_neo_process_message);
+BW_APP_STATE(WodAppState_t);
 
 static uint32_t UptimeMilliseconds(void) {
-    return GetUptimeMilliseconds();
+    return bw_now_ms();
 }
 
 static uint32_t ElapsedMilliseconds(const WodAppState_t* state, uint32_t now_ms) {
-    return applet_elapsed_milliseconds(state->start_ms, now_ms);
+    return bw_elapsed_milliseconds(state->start_ms, now_ms);
 }
 
 static void SetDefaults(WodAppState_t* state) {
@@ -72,7 +70,7 @@ static void StartChallenge(WodAppState_t* state) {
 
 static uint32_t RemainingSeconds(const WodAppState_t* state, uint32_t elapsed_ms) {
     if(state->goal_mode == WOD_GOAL_TIME) {
-        return applet_remaining_seconds(state->time_goal_seconds, elapsed_ms);
+        return bw_remaining_seconds(state->time_goal_seconds, elapsed_ms);
     }
     return state->time_goal_seconds;
 }
@@ -113,7 +111,7 @@ static void CheckCompletion(WodAppState_t* state, uint32_t elapsed_ms) {
        challenge_words_complete(editor_word_count(&state->editor), state->word_goal)) {
         CompleteChallenge(state);
     } else if(state->goal_mode == WOD_GOAL_TIME &&
-              elapsed_ms >= applet_seconds_to_milliseconds(state->time_goal_seconds)) {
+              elapsed_ms >= bw_seconds_to_milliseconds(state->time_goal_seconds)) {
         CompleteChallenge(state);
     }
 }
@@ -156,7 +154,7 @@ static void HandleSetupKey(WodAppState_t* state, uint32_t key, uint32_t* status)
         case KEY_APPLETS:
         case KEY_ESC:
             SaveIfDirty(state);
-            *status = APPLET_EXIT_STATUS;
+            *status = BW_STATUS_EXIT;
             break;
         default:
             break;
@@ -167,7 +165,7 @@ static void HandleSetupKey(WodAppState_t* state, uint32_t key, uint32_t* status)
 }
 
 static bool IsEnterChar(uint32_t param) {
-    uint8_t byte = (uint8_t)(param & 0xff);
+    uint8_t byte = (uint8_t)bw_key_id(param);
     return byte == '\r' || byte == '\n';
 }
 
@@ -215,7 +213,7 @@ static void MarkActivity(WodAppState_t* state, uint32_t now_ms) {
 static void HandleRunningChar(WodAppState_t* state, uint32_t param) {
     uint32_t now = UptimeMilliseconds();
     uint32_t elapsed = ElapsedMilliseconds(state, now);
-    bool changed = ApplyChar(state, param & 0xff);
+    bool changed = ApplyChar(state, (uint8_t)bw_key_id(param));
     if(changed) {
         MarkActivity(state, now);
         ui_set_challenge_text_highlight(state, false);
@@ -242,7 +240,7 @@ static void HandleRunningKey(WodAppState_t* state, uint32_t key, uint32_t* statu
         case KEY_APPLETS:
         case KEY_ESC:
             SaveIfDirty(state);
-            *status = APPLET_EXIT_STATUS;
+            *status = BW_STATUS_EXIT;
             break;
         default:
             break;
@@ -255,7 +253,7 @@ static void HandleRunningKey(WodAppState_t* state, uint32_t key, uint32_t* statu
             uint32_t idle = now - state->last_activity_ms;
             WodPressure_t pressure = challenge_pressure(idle, state->grace_seconds);
             DrawChallenge(state, pressure, RemainingSeconds(state, elapsed), text_changed);
-            ui_set_challenge_text_highlight(state, ShouldFlashText(pressure) && applet_flash_phase(idle, 500u));
+            ui_set_challenge_text_highlight(state, ShouldFlashText(pressure) && bw_flash_phase(idle, 500u));
         }
     }
 }
@@ -267,7 +265,7 @@ static void HandleRunningIdle(WodAppState_t* state) {
     WodPressure_t pressure = challenge_pressure(idle, state->grace_seconds);
     bool changed = false;
     if(pressure == WOD_PRESSURE_PENALTY &&
-       now - state->last_penalty_ms >= applet_penalty_interval_milliseconds(state->grace_seconds)) {
+       now - state->last_penalty_ms >= bw_penalty_interval_milliseconds(state->grace_seconds)) {
         if(editor_delete_last_byte(&state->editor)) {
             MarkDirty(state);
             changed = true;
@@ -280,7 +278,7 @@ static void HandleRunningIdle(WodAppState_t* state) {
         if(changed || pressure != state->display_pressure || remaining != state->display_remaining_seconds) {
             DrawChallenge(state, pressure, remaining, changed);
         }
-        ui_set_challenge_text_highlight(state, ShouldFlashText(pressure) && applet_flash_phase(idle, 500u));
+        ui_set_challenge_text_highlight(state, ShouldFlashText(pressure) && bw_flash_phase(idle, 500u));
     }
 }
 
@@ -313,7 +311,7 @@ static void HandleCompletedKey(WodAppState_t* state, uint32_t key, uint32_t* sta
         ResetToSetup(state);
     } else if(IsExitKey(key)) {
         SaveIfDirty(state);
-        *status = APPLET_EXIT_STATUS;
+        *status = BW_STATUS_EXIT;
     }
 }
 
@@ -322,14 +320,15 @@ static void HandleExportedKey(WodAppState_t* state, uint32_t key, uint32_t* stat
         ResetToSetup(state);
     } else if(IsExitKey(key)) {
         SaveIfDirty(state);
-        *status = APPLET_EXIT_STATUS;
+        *status = BW_STATUS_EXIT;
     }
 }
 
 void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* status) {
     WodAppState_t* state = State();
+    uint32_t base_message = bw_message_id(message);
     *status = 0;
-    switch(message) {
+    switch(base_message) {
         case MSG_SETFOCUS:
             SetDefaults(state);
             if(storage_load(state)) {
@@ -356,13 +355,13 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
             break;
         case MSG_KEY:
             if(state->phase == WOD_PHASE_SETUP) {
-                HandleSetupKey(state, param & 0xff, status);
+                HandleSetupKey(state, bw_key_id(param), status);
             } else if(state->phase == WOD_PHASE_RUNNING) {
-                HandleRunningKey(state, param & 0xff, status);
+                HandleRunningKey(state, bw_key_id(param), status);
             } else if(state->phase == WOD_PHASE_COMPLETED) {
-                HandleCompletedKey(state, param & 0xff, status);
+                HandleCompletedKey(state, bw_key_id(param), status);
             } else if(state->phase == WOD_PHASE_EXPORTED) {
-                HandleExportedKey(state, param & 0xff, status);
+                HandleExportedKey(state, bw_key_id(param), status);
             }
             break;
         case MSG_IDLE:
@@ -374,7 +373,7 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
             SaveIfDirty(state);
             break;
         default:
-            *status = APPLET_UNHANDLED_STATUS;
+            *status = BW_STATUS_UNHANDLED;
             break;
     }
 }

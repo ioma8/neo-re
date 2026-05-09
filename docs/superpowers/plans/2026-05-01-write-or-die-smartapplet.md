@@ -4,7 +4,7 @@
 
 **Goal:** Build a new `WriteOrDie` SmartApplet with setup goals, a pressure loop, permanent pause penalties, one-file persistence, and full headless validation.
 
-**Architecture:** Implement a new Betawise-derived C SmartApplet under `smartapplets/write_or_die_bw/`, using the proven direct applet callback/editor path from `basic_writer_bw` and one-file snapshot persistence through `betawise-sdk/file_store`. Keep applet logic split into editor, challenge, UI, storage, and dispatch files so each part is testable and small.
+**Architecture:** Implement a new Betawise-derived C SmartApplet under `smartapplets/write_or_die_bw/`, using the proven direct applet callback/editor path from `basic_writer_bw` and one-file snapshot persistence through `betawise-sdk/bw_store`. Keep applet logic split into editor, challenge, UI, storage, and dispatch files so each part is testable and small.
 
 **Tech Stack:** C for target applet code, `m68k-elf-gcc`, local `alpha-neo-pack`, Rust `alpha-emu` headless validation, existing Betawise-side SDK helpers.
 
@@ -86,15 +86,15 @@ Add `WriteOrDie` to `AppletName`, parse `"write-or-die"`, usage text, and `manif
 Create `WriteOrDieBW.c`:
 
 ```c
-#include "../betawise-sdk/applet.h"
+#include "../betawise-sdk/bw.h"
 #include "os3k.h"
 
 typedef struct {
     uint32_t marker;
 } AppState_t;
 
-APPLET_ENTRY(alpha_neo_process_message);
-APPLET_STATE(AppState_t);
+BW_APP_ENTRY(alpha_neo_process_message);
+BW_APP_STATE(AppState_t);
 
 void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* status) {
     (void)param;
@@ -105,9 +105,9 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
         ClearScreen();
         PutStringRaw("WriteOrDie");
     } else if(message == MSG_KEY && ((param & 0xff) == KEY_APPLETS || (param & 0xff) == KEY_ESC)) {
-        *status = APPLET_EXIT_STATUS;
+        *status = BW_STATUS_EXIT;
     } else {
-        *status = APPLET_UNHANDLED_STATUS;
+        *status = BW_STATUS_UNHANDLED;
     }
 }
 ```
@@ -407,7 +407,7 @@ git commit -m "Implement WriteOrDie challenge loop"
 
 - [ ] **Step 1: Add storage wrapper**
 
-Use `applet_load_snapshot(1, magic, state, sizeof(*state))` and `applet_save_snapshot(1, magic, state, sizeof(*state))`.
+Use `bw_store_load_snapshot(1, magic, state, sizeof(*state))` and `bw_store_save_snapshot(1, magic, state, sizeof(*state))`.
 
 Use magic:
 

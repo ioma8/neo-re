@@ -1,6 +1,6 @@
 #include "render.h"
 
-#include "os3k.h"
+#include "../betawise-sdk/bw.h"
 
 enum {
     LCD_W = 264,
@@ -23,17 +23,8 @@ typedef struct {
 } Slice_t;
 
 static void Fill(int16_t x, int16_t y, int16_t w, int16_t h, RopCode_e rop) {
-    if(x < 0) {
-        w = (int16_t)(w + x);
-        x = 0;
-    }
-    if(y < 0) {
-        h = (int16_t)(h + y);
-        y = 0;
-    }
-    if(x + w > LCD_W) w = (int16_t)(LCD_W - x);
-    if(y + h > LCD_H) h = (int16_t)(LCD_H - y);
-    if(w > 0 && h > 0) RasterOp((uint16_t)x, (uint16_t)y, (uint16_t)w, (uint16_t)h, 0, rop);
+    BwRect rect = {x, y, w, h};
+    bw_fill_rect_clipped(rect, LCD_W, LCD_H, rop);
 }
 
 static int16_t Abs16(int16_t value) {
@@ -64,15 +55,11 @@ static void DrawWallFace(const Slice_t* left, const Slice_t* right) {
     int16_t bot_delta = Abs16((int16_t)(right->bot - left->bot));
     int16_t top_err = 0;
     int16_t bot_err = 0;
-    uint8_t shaded = (uint8_t)((left->wall_x + left->wall_y) & 1u);
     for(int16_t x = x0; x <= x1; x = (int16_t)(x + COL_W)) {
         int16_t clamped_top = ClampY(top);
         int16_t clamped_bot = ClampY(bot);
-        int16_t h = (int16_t)(clamped_bot - clamped_top + 1);
-        Fill(x, clamped_top, COL_W, h, ROP_BLACKNESS);
-        if(shaded && h > 6) {
-            Fill((int16_t)(x + COL_W - 1), (int16_t)(clamped_top + 2), 1, (int16_t)(h - 4), ROP_WHITENESS);
-        }
+        Fill(x, clamped_top, COL_W, 1, ROP_BLACKNESS);
+        Fill(x, clamped_bot, COL_W, 1, ROP_BLACKNESS);
         if(span > 0) {
             top_err = (int16_t)(top_err + top_delta * COL_W);
             while(top_err >= span) {
@@ -89,7 +76,7 @@ static void DrawWallFace(const Slice_t* left, const Slice_t* right) {
 }
 
 static void DrawSeam(uint16_t x, int16_t top, int16_t bot) {
-    Fill((int16_t)x, top, 1, (int16_t)(bot - top + 1), ROP_WHITENESS);
+    Fill((int16_t)x, top, 1, (int16_t)(bot - top + 1), ROP_BLACKNESS);
 }
 
 static void DrawWalls(const RayGame_t* game) {
@@ -137,10 +124,10 @@ static void DrawWalls(const RayGame_t* game) {
 }
 
 static void DrawGun(void) {
-    Fill(64, 50, 40, 14, ROP_BLACKNESS);
-    Fill(76, 42, 16, 16, ROP_BLACKNESS);
-    Fill(81, 34, 6, 16, ROP_BLACKNESS);
-    Fill(70, 50, 28, 4, ROP_WHITENESS);
+    Fill(71, 54, 26, 10, ROP_BLACKNESS);
+    Fill(79, 48, 10, 10, ROP_BLACKNESS);
+    Fill(83, 42, 3, 9, ROP_BLACKNESS);
+    Fill(76, 54, 16, 3, ROP_WHITENESS);
 }
 
 static void DrawEnemy(const RayGame_t* game) {

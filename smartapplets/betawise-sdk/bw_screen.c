@@ -1,0 +1,83 @@
+#include "bw_screen.h"
+
+#include "os3k.h"
+
+void _OS3K_SetCursor(uint8_t row, uint8_t col, CursorMode_e cursor_mode);
+
+static uint8_t ClampWidth(uint8_t width) {
+    return width > BW_SCREEN_SAFE_COLS ? BW_SCREEN_SAFE_COLS : width;
+}
+
+void bw_screen_set_reverse(bool enabled) {
+    LCD_CMD_REG_LEFT = LCD_CMD_ON(1u);
+    LCD_CMD_REG_RIGHT = LCD_CMD_ON(1u);
+    LCD_CMD_REG_LEFT = LCD_CMD_REVERSE(enabled ? 1u : 0u);
+    LCD_CMD_REG_RIGHT = LCD_CMD_REVERSE(enabled ? 1u : 0u);
+}
+
+void bw_screen_set_reverse_cached(uint32_t* cached_state, bool enabled) {
+    if((*cached_state != 0) == enabled) {
+        return;
+    }
+    bw_screen_set_reverse(enabled);
+    *cached_state = enabled ? 1u : 0u;
+}
+
+void bw_screen_clear_reverse_cache(uint32_t* cached_state) {
+    bw_screen_set_reverse(false);
+    *cached_state = 0;
+}
+
+void bw_screen_clear_line(char* line, uint8_t width) {
+    width = ClampWidth(width);
+    for(uint8_t i = 0; i < width; i++) {
+        line[i] = ' ';
+    }
+    line[width] = '\0';
+}
+
+void bw_screen_format_line(char* line, uint8_t width, const char* text) {
+    width = ClampWidth(width);
+    bw_screen_clear_line(line, width);
+    for(uint8_t i = 0; i < width && text[i] != '\0'; i++) {
+        line[i] = text[i];
+    }
+}
+
+bool bw_screen_same_line(const char* left, const char* right, uint8_t width) {
+    width = ClampWidth(width);
+    for(uint8_t i = 0; i < width; i++) {
+        if(left[i] != right[i]) return false;
+    }
+    return true;
+}
+
+void bw_screen_copy_line(char* target, const char* source, uint8_t width) {
+    width = ClampWidth(width);
+    for(uint8_t i = 0; i < width; i++) {
+        target[i] = source[i];
+    }
+    target[width] = '\0';
+}
+
+void bw_screen_invalidate_cache(char* cache) {
+    cache[0] = '\0';
+}
+
+void bw_screen_put_line(uint8_t row, const char* text, uint8_t width) {
+    char line[BW_SCREEN_SAFE_COLS + 1];
+    width = ClampWidth(width);
+    bw_screen_format_line(line, width, text);
+    _OS3K_SetCursor(row, 1, CURSOR_MODE_HIDE);
+    PutStringRaw(line);
+}
+
+void bw_screen_put_cached_line(uint8_t row, const char* text, char* cache, uint8_t width) {
+    char line[BW_SCREEN_SAFE_COLS + 1];
+    width = ClampWidth(width);
+    bw_screen_format_line(line, width, text);
+    if(bw_screen_same_line(line, cache, width)) return;
+    bw_screen_copy_line(cache, line, width);
+    _OS3K_SetCursor(row, 1, CURSOR_MODE_HIDE);
+    PutStringRaw(line);
+}

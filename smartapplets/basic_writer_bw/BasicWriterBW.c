@@ -1,6 +1,4 @@
-#include "../betawise-sdk/applet.h"
-#include "../betawise-sdk/file_store.h"
-#include "os3k.h"
+#include "../betawise-sdk/bw.h"
 
 enum { FILE_COUNT = 8 };
 enum { MAX_FILE_BYTES = 256 };
@@ -19,7 +17,7 @@ typedef struct {
 typedef struct {
     uint32_t active_slot;
     uint32_t banner_slot;
-    uint32_t banner_until_ms;
+    BwTimer banner_timer;
     uint32_t loaded_mask;
     uint32_t dirty_mask;
     Slot_t slots[FILE_COUNT];
@@ -28,9 +26,9 @@ typedef struct {
 void _OS3K_ClearScreen();
 void _OS3K_SetCursor(uint8_t row, uint8_t col, CursorMode_e cursor_mode);
 
-APPLET_ENTRY(alpha_neo_process_message);
+BW_APP_ENTRY(alpha_neo_process_message);
 
-APPLET_STATE(AppState_t);
+BW_APP_STATE(AppState_t);
 
 static inline Slot_t* ActiveSlot(AppState_t* state) {
     uint32_t index = state->active_slot > 0 ? state->active_slot - 1 : 0;
@@ -50,32 +48,32 @@ static unsigned long SlotHandle(uint32_t slot) {
 }
 
 static bool BannerActive(const AppState_t* state) {
-    return state->banner_slot != 0 && GetUptimeMilliseconds() < state->banner_until_ms;
+    return state->banner_slot != 0 && !bw_time_due(bw_now_ms(), state->banner_timer.next_ms);
 }
 
 static void ClearExpiredBanner(AppState_t* state) {
     if(state->banner_slot != 0 && !BannerActive(state)) {
         state->banner_slot = 0;
-        state->banner_until_ms = 0;
+        state->banner_timer.next_ms = 0;
     }
 }
 
 static void ShowBanner(AppState_t* state, uint32_t slot) {
     state->banner_slot = slot;
-    state->banner_until_ms = GetUptimeMilliseconds() + BANNER_MS;
+    bw_timer_reset(&state->banner_timer, BANNER_MS);
 }
 
 static void LoadSlot(AppState_t* state, uint32_t slot) {
     Slot_t* target = &state->slots[slot - 1];
     memset(target, 0, sizeof(*target));
-    (void)applet_load_snapshot(SlotHandle(slot), SLOT_MAGIC, target, sizeof(*target));
+    (void)bw_store_load_snapshot(SlotHandle(slot), SLOT_MAGIC, target, sizeof(*target));
     if(target->cursor > target->len) target->cursor = target->len;
     EnsureCursorVisible(target);
     state->loaded_mask |= 1u << (slot - 1);
 }
 
 static void SaveSlot(const AppState_t* state, uint32_t slot) {
-    (void)applet_save_snapshot(SlotHandle(slot), SLOT_MAGIC, &state->slots[slot - 1], sizeof(state->slots[0]));
+    (void)bw_store_save_snapshot(SlotHandle(slot), SLOT_MAGIC, &state->slots[slot - 1], sizeof(state->slots[0]));
 }
 
 static void MarkSlotDirty(AppState_t* state, uint32_t slot) {
@@ -271,7 +269,7 @@ static void ZeroState(AppState_t* state) {
 static void HandleChar(AppState_t* state, uint32_t param) {
     EnsureSlotLoaded(state, state->active_slot);
     Slot_t* slot = ActiveSlot(state);
-    uint8_t byte = param & 0xff;
+    uint8_t byte = (uint8_t)bw_key_id(param);
     if(byte == '\r' || byte == '\n') {
         if(InsertByte(slot, '\n')) {
             MarkSlotDirty(state, state->active_slot);
@@ -290,7 +288,7 @@ static void HandleChar(AppState_t* state, uint32_t param) {
 static void HandleKey(AppState_t* state, uint32_t param, uint32_t* status) {
     EnsureSlotLoaded(state, state->active_slot);
     Slot_t* slot = ActiveSlot(state);
-    uint32_t key = param & 0xff;
+    uint32_t key = bw_key_id(param);
     uint32_t wanted_slot = 0;
     switch(key) {
         case KEY_LEFT: MoveLeft(slot); break;
@@ -309,7 +307,7 @@ static void HandleKey(AppState_t* state, uint32_t param, uint32_t* status) {
         case KEY_APPLETS:
         case KEY_ESC:
             FlushSlotIfDirty(state, state->active_slot);
-            *status = APPLET_EXIT_STATUS;
+            *status = BW_STATUS_EXIT;
             break;
         default:
             break;
@@ -327,8 +325,9 @@ static void HandleKey(AppState_t* state, uint32_t param, uint32_t* status) {
 
 void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* status) {
     AppState_t* state = State();
+    uint32_t base_message = bw_message_id(message);
     *status = 0;
-    switch(message) {
+    switch(base_message) {
         case MSG_SETFOCUS:
             ZeroState(state);
             DrawDocument(state);
@@ -350,7 +349,7 @@ void alpha_neo_process_message(uint32_t message, uint32_t param, uint32_t* statu
             }
             break;
         default:
-            *status = APPLET_UNHANDLED_STATUS;
+            *status = BW_STATUS_UNHANDLED;
             break;
     }
 }
