@@ -1171,9 +1171,10 @@ mod tests {
     }
 
     fn launch_forth_mini_through_menu(session: &mut FirmwareSession) {
-        for _ in 0..19 {
-            session.tap_matrix_code_long(0x15);
-            session.run_steps(250_000);
+        let slot = session.applet_slot_for_validation("Forth Mini").expect("Forth Mini is installed");
+        for _ in 1..slot {
+            session.tap_matrix_code_debug(0x15);
+            session.run_realtime_steps(1_000_000);
         }
         session.press_matrix_code(0x69);
         session.run_steps(3_000_000);

@@ -41,6 +41,24 @@ cargo run -- ../analysis/cab/os3kneorom.os3kos
 Repeat the initialization after changing the installed applet set; the saved
 recovery state contains applet information.
 
+Build the repository's C SmartApplets with:
+
+```sh
+for applet in alpha_usb_bw basic_writer_bw doom_bw file_fixer_bw floppy_bird_bw forth_mini_bw snake_bw write_or_die_bw; do
+  ./scripts/build-smartapplet.sh "$applet" --no-validate
+done
+(cd alpha-emu && cargo run -- --headless --reinit-memory ../analysis/cab/os3kneorom.os3kos)
+```
+
+Run these commands from the repository root. The build needs `m68k-elf-gcc` and
+`m68k-elf-binutils`. The emulator automatically loads the generated applets
+from `exports/applets/`. Click **Boot into SmartApplets list**, then use the
+arrow keys and Enter to choose one.
+
+Alpha USB is for switching a physical NEO to direct USB mode. File Fixer
+operates on AlphaWord's file table; a direct launch before that table is
+initialized reports `bad ptr`.
+
 Text input follows the character produced by the host keyboard layout. For
 example, on a Czech layout, Shift plus a number-row key enters a digit. The
 stock firmware's emulated keyboard supports ASCII characters; unsupported

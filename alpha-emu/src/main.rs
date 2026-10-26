@@ -2566,8 +2566,8 @@ fn forth_mini_probe_evaluates(session: &mut FirmwareSession) -> bool {
 
 fn launch_forth_mini_through_menu_with_downs(session: &mut FirmwareSession, down_count: usize) {
     for _ in 0..down_count {
-        session.tap_matrix_code_long(0x15);
-        session.run_steps(500_000);
+        session.tap_matrix_code_debug(0x15);
+        session.run_realtime_steps(1_000_000);
     }
     session.press_matrix_code(0x69);
     session.run_steps(3_000_000);
@@ -2751,13 +2751,16 @@ fn launch_file_fixer_internal(session: &mut FirmwareSession) -> Result<()> {
     session
         .start_applet_message_for_validation("File Fixer", 0x19)
         .map_err(|error| anyhow::anyhow!("failed to launch File Fixer: {error}"))?;
-    session.run_realtime_steps(50_000_000);
+    let returned = session.run_until_pc_or_steps(0x0042_6752, 50_000_000);
     let snapshot = session.snapshot();
     if let Some(text) = &snapshot.text_screen {
         println!("LCD text output:\n{text}");
     }
     if let Some(exception) = &snapshot.last_exception {
         anyhow::bail!("File Fixer exception: {exception}");
+    }
+    if !returned {
+        anyhow::bail!("File Fixer did not return within the instruction limit");
     }
     println!("File Fixer ran successfully!");
     Ok(())
