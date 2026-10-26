@@ -2,21 +2,30 @@
 #include "game.h"
 #include "render.h"
 
+enum {
+    DOOM_FB_BYTES = RAY_VIEW_W * (RAY_VIEW_H / 8),
+    RAW_KEY_SPACE = 0x79,
+    STEP_MS = 120
+};
+
 typedef struct {
     RayGame_t game;
     BwTimer step_timer;
     int8_t pending_move;
     int8_t pending_turn;
     uint8_t initialized;
+    uint8_t framebuffer[DOOM_FB_BYTES];
+    uint16_t depth[RAY_VIEW_W];
+    int16_t ray_x[RAY_COLS];
+    int16_t ray_y[RAY_COLS];
 } RayState_t;
-
-enum {
-    RAW_KEY_SPACE = 0x79,
-    STEP_MS = 70
-};
 
 BW_APP_ENTRY(alpha_neo_process_message);
 BW_APP_STATE(RayState_t);
+
+static void Render(RayState_t* state) {
+    ray_render_frame(&state->game, state->framebuffer, state->depth, state->ray_x, state->ray_y);
+}
 
 static void Reset(RayState_t* state) {
     ray_game_init(&state->game);
@@ -25,11 +34,7 @@ static void Reset(RayState_t* state) {
     state->pending_turn = 0;
     state->initialized = 1;
     SetCursorMode(CURSOR_MODE_HIDE);
-    ray_render_frame(&state->game);
-}
-
-static void Redraw(RayState_t* state) {
-    ray_render_frame(&state->game);
+    Render(state);
 }
 
 static void QueueMove(RayState_t* state, RayMove_t move) {
@@ -43,26 +48,38 @@ static void QueueTurn(RayState_t* state, int8_t turn) {
 }
 
 static void TickIfDue(RayState_t* state) {
-    if(!bw_timer_due_and_advance(&state->step_timer, STEP_MS)) return;
+    uint32_t now = bw_now_ms();
+    bool redraw = false;
+    if(!bw_time_due(now, state->step_timer.next_ms)) return;
 
     if(state->pending_turn < 0) {
         ray_game_turn_left(&state->game);
+        state->pending_turn = 0;
+        state->pending_move = 0;
+        redraw = true;
     } else if(state->pending_turn > 0) {
         ray_game_turn_right(&state->game);
+        state->pending_turn = 0;
+        state->pending_move = 0;
+        redraw = true;
     } else if(state->pending_move < 0) {
         ray_game_move(&state->game, RAY_MOVE_BACKWARD);
+        state->pending_move = 0;
+        redraw = true;
     } else if(state->pending_move > 0) {
         ray_game_move(&state->game, RAY_MOVE_FORWARD);
-    } else {
-        return;
+        state->pending_move = 0;
+        redraw = true;
     }
-
-    state->pending_move = 0;
-    state->pending_turn = 0;
-    Redraw(state);
+    if(redraw || state->game.muzzle_flash != 0 || state->game.hit_flash != 0) {
+        ray_game_tick(&state->game);
+        bw_timer_reset(&state->step_timer, STEP_MS);
+        Render(state);
+    }
 }
 
 static void HandleKey(RayState_t* state, uint32_t key, uint32_t* status) {
+    if(state->initialized == 0) Reset(state);
     switch(bw_key_id(key)) {
         case KEY_UP:
             QueueMove(state, RAY_MOVE_FORWARD);
@@ -79,13 +96,11 @@ static void HandleKey(RayState_t* state, uint32_t key, uint32_t* status) {
         case KEY_SPACE:
         case RAW_KEY_SPACE:
             ray_game_shoot(&state->game);
-            break;
+            Render(state);
+            return;
         case KEY_R:
-            ray_game_init(&state->game);
-            bw_timer_reset(&state->step_timer, STEP_MS);
-            state->pending_move = 0;
-            state->pending_turn = 0;
-            break;
+            Reset(state);
+            return;
         case KEY_ESC:
         case KEY_APPLETS:
             *status = BW_STATUS_EXIT;
@@ -93,17 +108,24 @@ static void HandleKey(RayState_t* state, uint32_t key, uint32_t* status) {
         default:
             return;
     }
-    Redraw(state);
 }
 
 static void HandleChar(RayState_t* state, uint32_t param) {
     uint8_t c = (uint8_t)bw_key_id(param);
+    if(state->initialized == 0) Reset(state);
     if(c == ' ') {
         ray_game_shoot(&state->game);
-        Redraw(state);
+        Render(state);
     } else if(c == 'r' || c == 'R') {
-        ray_game_init(&state->game);
-        Redraw(state);
+        Reset(state);
+    } else if(c == 'w' || c == 'W') {
+        QueueMove(state, RAY_MOVE_FORWARD);
+    } else if(c == 's' || c == 'S') {
+        QueueMove(state, RAY_MOVE_BACKWARD);
+    } else if(c == 'a' || c == 'A') {
+        QueueTurn(state, -1);
+    } else if(c == 'd' || c == 'D') {
+        QueueTurn(state, 1);
     }
 }
 

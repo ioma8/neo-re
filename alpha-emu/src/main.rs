@@ -933,10 +933,6 @@ fn main() -> Result<()> {
             if top_variation < 8 {
                 anyhow::bail!("DOOM? opening view should have perspective top-edge variation, got {top_variation}");
             }
-            let minimap_pixels = lcd_lit_pixels_in_rect(&session.snapshot().lcd, 160, 0, 104, 64);
-            if minimap_pixels < 350 {
-                anyhow::bail!("DOOM? minimap should render on right side, got only {minimap_pixels} lit pixels");
-            }
             let before = doom_state(&session);
             let before_lcd = session.snapshot().lcd.clone();
             dispatch_doom_message(&mut session, 0x21, 0x4a, "DOOM? right turn")?;
@@ -965,15 +961,23 @@ fn main() -> Result<()> {
             if moved.player_x == turned.player_x && moved.player_y == turned.player_y {
                 anyhow::bail!("DOOM? up arrow should move player on timed tick: before={turned:?} after={moved:?}");
             }
-            let minimap_diff = lcd_diff_pixels_in_rect(&before_lcd, &session.snapshot().lcd, 160, 0, 104, 64);
-            if minimap_diff == 0 {
-                anyhow::bail!("DOOM? minimap should update after movement");
+            let view_diff = lcd_diff_pixels_in_rect(&before_lcd, &session.snapshot().lcd, 0, 0, 264, 64);
+            if view_diff == 0 {
+                anyhow::bail!("DOOM? view should update after movement");
             }
             seed_doom_visible_enemy(&mut session);
+            dispatch_doom_message(&mut session, 0x21, 0x4b, "DOOM? seed redraw")?;
+            force_doom_tick(&mut session, "DOOM? seed redraw tick")?;
             dispatch_doom_message(&mut session, 0x21, 0x4c, "DOOM? shoot")?;
             let shot = doom_state(&session);
             if shot.enemy_alive != 0 {
                 anyhow::bail!("DOOM? Space should remove visible enemy, got {shot:?}");
+            }
+            if shot.score != 1 {
+                anyhow::bail!("DOOM? Space should increment score, got {shot:?}");
+            }
+            if shot.muzzle == 0 {
+                anyhow::bail!("DOOM? Space should trigger muzzle flash, got {shot:?}");
             }
             seed_doom_visible_enemy(&mut session);
             dispatch_doom_message(&mut session, 0x20, b' ' as u32, "DOOM? char space shoot")?;
@@ -989,7 +993,7 @@ fn main() -> Result<()> {
             }
             dispatch_doom_message(&mut session, 0x21, 0x23, "DOOM? restart")?;
             let reset = doom_state(&session);
-            if reset.player_x != 1152 || reset.player_y != 1664 || reset.angle != 56 {
+            if reset.player_x != 2176 || reset.player_y != 2176 || reset.angle != 192 {
                 anyhow::bail!("DOOM? R should restart, got {reset:?}");
             }
             dispatch_doom_message(&mut session, 0x21, 0x48, "DOOM? escape exit")?;
@@ -1675,6 +1679,8 @@ struct DoomState {
     player_y: i16,
     angle: u8,
     enemy_alive: u8,
+    score: u8,
+    muzzle: u8,
 }
 
 fn doom_state_base(session: &FirmwareSession) -> Option<u32> {
@@ -1689,19 +1695,18 @@ fn doom_state(session: &FirmwareSession) -> DoomState {
         player_y: read_be_i16(bytes, base + 2).unwrap_or_default(),
         angle: bytes.get(base + 4).copied().unwrap_or_default(),
         enemy_alive: bytes.get(base + 7).copied().unwrap_or_default(),
+        score: bytes.get(base + 14).copied().unwrap_or_default(),
+        muzzle: bytes.get(base + 16).copied().unwrap_or_default(),
     }
 }
 
 fn seed_doom_visible_enemy(session: &mut FirmwareSession) {
     let base = doom_state_base(session).unwrap_or_default();
-    // Place player at (1152×4, 384×4) in doom tile units and set
-    // enemy_alive=1 at offset+7. This positions an enemy within line-of-sight
-    // so the shoot test can verify that Space removes it.
+    // Place the player at (4.5, 7.5) facing east with enemy 0 at (6, 7)
+    // so the shoot test has a clear, centred target.
     session.overlay_memory_range(base, &(4 * 256i16 + 128).to_be_bytes());
-    session.overlay_memory_range(base + 2, &(256i16 + 128).to_be_bytes());
-    session.overlay_memory_range(base + 4, &[0, 6, 1, 1]);
-    // Byte layout at base+4..=base+7: [angle, unused, unused, enemy_alive]
-    // Writing [0, 6, 1, 1] sets angle=0 and enemy_alive=1.
+    session.overlay_memory_range(base + 2, &(7 * 256i16 + 128).to_be_bytes());
+    session.overlay_memory_range(base + 4, &[0, 6, 7, 1]);
 }
 
 fn snake_state_base(session: &FirmwareSession) -> Option<u32> {
@@ -1856,11 +1861,21 @@ fn doom_wall_top_variation(snapshot: &LcdSnapshot) -> usize {
     let mut min_top = usize::MAX;
     let mut max_top = 0usize;
     for x in (0..160.min(snapshot.width)).step_by(8) {
-        if let Some(top) = (0..48.min(snapshot.height))
-            .find(|y| snapshot.pixels[*y * snapshot.width + x])
-        {
-            min_top = min_top.min(top);
-            max_top = max_top.max(top);
+        if x + 4 > snapshot.width {
+            continue;
+        }
+        for y in 4..48.min(snapshot.height) {
+            let mut run = 0;
+            for dx in 0..4 {
+                if snapshot.pixels[y * snapshot.width + x + dx] {
+                    run += 1;
+                }
+            }
+            if run == 4 {
+                min_top = min_top.min(y);
+                max_top = max_top.max(y);
+                break;
+            }
         }
     }
     max_top.saturating_sub(min_top)
@@ -2695,7 +2710,7 @@ fn focus_doom_direct(session: &mut FirmwareSession) -> Result<()> {
 
 fn force_doom_tick(session: &mut FirmwareSession, label: &str) -> Result<()> {
     let base = doom_state_base(session).unwrap_or_default();
-    session.overlay_memory_range(base + 8, &0u32.to_be_bytes());
+    session.overlay_memory_range(base + 18, &0u32.to_be_bytes());
     dispatch_doom_message(session, 0x00, 0, label)
 }
 

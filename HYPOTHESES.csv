@@ -18,3 +18,16 @@ Blink overlay mistakes static applet-menu selection marker for an editing cursor
 "XOR cursor over the menu dash interrupts one column, so the blink heuristic masks only the other",Compare firmware menu on/off PBM and reconstruct both cursor columns,proven,Before fix blink changes 16 pixels and leaves a line; after fix changes 32 and restores dash
 Forth Mini test selects the wrong applet because it assumes 19 menu presses,Compare Forth Mini slot and actual menu inventory with hardcoded navigation,proven,"Forth slot is 4; three debug taps launch it, while 19 long taps do not"
 File Fixer direct-launch harness runs beyond applet return and faults in unrelated code,Stop execution at validation return PC after launching File Fixer,proven,Stopping at return avoids exception; applet reports bad ptr when AlphaWord table is uninitialized
+DrawBitmap source is page-major with bit 1 = black,Blit a synthetic 264x64 buffer and compare every LCD pixel,proved,"264 bytes/page; bit r = row, LSB top; 1=black. Full-frame blit matched exactly."
+The applet framebuffer at state+25 survives firmware scratch use,Run DOOM and compare framebuffer writes with A5/SP bounds,proved,"A5=0x68364, state=0x68664, fb=0x6867d, ~0x1549c bytes headroom to SP=0x7fb04."
+Wall projection must use perpendicular ray depth to avoid a height jump,Compare wall height at distance 135 and 136 before/after the formula change,proved,Old formula jumped 64px to 70px between adjacent cells; perpendicular depth gives a smooth projection.
+Shooting checks distance and aim but not line of sight,Place an enemy behind a wall and dispatch Space,proved,Added Bresenham line-of-sight; behind-wall shots are rejected.
+The DOOM validator's forced tick writes the old timer offset,Inspect RayState layout and validator overlay address,proved,Timer is at game+18 after the RayGame_t rewrite; validator now writes base+18.
+Minimap base is copied at byte offset x/8 instead of x,Inspect the right-side LCD crop after the minimap refactor,proved,Framebuffer is one byte per column; copy 40 columns at x=224.
+The new 264x64 raycaster exceeds the 50ms tick budget,Measure focus cycles before and after optimization,proved,8.22M cycles (~249ms) dropped to 3.63M (~110ms) with 2px columns/blocks and a static minimap; tick is 120ms.
+Global hit_flash makes every enemy flash when one is hit,Read DrawEnemies and ray_game_shoot,proved,Removed global flash from enemy drawing; hit_flash remains for future UI use.
+Enemy view is discarded below 96 units of depth,Read ray_game_enemy_view and test a close approach,proved,Threshold lowered to 48; centre/bottom math stays inside int16.
+RAY_MOVE_STEP is dead because ray_game_move hardcodes >>2,Host test expected y-60 after a forward step,proved,ray_game_move now scales COS/SIN by RAY_MOVE_STEP; host test passes.
+Aim dot product overflows int16 at long range,Review ray_game_shoot arithmetic,proved,Casts lat_abs to int32 before multiplying by 10.
+Out-of-bounds wall type reads past the map,"Call ray_game_wall_type(255,255)",proved,Returns solid wall type 1; covered by host test.
+Shaded N/S wall span disappears because the shading path clears mask bits without first filling the span,Build the shaded wall variant and inspect the LCD,proved,"Fill the span black first, then clear the dither mask; N/S faces now render gray instead of vanishing."
