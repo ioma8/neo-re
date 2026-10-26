@@ -27,6 +27,20 @@ To boot another Small ROM-compatible image:
 cargo run -- ../analysis/cab/smallos3kneorom.os3kos
 ```
 
+The full System 3 image also needs stock SmartApplets. Extract
+`alphawordplus.os3kapp`, `calculator.os3kapp`, and `controlpanel.os3kapp`
+from the NEO Manager installer into `analysis/cab/`. Device-dumped applets in
+`analysis/device-dumps/applets/` take precedence when available. On first use,
+initialize the virtual memory with the firmware's recovery procedure:
+
+```sh
+cargo run -- --headless --reinit-memory ../analysis/cab/os3kneorom.os3kos
+cargo run -- ../analysis/cab/os3kneorom.os3kos
+```
+
+Repeat the initialization after changing the installed applet set; the saved
+recovery state contains applet information.
+
 Headless full System 3 firmware boot:
 
 ```sh

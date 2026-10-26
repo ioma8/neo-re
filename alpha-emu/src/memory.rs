@@ -549,6 +549,14 @@ fn load_stock_applets(bytes: &mut [u8]) {
         })
         .collect::<Vec<_>>();
     applets.sort();
+    if applets.is_empty() {
+        let cab_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../analysis/cab");
+        applets = ["alphawordplus.os3kapp", "calculator.os3kapp", "controlpanel.os3kapp"]
+            .into_iter()
+            .map(|name| cab_dir.join(name))
+            .filter(|path| path.is_file())
+            .collect();
+    }
     let stock_limit = 31usize.saturating_sub(extra_applets.len());
 
     let mut cursor = STOCK_APPLET_BASE;
