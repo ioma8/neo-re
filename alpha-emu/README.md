@@ -41,6 +41,11 @@ cargo run -- ../analysis/cab/os3kneorom.os3kos
 Repeat the initialization after changing the installed applet set; the saved
 recovery state contains applet information.
 
+Text input follows the character produced by the host keyboard layout. For
+example, on a Czech layout, Shift plus a number-row key enters a digit. The
+stock firmware's emulated keyboard supports ASCII characters; unsupported
+characters such as Czech accented letters cannot currently be entered.
+
 Headless full System 3 firmware boot:
 
 ```sh

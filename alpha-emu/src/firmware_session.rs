@@ -471,13 +471,13 @@ impl FirmwareSession {
     pub fn tap_char_for_cycles(&mut self, value: char, press_cycles: u64, release_cycles: u64) {
         if let Some(stroke) = matrix_key_stroke_for_char(value) {
             if stroke.shift {
-                self.memory.tap_key_chord_for_cycles(
+                self.memory.tap_text_for_cycles(
                     &[left_shift_key(), stroke.key],
                     press_cycles,
                     release_cycles,
                 );
             } else {
-                self.memory.tap_key_chord_for_cycles(
+                self.memory.tap_text_for_cycles(
                     &[stroke.key],
                     press_cycles,
                     release_cycles,

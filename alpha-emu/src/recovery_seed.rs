@@ -156,10 +156,16 @@ impl RecoverySeed {
         }
         let mut cursor = MAGIC.len();
         let count = read_u32(&bytes, &mut cursor)? as usize;
+        if count != RANGES.len() {
+            return Err(RecoverySeedError::InvalidSeed);
+        }
         let mut ranges = Vec::with_capacity(count);
-        for _ in 0..count {
+        for expected in RANGES {
             let start = read_u32(&bytes, &mut cursor)?;
             let len = read_u32(&bytes, &mut cursor)?;
+            if (RecoverySeedRange { start, len }) != *expected {
+                return Err(RecoverySeedError::InvalidSeed);
+            }
             let end = cursor.saturating_add(len as usize);
             if end > bytes.len() {
                 return Err(RecoverySeedError::InvalidSeed);
@@ -269,6 +275,25 @@ mod tests {
         assert!(matches!(result, Err(RecoverySeedError::InvalidSeed)));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_rejects_unexpected_memory_ranges() {
+        let path = std::env::temp_dir()
+            .join(format!("alpha-emu-invalid-range-{}.seed", std::process::id()));
+        let mut data = MAGIC.to_vec();
+        data.extend_from_slice(&(RANGES.len() as u32).to_be_bytes());
+        for range in RANGES {
+            data.extend_from_slice(&(range.start + 1).to_be_bytes());
+            data.extend_from_slice(&range.len.to_be_bytes());
+            data.resize(data.len() + range.len as usize, 0);
+        }
+        std::fs::write(&path, data).unwrap();
+        assert!(matches!(
+            RecoverySeed::read(&path),
+            Err(RecoverySeedError::InvalidSeed)
+        ));
+        std::fs::remove_file(path).unwrap();
     }
 }
 

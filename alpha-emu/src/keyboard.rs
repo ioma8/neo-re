@@ -315,6 +315,7 @@ struct TimedKeyPhase {
     key_codes: [Option<MatrixKey>; 4],
     remaining_cycles: u64,
     all_rows: bool,
+    text_input: bool,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -325,7 +326,6 @@ pub(crate) struct Keyboard {
     phase: usize,
     reads_in_phase: usize,
     selected_rows: Option<u16>,
-    prior_timed_active: Vec<MatrixKey>,
 }
 
 impl Keyboard {
@@ -334,7 +334,6 @@ impl Keyboard {
         self.timed_script.clear();
         self.phase = 0;
         self.reads_in_phase = 0;
-        self.prior_timed_active.clear();
         self.held.clear();
     }
 
@@ -377,12 +376,20 @@ impl Keyboard {
         press_cycles: u64,
         release_cycles: u64,
     ) {
+        self.tap_chord_for_cycles_inner(keys, press_cycles, release_cycles, false);
+    }
+
+    pub(crate) fn tap_text_for_cycles(&mut self, keys: &[MatrixKey], press_cycles: u64, release_cycles: u64) {
+        self.tap_chord_for_cycles_inner(keys, press_cycles, release_cycles, true);
+    }
+
+    fn tap_chord_for_cycles_inner(&mut self, keys: &[MatrixKey], press_cycles: u64, release_cycles: u64, text_input: bool) {
         let mut key_codes = [None, None, None, None];
         for (slot, key) in key_codes.iter_mut().zip(keys.iter().copied()) {
             *slot = Some(key);
         }
-        self.push_timed_phase(key_codes, press_cycles.max(1), false);
-        self.push_timed_phase([None, None, None, None], release_cycles.max(1), false);
+        self.push_timed_phase(key_codes, press_cycles.max(1), false, text_input);
+        self.push_timed_phase([None, None, None, None], release_cycles.max(1), false, text_input);
     }
 
     pub(crate) fn tap_chord_debug(&mut self, keys: &[MatrixKey]) {
@@ -473,6 +480,11 @@ impl Keyboard {
             }
         }
         for key in self.held.iter().copied() {
+            if self.timed_script.front().is_some_and(|phase| phase.text_input)
+                && (key == RIGHT_SHIFT_KEY || key == LEFT_SHIFT_KEY)
+            {
+                continue;
+            }
             if key.is_visible_on_rows(self.selected_rows) {
                 active_columns |= key.column_mask();
             }
@@ -493,24 +505,6 @@ impl Keyboard {
             self.timed_script.pop_front();
         }
     }
-
-    pub(crate) fn service_timed_script_keys(&mut self) {
-        if self.timed_script.is_empty() {
-            return;
-        }
-        let active: Vec<MatrixKey> = self.read_timed_script_keys().iter().map(|sk| sk.key).collect();
-        /* Remove any previously-held timed keys that are no longer active */
-        self.held.retain(|key| !self.prior_timed_active.contains(key) || active.contains(key));
-        /* Add newly active timed keys */
-        for key in &active {
-            if !self.held.contains(key) {
-                self.held.push(*key);
-            }
-        }
-        self.prior_timed_active = active;
-    }
-
-
 
     fn read_script_keys(&mut self) -> Vec<ScriptKey> {
         let Some(phase) = self.script.get(self.phase).copied() else {
@@ -560,11 +554,13 @@ impl Keyboard {
         key_codes: [Option<MatrixKey>; 4],
         remaining_cycles: u64,
         all_rows: bool,
+        text_input: bool,
     ) {
         self.timed_script.push_back(TimedKeyPhase {
             key_codes,
             remaining_cycles,
             all_rows,
+            text_input,
         });
     }
 }
@@ -588,6 +584,7 @@ pub(crate) struct CharKeyStroke {
 }
 
 const LEFT_SHIFT_KEY: MatrixKey = MatrixKey::new(0x0e);
+const RIGHT_SHIFT_KEY: MatrixKey = MatrixKey::new(0x6e);
 
 pub fn matrix_key_for_char(value: char) -> Option<MatrixKey> {
     matrix_key_stroke_for_char(value).map(|stroke| stroke.key)
@@ -795,6 +792,29 @@ mod tests {
         keyboard.select_row(0x05);
 
         assert_eq!(keyboard.read_matrix_input(), 0xfd);
+    }
+
+    #[test]
+    fn timed_key_does_not_release_a_physically_held_key() {
+        let mut keyboard = Keyboard::default();
+        let key = MatrixKey::new(0x6e);
+        keyboard.select_row(0x0e);
+        keyboard.press(key);
+        keyboard.tap_chord_for_cycles(&[key], 100, 50);
+        keyboard.advance_cycles(100);
+        assert_eq!(keyboard.read_matrix_input() & key.column_mask(), 0);
+    }
+
+    #[test]
+    fn text_tap_masks_held_shift_only_during_playback() {
+        let mut keyboard = Keyboard::default();
+        let shift = MatrixKey::new(0x6e);
+        keyboard.select_row(shift.row());
+        keyboard.press(shift);
+        keyboard.tap_text_for_cycles(&[MatrixKey::new(0x3b)], 100, 50);
+        assert_ne!(keyboard.read_matrix_input() & shift.column_mask(), 0);
+        keyboard.advance_cycles(150);
+        assert_eq!(keyboard.read_matrix_input() & shift.column_mask(), 0);
     }
 
     #[test]

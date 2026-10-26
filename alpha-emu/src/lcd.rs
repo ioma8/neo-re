@@ -72,7 +72,8 @@ impl Lcd {
                     let value = controller.pixels[page][column];
                     for bit in 0..PAGE_HEIGHT {
                         let x = x_base + column;
-                        let y = page * PAGE_HEIGHT + bit;
+                        let ram_y = page * PAGE_HEIGHT + bit;
+                        let y = (ram_y + LCD_HEIGHT - controller.display_start_line) % LCD_HEIGHT;
                         if x < LCD_WIDTH {
                             let lit = value & (1 << bit) != 0;
                             pixels[y * LCD_WIDTH + x] =
@@ -416,6 +417,17 @@ mod tests {
         let snapshot = lcd.snapshot();
         assert!(!snapshot.pixels[0]);
         assert!(snapshot.pixels[5]);
+    }
+
+    #[test]
+    fn display_start_line_scrolls_display_without_changing_ram() {
+        let mut lcd = Lcd::new();
+        lcd.write_command(0, 0xb1);
+        lcd.write_data(0, 1);
+        lcd.write_command(0, 0x48);
+        assert!(lcd.snapshot().pixels[0]);
+        lcd.write_command(0, 0x40);
+        assert!(lcd.snapshot().pixels[8 * LCD_WIDTH]);
     }
 
     #[test]

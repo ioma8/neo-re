@@ -163,6 +163,10 @@ impl EmuMemory {
             .tap_chord_for_cycles(keys, press_cycles, release_cycles);
     }
 
+    pub(crate) fn tap_text_for_cycles(&mut self, keys: &[MatrixKey], press_cycles: u64, release_cycles: u64) {
+        self.keyboard.tap_text_for_cycles(keys, press_cycles, release_cycles);
+    }
+
     pub(crate) fn tap_key_chord_debug(&mut self, keys: &[MatrixKey]) {
         self.keyboard.tap_chord_debug(keys);
     }
@@ -336,7 +340,6 @@ impl EmuMemory {
 
     pub(crate) fn advance_cpu_cycles(&mut self, cycles: usize) {
         self.keyboard.advance_cycles(cycles as u64);
-        self.keyboard.service_timed_script_keys();
         self.pll_clk32_cycles = self.pll_clk32_cycles.saturating_add(cycles as u64);
         while self.pll_clk32_cycles >= PLL_CLK32_CYCLES_PER_EDGE {
             self.pll_clk32_cycles -= PLL_CLK32_CYCLES_PER_EDGE;
@@ -421,6 +424,12 @@ impl EmuMemory {
         }
         if addr == 0xf449 {
             return self.mmio_bytes.get(&addr).copied().unwrap_or(0) | 0x20;
+        }
+        if (0xf608..=0xf609).contains(&addr) {
+            return (self.timer_counter as u16).to_be_bytes()[(addr - 0xf608) as usize];
+        }
+        if (0xfb00..=0xfb03).contains(&addr) {
+            return self.packed_timebase().to_be_bytes()[(addr - 0xfb00) as usize];
         }
         match addr {
             0x0100_8000 => return self.lcd.read_status(0),
@@ -829,6 +838,31 @@ mod tests {
 
         assert_eq!(memory.get_word(0xffff_f608), Some(992));
         assert_eq!(memory.get_word(0xffff_f608), Some(992));
+        Ok(())
+    }
+
+    #[test]
+    fn timer_register_byte_reads_match_word_read() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+        memory.advance_cpu_cycles(super::CPU_HZ as usize);
+
+        let word = memory.get_word(0xffff_f608).unwrap();
+        assert_eq!(memory.get_byte(0xffff_f608), Some((word >> 8) as u8));
+        assert_eq!(memory.get_byte(0xffff_f609), Some(word as u8));
+        Ok(())
+    }
+
+    #[test]
+    fn timebase_register_byte_reads_match_word_reads() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = FirmwareRuntime::load_small_rom_default()?;
+        let mut memory = EmuMemory::load_small_rom(&firmware)?;
+        memory.timebase_counter = 3_661;
+        for address in [0xffff_fb00, 0xffff_fb02] {
+            let word = memory.get_word(address).unwrap();
+            assert_eq!(memory.get_byte(address), Some((word >> 8) as u8));
+            assert_eq!(memory.get_byte(address + 1), Some(word as u8));
+        }
         Ok(())
     }
 

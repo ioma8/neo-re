@@ -9,7 +9,7 @@ use eframe::egui;
 use crate::firmware::FirmwareRuntime;
 use crate::firmware_session::FirmwareSession;
 use crate::keyboard::{matrix_key_for_char, matrix_key_label};
-use crate::lcd::LcdSnapshot;
+use crate::lcd::{LcdSnapshot, cursor_blink_snapshot};
 use crate::recovery_seed;
 
 const SHIFT_CODE: u8 = 0x6e;
@@ -19,7 +19,7 @@ const CTRL_CODE: u8 = 0x7c;
 const NEO_CPU_HZ: u64 = 33_000_000;
 const REALTIME_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const MAX_REALTIME_STEPS_PER_FRAME: usize = 1_000_000;
-const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(16);
+const MAX_REALTIME_CATCHUP: Duration = Duration::from_millis(100);
 const MAX_REALTIME_WORK_PER_FRAME: Duration = Duration::from_millis(15);
 const SPEED_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
 const GUI_KEY_PRESS_CYCLES: u64 = NEO_CPU_HZ / 25;
@@ -266,10 +266,9 @@ impl eframe::App for AlphaEmuApp {
             .is_some_and(FirmwareSession::is_running)
         {
             let elapsed = elapsed.min(MAX_REALTIME_CATCHUP);
-            let target_cycles =
-                elapsed.as_secs_f64() * NEO_CPU_HZ as f64 + self.realtime_cycle_remainder;
-            let cycle_budget = target_cycles.floor() as u64;
-            self.realtime_cycle_remainder = target_cycles - cycle_budget as f64;
+            let target_cycles = realtime_target_cycles(elapsed, self.realtime_cycle_remainder);
+            let cycle_budget = target_cycles.max(0.0).floor() as u64;
+            self.realtime_cycle_remainder = target_cycles;
             if cycle_budget > 0
                 && let Some(session) = self.session.as_mut()
             {
@@ -278,6 +277,7 @@ impl eframe::App for AlphaEmuApp {
                     MAX_REALTIME_STEPS_PER_FRAME,
                     MAX_REALTIME_WORK_PER_FRAME,
                 );
+                self.realtime_cycle_remainder -= actual_cycles as f64;
                 self.last_target_cycles = cycle_budget;
                 self.last_actual_cycles = actual_cycles;
                 self.sample_realtime_speed(now);
@@ -336,12 +336,17 @@ impl AlphaEmuApp {
             return;
         };
         ctx.input(|input| {
+            if !input.focused {
+                self.modifier_state.sync(session, egui::Modifiers::default());
+                return;
+            }
             self.modifier_state.sync(session, input.modifiers);
             for event in &input.events {
                 match event {
-                    egui::Event::Text(text)
+                    egui::Event::Text(text) | egui::Event::Ime(egui::ImeEvent::Commit(text))
                         if !input.modifiers.ctrl && !input.modifiers.mac_cmd =>
                     {
+                        tracing::debug!(kind = if matches!(event, egui::Event::Text(_)) { "text" } else { "ime" }, chars = text.chars().count(), ascii_digits = text.chars().all(|c| c.is_ascii_digit()), "keyboard input");
                         for character in text.chars() {
                             if let Some(tap) = tap_for_text_char(character) {
                                 tap.apply_as_text(session);
@@ -350,11 +355,12 @@ impl AlphaEmuApp {
                     }
                     egui::Event::Key {
                         key,
+                        physical_key,
                         pressed,
-                        repeat: false,
                         modifiers,
                         ..
                     } => {
+                        tracing::debug!(physical_number = physical_key.is_some_and(|key| matches!(key, egui::Key::Num0 | egui::Key::Num1 | egui::Key::Num2 | egui::Key::Num3 | egui::Key::Num4 | egui::Key::Num5 | egui::Key::Num6 | egui::Key::Num7 | egui::Key::Num8 | egui::Key::Num9)), pressed, shift = modifiers.shift, ctrl = modifiers.ctrl, command = modifiers.mac_cmd, "keyboard key");
                         self.modifier_state.sync(session, *modifiers);
                         let text_event_will_handle =
                             !modifiers.ctrl && !modifiers.mac_cmd && is_printable_text_key(*key);
@@ -362,7 +368,7 @@ impl AlphaEmuApp {
                             && !text_event_will_handle
                             && let Some(tap) = matrix_tap_for_key(*key)
                         {
-                            tap.apply(session);
+                            tap.apply_with_modifiers(session, *modifiers);
                         }
                     }
                     _ => {}
@@ -370,6 +376,11 @@ impl AlphaEmuApp {
             }
         });
     }
+}
+
+fn realtime_target_cycles(elapsed: Duration, remainder: f64) -> f64 {
+    (elapsed.as_secs_f64() * NEO_CPU_HZ as f64 + remainder)
+        .min(MAX_REALTIME_CATCHUP.as_secs_f64() * NEO_CPU_HZ as f64)
 }
 
 fn is_printable_text_key(key: egui::Key) -> bool {
@@ -434,7 +445,6 @@ fn is_printable_text_key(key: egui::Key) -> bool {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct ModifierMatrixState {
-    shift: bool,
     ctrl: bool,
     command: bool,
     option: bool,
@@ -443,13 +453,11 @@ struct ModifierMatrixState {
 impl ModifierMatrixState {
     fn sync(&mut self, session: &mut FirmwareSession, modifiers: egui::Modifiers) -> bool {
         let next = Self {
-            shift: modifiers.shift,
             ctrl: modifiers.ctrl,
             command: modifiers.mac_cmd,
             option: modifiers.alt,
         };
         let mut changed = false;
-        changed |= sync_matrix_key(session, self.shift, next.shift, SHIFT_CODE);
         changed |= sync_matrix_key(session, self.ctrl, next.ctrl, CTRL_CODE);
         changed |= sync_matrix_key(session, self.command, next.command, COMMAND_CODE);
         changed |= sync_matrix_key(session, self.option, next.option, OPTION_CODE);
@@ -479,19 +487,27 @@ enum MatrixTap {
 }
 
 impl MatrixTap {
-    fn apply(self, session: &mut FirmwareSession) {
-        match self {
-            Self::Key(code) => session.tap_matrix_code_for_cycles(
-                code,
-                GUI_KEY_PRESS_CYCLES,
-                GUI_KEY_RELEASE_CYCLES,
-            ),
-            Self::Chord(codes) => session.tap_matrix_chord_for_cycles(
-                codes,
-                GUI_KEY_PRESS_CYCLES,
-                GUI_KEY_RELEASE_CYCLES,
-            ),
+    fn apply_with_modifiers(self, session: &mut FirmwareSession, modifiers: egui::Modifiers) {
+        let codes = self.codes_with_modifiers(modifiers);
+        session.tap_matrix_chord_for_cycles(&codes, GUI_KEY_PRESS_CYCLES, GUI_KEY_RELEASE_CYCLES);
+    }
+
+    fn codes_with_modifiers(self, modifiers: egui::Modifiers) -> Vec<u8> {
+        let mut codes = match self {
+            Self::Key(code) => vec![code],
+            Self::Chord(chord) => chord.to_vec(),
+        };
+        for (held, code) in [
+            (modifiers.shift, SHIFT_CODE),
+            (modifiers.ctrl, CTRL_CODE),
+            (modifiers.mac_cmd, COMMAND_CODE),
+            (modifiers.alt, OPTION_CODE),
+        ] {
+            if held && !codes.contains(&code) {
+                codes.push(code);
+            }
         }
+        codes
     }
 }
 
@@ -894,6 +910,7 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
         let pixel_rect = rect.shrink(LCD_INNER_PADDING);
         let scale_x = pixel_rect.width() / visible_width as f32;
         let scale_y = pixel_rect.height() / visible_height as f32;
+        let lcd = display_lcd_snapshot(lcd, ui.input(|input| input.time));
         for y in 0..visible_height {
             for x in 0..visible_width {
                 if lcd.pixels[y * lcd.width + x] {
@@ -907,6 +924,11 @@ fn render_lcd(ui: &mut egui::Ui, lcd: &LcdSnapshot) {
             }
         }
     });
+}
+
+fn display_lcd_snapshot(lcd: &LcdSnapshot, time: f64) -> LcdSnapshot {
+    let cursor_visible = ((time * 2.0) as u64).is_multiple_of(2);
+    cursor_blink_snapshot(lcd, cursor_visible)
 }
 
 fn card(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
@@ -989,15 +1011,163 @@ fn metadata_pill(ui: &mut egui::Ui, label: &str, value: impl ToString) {
 #[cfg(test)]
 mod tests {
     use super::{
-        MatrixTap, NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, PLUS_CHORD, matrix_code_for_key,
-        matrix_tap_for_key, tap_for_text_char,
+        MatrixTap, NEO_VISIBLE_LCD_HEIGHT, NEO_VISIBLE_LCD_WIDTH, PLUS_CHORD, display_lcd_snapshot, matrix_code_for_key,
+        matrix_tap_for_key, realtime_target_cycles, tap_for_text_char,
     };
     use eframe::egui;
+    use std::time::Duration;
 
     use crate::keyboard::{matrix_cells, matrix_key_is_character, matrix_key_label};
     use crate::lcd::{
         LcdSnapshot, cursor_blink_snapshot, probable_cursor_columns, probable_cursor_pixels,
     };
+
+    #[test]
+    fn calculator_accepts_gui_number_key() -> Result<(), Box<dyn std::error::Error>> {
+        let firmware = crate::firmware::FirmwareRuntime::load_small_rom("../analysis/cab/os3kneorom.os3kos")?;
+        let mut session = crate::firmware_session::FirmwareSession::boot_with_keys(firmware, &[0x0e, 0x0c], 512)?;
+        crate::recovery_seed::apply_seed_file_if_present(&mut session, crate::recovery_seed::default_seed_path())?;
+        session.run_realtime_steps(25_100_000);
+        session.tap_matrix_code_debug(0x15);
+        session.run_realtime_steps(2_000_000);
+        session.tap_matrix_code_debug(0x69);
+        session.run_realtime_steps(1_000_000);
+        session.press_matrix_code(0x74);
+        session.run_realtime_steps(1_900_000);
+        session.release_matrix_code(0x74);
+        session.run_realtime_steps(1_000_000);
+        let before = session.lcd_snapshot();
+        for digit in '0'..='9' {
+            let mut app = super::AlphaEmuApp::load(std::path::Path::new("../analysis/cab/os3kneorom.os3kos"));
+            app.session = Some(session.clone());
+            let context = egui::Context::default();
+            let input = egui::RawInput {
+                events: vec![egui::Event::Text(digit.to_string())],
+                ..Default::default()
+            };
+            let _ = context.run_ui(input, |ui| app.handle_keyboard(ui.ctx()));
+            let mut trial = app.session.take().unwrap();
+            trial.run_realtime_steps(5_000_000);
+            assert_ne!(trial.lcd_snapshot(), before, "Calculator did not display digit {digit}");
+        }
+        let mut shifted = super::AlphaEmuApp::load(std::path::Path::new("../analysis/cab/os3kneorom.os3kos"));
+        shifted.session = Some(session.clone());
+        let context = egui::Context::default();
+        let input = egui::RawInput {
+            modifiers: egui::Modifiers { shift: true, ..Default::default() },
+            events: vec![egui::Event::Text("7".into())],
+            ..Default::default()
+        };
+        let _ = context.run_ui(input, |ui| shifted.handle_keyboard(ui.ctx()));
+        let mut shifted = shifted.session.take().unwrap();
+        shifted.run_realtime_steps(5_000_000);
+        let mut unshifted = session.clone();
+        super::tap_for_text_char('7').unwrap().apply_as_text(&mut unshifted);
+        unshifted.run_realtime_steps(5_000_000);
+        assert_eq!(shifted.lcd_snapshot(), unshifted.lcd_snapshot(), "Czech Shift+7 must enter the digit 7");
+        let mut desktop = super::AlphaEmuApp::load(std::path::Path::new("../analysis/cab/os3kneorom.os3kos"));
+        desktop.session = Some(session.clone());
+        let context = egui::Context::default();
+        let shift = egui::Modifiers { shift: true, ..Default::default() };
+        let press = egui::RawInput {
+            modifiers: shift,
+            events: vec![
+                egui::Event::Key { key: egui::Key::Num7, physical_key: Some(egui::Key::Num7), pressed: true, repeat: false, modifiers: shift },
+                egui::Event::Text("7".into()),
+            ],
+            ..Default::default()
+        };
+        let _ = context.run_ui(press, |ui| desktop.handle_keyboard(ui.ctx()));
+        let release = egui::RawInput {
+            events: vec![egui::Event::Key { key: egui::Key::Num7, physical_key: Some(egui::Key::Num7), pressed: false, repeat: false, modifiers: egui::Modifiers::default() }],
+            ..Default::default()
+        };
+        let _ = context.run_ui(release, |ui| desktop.handle_keyboard(ui.ctx()));
+        let mut desktop = desktop.session.take().unwrap();
+        desktop.run_realtime_steps(5_000_000);
+        assert_eq!(desktop.lcd_snapshot(), unshifted.lcd_snapshot(), "Czech shifted key events must enter digit 7");
+        let mut held = super::AlphaEmuApp::load(std::path::Path::new("../analysis/cab/os3kneorom.os3kos"));
+        held.session = Some(session.clone());
+        let context = egui::Context::default();
+        let _ = context.run_ui(egui::RawInput { modifiers: shift, ..Default::default() }, |ui| held.handle_keyboard(ui.ctx()));
+        held.session.as_mut().unwrap().run_realtime_steps(3_000_000);
+        let _ = context.run_ui(egui::RawInput { modifiers: shift, events: vec![egui::Event::Text("7".into())], ..Default::default() }, |ui| held.handle_keyboard(ui.ctx()));
+        held.session.as_mut().unwrap().run_realtime_steps(5_000_000);
+        assert_eq!(held.session.as_ref().unwrap().lcd_snapshot(), unshifted.lcd_snapshot(), "digit must work while Shift remains physically held");
+        let mut ime = super::AlphaEmuApp::load(std::path::Path::new("../analysis/cab/os3kneorom.os3kos"));
+        ime.session = Some(session.clone());
+        let context = egui::Context::default();
+        let input = egui::RawInput {
+            events: vec![egui::Event::Ime(egui::ImeEvent::Commit("7".into()))],
+            ..Default::default()
+        };
+        let _ = context.run_ui(input, |ui| ime.handle_keyboard(ui.ctx()));
+        let mut ime = ime.session.take().unwrap();
+        ime.run_realtime_steps(5_000_000);
+        assert_eq!(ime.lcd_snapshot(), unshifted.lcd_snapshot(), "committed input must enter digit 7");
+        let mut czech = super::AlphaEmuApp::load(std::path::Path::new("../analysis/cab/os3kneorom.os3kos"));
+        czech.session = Some(session.clone());
+        let context = egui::Context::default();
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::Key { key: egui::Key::Num7, physical_key: Some(egui::Key::Num7), pressed: true, repeat: false, modifiers: egui::Modifiers::default() },
+                egui::Event::Text("ý".into()),
+            ],
+            ..Default::default()
+        };
+        let _ = context.run_ui(input, |ui| czech.handle_keyboard(ui.ctx()));
+        let mut czech = czech.session.take().unwrap();
+        czech.run_realtime_steps(5_000_000);
+        assert_eq!(czech.lcd_snapshot(), before, "unsupported Czech text must not become a digit");
+        let mut one = super::AlphaEmuApp::load(std::path::Path::new("../analysis/cab/os3kneorom.os3kos"));
+        one.session = Some(session.clone());
+        let context = egui::Context::default();
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::Key { key: egui::Key::Plus, physical_key: Some(egui::Key::Num1), pressed: true, repeat: false, modifiers: egui::Modifiers::default() },
+                egui::Event::Text("+".into()),
+            ],
+            ..Default::default()
+        };
+        let _ = context.run_ui(input, |ui| one.handle_keyboard(ui.ctx()));
+        let mut one = one.session.take().unwrap();
+        one.run_realtime_steps(5_000_000);
+        let mut expected_one = session.clone();
+        super::tap_for_text_char('+').unwrap().apply_as_text(&mut expected_one);
+        expected_one.run_realtime_steps(5_000_000);
+        assert_eq!(one.lcd_snapshot(), expected_one.lcd_snapshot(), "Czech plus key must enter plus only");
+        Ok(())
+    }
+
+    #[test]
+    fn lcd_render_blinks_cursor_without_changing_framebuffer() {
+        let mut lcd = LcdSnapshot { width: 264, height: 64, pixels: vec![false; 264 * 64] };
+        for y in 0..16 {
+            lcd.pixels[y * lcd.width] = true;
+            lcd.pixels[y * lcd.width + 1] = true;
+        }
+        assert!(display_lcd_snapshot(&lcd, 0.0).pixels[0]);
+        assert!(!display_lcd_snapshot(&lcd, 0.5).pixels[0]);
+        assert!(display_lcd_snapshot(&lcd, 1.0).pixels[0]);
+        assert!(lcd.pixels[0]);
+    }
+
+    #[test]
+    fn shortcut_chord_captures_modifiers_for_delayed_playback() {
+        let modifiers = egui::Modifiers { ctrl: true, shift: true, ..Default::default() };
+        let chord = MatrixTap::Key(0x2c).codes_with_modifiers(modifiers);
+        assert_eq!(chord, [0x2c, super::SHIFT_CODE, super::CTRL_CODE]);
+        assert_eq!(MatrixTap::Chord(PLUS_CHORD).codes_with_modifiers(modifiers),
+            [super::SHIFT_CODE, 0x40, super::CTRL_CODE]);
+    }
+
+    #[test]
+    fn realtime_budget_preserves_overshoot_and_bounded_debt() {
+        assert_eq!(realtime_target_cycles(Duration::from_millis(20), 0.0), 660_000.0);
+        assert_eq!(realtime_target_cycles(Duration::from_millis(20), -10.0), 659_990.0);
+        assert_eq!(realtime_target_cycles(Duration::from_millis(20), 2_000_000.0), 2_660_000.0);
+        assert_eq!(realtime_target_cycles(Duration::from_millis(100), 3_300_000.0), 3_300_000.0);
+    }
 
     #[test]
     fn printable_text_keys_are_covered() {
