@@ -329,10 +329,11 @@ Two hardware details were required for this to work:
 Cursor rendering note: after AlphaWord reaches a blank file, headless sampling
 shows the framebuffer cursor pixels are static and the firmware does not
 continuously rewrite the LCD for blink. The GUI therefore overlays the visible
-NEO-style blink by hiding isolated tall cursor runs during the off phase. The
-mask is limited to the detected run, not the full display column, so text pixels
-above or below the cursor on the same x coordinate remain visible. This is a
-display-layer behavior and does not mutate emulated LCD RAM.
+NEO-style blink by inverting detected cursor pixels during the off phase. The
+menu cursor is XORed over the selection dash, which interrupts one of its two
+columns; the display overlay includes that interrupted column and restores the
+dash. The mask is limited to the cursor area, so pixels above and below it stay
+unchanged. This is a display-layer heuristic and does not mutate LCD RAM.
 
 The validated AlphaWord blank-editor cursor dump is a narrow block at columns
 `0..1`, rows `0..15`. The headless validation command writes paired PBM dumps:

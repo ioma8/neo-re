@@ -1360,6 +1360,24 @@ mod tests {
     }
 
     #[test]
+    fn menu_cursor_blinks_as_a_whole_and_preserves_selection_marker() {
+        let mut lcd = LcdSnapshot { width: 320, height: 128, pixels: vec![false; 320 * 128] };
+        for y in 16..32 {
+            lcd.pixels[y * lcd.width + 11] = true;
+            lcd.pixels[y * lcd.width + 12] = true;
+        }
+        // The firmware draws the cursor by XOR over the menu's horizontal dash.
+        lcd.pixels[23 * lcd.width + 12] = false;
+        for x in 13..17 { lcd.pixels[23 * lcd.width + x] = true; }
+        let off = cursor_blink_snapshot(&lcd, false);
+        for y in 16..32 {
+            assert!(!off.pixels[y * lcd.width + 11]);
+            assert_eq!(off.pixels[y * lcd.width + 12], y == 23);
+        }
+        assert!(off.pixels[23 * lcd.width + 13]);
+    }
+
+    #[test]
     fn cursor_detector_masks_only_the_cursor_run_not_the_whole_column() {
         let mut lcd = LcdSnapshot {
             width: 320,

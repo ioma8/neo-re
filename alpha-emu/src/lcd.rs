@@ -177,7 +177,7 @@ pub fn cursor_blink_snapshot(snapshot: &LcdSnapshot, cursor_visible: bool) -> Lc
     for y in 0..visible_height {
         for x in 0..visible_width {
             if cursor_mask[y * visible_width + x] {
-                blink.pixels[y * blink.width + x] = false;
+                blink.pixels[y * blink.width + x] ^= true;
             }
         }
     }
@@ -211,6 +211,20 @@ pub fn probable_cursor_pixels(
                 if let Some(run) = runs[column] {
                     for y in run.start..run.end {
                         mask[y * visible_width + column] = true;
+                    }
+                }
+            }
+            // A cursor is XORed over existing text. A selection dash can split
+            // one of its columns, so include the adjacent interrupted column.
+            if end - start == 1 && let Some(run) = runs[start] && run.len() == 16 {
+                for neighbor in [start.checked_sub(1), (end < visible_width).then_some(end)].into_iter().flatten() {
+                    let lit = (run.start..run.end)
+                        .filter(|y| snapshot.pixels[y * snapshot.width + neighbor])
+                        .count();
+                    if lit == run.len() - 1 {
+                        for y in run.start..run.end {
+                            mask[y * visible_width + neighbor] = true;
+                        }
                     }
                 }
             }
