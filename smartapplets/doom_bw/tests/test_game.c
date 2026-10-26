@@ -116,6 +116,23 @@ static void off_axis_enemies_are_not_shot(void) {
     assert(game.enemies[0].alive == 1);
 }
 
+
+static void close_enemy_still_projects(void) {
+    RayGame_t game;
+    int16_t cx, w, h, by;
+    uint16_t dep;
+    ray_game_init(&game);
+    place(&game, 4 * RAY_Q8 + 96, 7 * RAY_Q8 + RAY_Q8 / 2, RAY_ANGLE_EAST);
+    game.enemies[0].x = 4;
+    game.enemies[0].y = 7;
+    game.enemies[0].alive = 1;
+    assert(ray_game_enemy_view(&game, 0, &cx, &w, &h, &by, &dep));
+    assert(w > 0 && h > 0);
+    assert(dep == 32);
+    assert(by <= RAY_VIEW_H);
+    assert(by - h < RAY_VIEW_H);
+}
+
 static void out_of_bounds_walls_are_solid(void) {
     assert(ray_game_wall_type(255, 255) == 1);
     assert(ray_game_wall_type(0, 0) == 1);
@@ -133,6 +150,7 @@ int main(void) {
     walls_block_shots();
     enemies_behind_the_player_are_not_shot();
     off_axis_enemies_are_not_shot();
+    close_enemy_still_projects();
     out_of_bounds_walls_are_solid();
     puts("doom game tests passed");
     return 0;

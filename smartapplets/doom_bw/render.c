@@ -196,30 +196,34 @@ static void PrepareRays(const RayGame_t* game, int16_t* ray_x, int16_t* ray_y) {
     }
 }
 
-static void DrawFloorCeiling(const RayGame_t* game, uint8_t* fb, const int16_t* ray_x, const int16_t* ray_y) {
-    (void)game; (void)ray_x; (void)ray_y;
+static void DrawFloor(uint8_t* fb) {
     for(uint16_t i = 0; i < FB_BYTES; i++) fb[i] = 0;
-    for(int16_t y = RAY_HORIZON + 1; y < RAY_VIEW_H; y++) {
-        for(int16_t x = 0; x < RAY_VIEW_W; x++) {
-            if((x & 3) == 0 && (y & 3) == 0) FB_BLACK(fb, x, y);
+    for(int16_t y = RAY_HORIZON + 4; y < RAY_VIEW_H; y += 4) {
+        for(int16_t x = 0; x < RAY_VIEW_W; x += 4) {
+            FB_BLACK(fb, x, y);
         }
     }
 }
 
 static void DrawWallSpan(uint8_t* fb, int16_t x, int16_t top, int16_t bot, bool shaded) {
-    for(uint8_t page = 0; page < FB_PAGES; page++) {
-        int16_t y0 = (int16_t)(page * 8);
-        int16_t y1 = (int16_t)(y0 + 7);
-        uint8_t span = 0;
-        if(bot < y0 || top > y1) continue;
-        for(uint8_t r = 0; r < 8; r++) {
-            int16_t y = (int16_t)(y0 + r);
-            if(y >= top && y <= bot) span |= (uint8_t)(1u << r);
-        }
-        fb[page * RAY_VIEW_W + x] |= span;
+    uint8_t first;
+    uint8_t last;
+    uint8_t page;
+    if(top < 0) top = 0;
+    if(bot >= RAY_VIEW_H) bot = RAY_VIEW_H - 1;
+    if(top > bot) return;
+    first = (uint8_t)(top >> 3);
+    last = (uint8_t)(bot >> 3);
+    for(page = first; page <= last; page++) {
+        uint8_t mask = 0xffu;
+        uint8_t* cell;
+        if(page == first) mask &= (uint8_t)(0xffu << (top & 7));
+        if(page == last) mask &= (uint8_t)(0xffu >> (7 - (bot & 7)));
+        cell = &fb[page * RAY_VIEW_W + x];
+        *cell |= mask;
         if(shaded) {
-            uint8_t mask = (x & 1) ? 0xaau : 0x55u;
-            fb[page * RAY_VIEW_W + x] &= (uint8_t)~(span & mask);
+            uint8_t dither = (x & 1) ? 0xaau : 0x55u;
+            *cell &= (uint8_t)~(mask & dither);
         }
     }
 }
@@ -241,8 +245,10 @@ static void DrawWalls(
             continue;
         }
         depth[x] = hit.distance;
-        height = (int16_t)DivU16((uint16_t)(RAY_FOCAL * RAY_WALL_HEIGHT), hit.distance < 1 ? 1 : hit.distance);
-        if(height > 2000) height = 2000;
+        {
+            uint16_t projected = DivU16((uint16_t)(RAY_FOCAL * RAY_WALL_HEIGHT), hit.distance < 1 ? 1 : hit.distance);
+            height = projected > 2000u ? 2000 : (int16_t)projected;
+        }
         top = (int16_t)(RAY_HORIZON - (height >> 1));
         bot = (int16_t)(top + height);
         DrawWallSpan(fb, x, top, bot, hit.side == 1);
@@ -359,7 +365,7 @@ void ray_render_frame(
     int16_t* ray_y
 ) {
     PrepareRays(game, ray_x, ray_y);
-    DrawFloorCeiling(game, fb, ray_x, ray_y);
+    DrawFloor(fb);
     DrawWalls(game, fb, depth, ray_x, ray_y);
     DrawEnemies(game, fb, depth);
     DrawGun(game, fb);

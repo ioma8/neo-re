@@ -22,7 +22,6 @@ enum {
     RAY_EYE_HEIGHT = 128,
     RAY_WALL_HEIGHT = 240,
     RAY_ENEMY_HEIGHT = 240,
-    RAY_ENEMY_WIDTH = 176,
     RAY_MOVE_STEP = 60,
     RAY_TURN_STEP = 8
 };
@@ -38,8 +37,6 @@ typedef struct {
     uint8_t wall_x;
     uint8_t wall_y;
     uint8_t side;
-    uint8_t wall_type;
-    uint8_t tex_u;
 } RayHit_t;
 
 typedef struct {
@@ -54,8 +51,8 @@ typedef struct {
     uint8_t angle;
     RayEnemy_t enemies[RAY_MAX_ENEMIES];
     uint8_t score;
-    uint8_t hit_flash;
     uint8_t muzzle_flash;
+    uint8_t reserved; /* keeps RayState/validator offsets stable */
 } RayGame_t;
 
 void ray_game_init(RayGame_t* game);
@@ -63,13 +60,10 @@ void ray_game_turn_left(RayGame_t* game);
 void ray_game_turn_right(RayGame_t* game);
 void ray_game_move(RayGame_t* game, RayMove_t move);
 RayHit_t ray_game_cast_center(const RayGame_t* game);
-RayHit_t ray_game_cast(const RayGame_t* game, int16_t angle_offset);
 RayHit_t ray_game_cast_vector(const RayGame_t* game, int16_t ray_x, int16_t ray_y);
 int16_t ray_game_dir_x(const RayGame_t* game);
 int16_t ray_game_dir_y(const RayGame_t* game);
-bool ray_game_wall_at_cell(uint8_t x, uint8_t y);
 uint8_t ray_game_wall_type(uint8_t x, uint8_t y);
-bool ray_game_enemy_visible(const RayGame_t* game, uint8_t index, uint16_t* distance);
 bool ray_game_enemy_view(
     const RayGame_t* game,
     uint8_t index,

@@ -14,7 +14,7 @@ A small 1-bit raycaster for the AlphaSmart NEO's 264x64 LCD.
 | R | Restart |
 | Esc / Applets | Exit |
 
-Holding a direction queues one step. Steps run on a 120 ms timer so the
+Holding a direction queues one step. Steps run on a 90 ms timer so the
 renderer stays inside the LCD/firmware budget.
 
 ## Map
@@ -37,8 +37,8 @@ sparse:
 - a gun, a short muzzle flash and a small inverted crosshair.
 
 There is no minimap and no wall texture; the arena is simple enough to read at
-a glance. A frame takes about 3.55M cycles (~108 ms at 33 MHz), so the step
-timer is 120 ms.
+a glance. A frame takes about 2.18M cycles (~66 ms at 33 MHz), so the step
+timer is 90 ms.
 
 The framebuffer lives at `state + 25`, where `state = A5 + 0x300`; this is
 well below the firmware stack.
@@ -55,6 +55,6 @@ cc -std=c99 -Wall -Wextra -I smartapplets/doom_bw \
 ```
 
 Host tests cover spawn, ray hits, movement, collision, turning, shooting,
-line-of-sight, off-axis rejection, behind-the-player rejection and
-out-of-bounds walls. The emulator validation covers focus, timer stepping,
+line-of-sight, off-axis rejection, behind-the-player rejection, close-range
+enemy projection and out-of-bounds walls. The emulator validation covers focus, timer stepping,
 turning, movement, view updates, shooting, restart and Escape exit.

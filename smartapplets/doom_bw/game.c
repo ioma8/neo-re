@@ -138,10 +138,6 @@ uint8_t ray_game_wall_type(uint8_t x, uint8_t y) {
     return MAP[y][x];
 }
 
-bool ray_game_wall_at_cell(uint8_t x, uint8_t y) {
-    return WallAtCell(x, y);
-}
-
 static bool WallAtPoint(int16_t x, int16_t y) {
     if(x < 0 || y < 0) return true;
     return WallAtCell((uint8_t)(x >> 8), (uint8_t)(y >> 8));
@@ -216,8 +212,8 @@ void ray_game_init(RayGame_t* game) {
     game->enemies[2].y = 9;
     game->enemies[2].alive = 1;
     game->score = 0;
-    game->hit_flash = 0;
     game->muzzle_flash = 0;
+    game->reserved = 0;
 }
 
 void ray_game_turn_left(RayGame_t* game) {
@@ -247,7 +243,7 @@ int16_t ray_game_dir_y(const RayGame_t* game) {
 }
 
 RayHit_t ray_game_cast_vector(const RayGame_t* game, int16_t ray_x, int16_t ray_y) {
-    RayHit_t hit = {false, 0, 0, 0, 0, 0, 0};
+    RayHit_t hit = {false, 0, 0, 0, 0};
     int16_t abs_x = ray_x < 0 ? (int16_t)-ray_x : ray_x;
     int16_t abs_y = ray_y < 0 ? (int16_t)-ray_y : ray_y;
     uint16_t delta_x = abs_x != 0 ? INV_RAY[abs_x < RAY_ANGLE_COUNT ? abs_x : RAY_ANGLE_COUNT - 1] : 0;
@@ -288,46 +284,19 @@ RayHit_t ray_game_cast_vector(const RayGame_t* game, int16_t ray_x, int16_t ray_
             side = 1;
         }
         if(WallAtCell(cell_x, cell_y)) {
-            int16_t world;
             hit.hit = true;
             hit.distance = distance > 1 ? distance : 1;
             hit.wall_x = cell_x;
             hit.wall_y = cell_y;
             hit.side = side;
-            hit.wall_type = (cell_x >= RAY_MAP_W || cell_y >= RAY_MAP_H) ? 1 : MAP[cell_y][cell_x];
-            if(side == 0) {
-                world = (int16_t)(game->player_y + (int16_t)(MulS16((int16_t)hit.distance, ray_y) >> 7));
-            } else {
-                world = (int16_t)(game->player_x + (int16_t)(MulS16((int16_t)hit.distance, ray_x) >> 7));
-            }
-            hit.tex_u = (uint8_t)(world & (RAY_Q8 - 1));
             return hit;
         }
     }
     return hit;
 }
 
-RayHit_t ray_game_cast(const RayGame_t* game, int16_t angle_offset) {
-    uint8_t angle = AngleAdd(game->angle, angle_offset);
-    return ray_game_cast_vector(game, COS256[angle], SIN256[angle]);
-}
-
 RayHit_t ray_game_cast_center(const RayGame_t* game) {
-    return ray_game_cast(game, 0);
-}
-
-bool ray_game_enemy_visible(const RayGame_t* game, uint8_t index, uint16_t* distance) {
-    int16_t forward;
-    int16_t lateral;
-    const RayEnemy_t* enemy;
-    if(index >= RAY_MAX_ENEMIES) return false;
-    enemy = &game->enemies[index];
-    if(!enemy->alive) return false;
-    EnemyRelative(game, index, &forward, &lateral);
-    if(forward <= 0) return false;
-    if(!LineOfSight(game, enemy->x, enemy->y)) return false;
-    if(distance != 0) *distance = (uint16_t)forward;
-    return true;
+    return ray_game_cast_vector(game, COS256[game->angle], SIN256[game->angle]);
 }
 
 bool ray_game_enemy_view(
@@ -348,16 +317,20 @@ bool ray_game_enemy_view(
     enemy = &game->enemies[index];
     if(!enemy->alive) return false;
     EnemyRelative(game, index, &forward, &lateral);
-    if(forward < 48) return false;
-    sprite_h = DivU16((uint16_t)(RAY_FOCAL * RAY_ENEMY_HEIGHT), (uint16_t)forward);
-    if(sprite_h < 3) return false;
-    if(sprite_h > 120) sprite_h = 120;
-    sprite_w = (uint16_t)((sprite_h * 7) >> 3);
-    *center_x = (int16_t)(RAY_VIEW_W / 2 + DivS16(MulS16(lateral, RAY_FOCAL), forward));
-    *width = (int16_t)sprite_w;
-    *height = (int16_t)sprite_h;
-    *bottom_y = (int16_t)(RAY_HORIZON + DivU16((uint16_t)(RAY_FOCAL * RAY_EYE_HEIGHT), (uint16_t)forward));
-    *depth = (uint16_t)forward;
+    if(forward <= 0) return false;
+    {
+        int16_t projection = forward < 48 ? 48 : forward;
+        sprite_h = DivU16((uint16_t)(RAY_FOCAL * RAY_ENEMY_HEIGHT), (uint16_t)projection);
+        if(sprite_h < 3) return false;
+        if(sprite_h > 120) sprite_h = 120;
+        sprite_w = (uint16_t)((sprite_h * 7) >> 3);
+        *center_x = (int16_t)(RAY_VIEW_W / 2 + DivS16(MulS16(lateral, RAY_FOCAL), projection));
+        *width = (int16_t)sprite_w;
+        *height = (int16_t)sprite_h;
+        *bottom_y = (int16_t)(RAY_HORIZON + DivU16((uint16_t)(RAY_FOCAL * RAY_EYE_HEIGHT), (uint16_t)projection));
+        if(*bottom_y > RAY_VIEW_H) *bottom_y = RAY_VIEW_H;
+        *depth = (uint16_t)forward;
+    }
     return true;
 }
 
@@ -383,11 +356,9 @@ bool ray_game_shoot(RayGame_t* game) {
     if(best == 0xffu) return false;
     game->enemies[best].alive = 0;
     if(game->score < 255) game->score++;
-    game->hit_flash = 2;
     return true;
 }
 
 void ray_game_tick(RayGame_t* game) {
-    if(game->hit_flash > 0) game->hit_flash--;
     if(game->muzzle_flash > 0) game->muzzle_flash--;
 }

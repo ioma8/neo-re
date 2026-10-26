@@ -1696,7 +1696,7 @@ fn doom_state(session: &FirmwareSession) -> DoomState {
         angle: bytes.get(base + 4).copied().unwrap_or_default(),
         enemy_alive: bytes.get(base + 7).copied().unwrap_or_default(),
         score: bytes.get(base + 14).copied().unwrap_or_default(),
-        muzzle: bytes.get(base + 16).copied().unwrap_or_default(),
+        muzzle: bytes.get(base + 15).copied().unwrap_or_default(),
     }
 }
 

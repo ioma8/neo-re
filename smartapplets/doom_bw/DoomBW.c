@@ -2,10 +2,12 @@
 #include "game.h"
 #include "render.h"
 
+#include <stddef.h>
+
 enum {
     DOOM_FB_BYTES = RAY_VIEW_W * (RAY_VIEW_H / 8),
     RAW_KEY_SPACE = 0x79,
-    STEP_MS = 120
+    STEP_MS = 90
 };
 
 typedef struct {
@@ -19,6 +21,10 @@ typedef struct {
     int16_t ray_x[RAY_COLS];
     int16_t ray_y[RAY_COLS];
 } RayState_t;
+
+_Static_assert(sizeof(RayGame_t) == 18, "RayGame_t layout changed");
+_Static_assert(offsetof(RayState_t, step_timer) == 18, "timer offset changed");
+_Static_assert(offsetof(RayState_t, framebuffer) == 25, "framebuffer offset changed");
 
 BW_APP_ENTRY(alpha_neo_process_message);
 BW_APP_STATE(RayState_t);
@@ -71,7 +77,7 @@ static void TickIfDue(RayState_t* state) {
         state->pending_move = 0;
         redraw = true;
     }
-    if(redraw || state->game.muzzle_flash != 0 || state->game.hit_flash != 0) {
+    if(redraw || state->game.muzzle_flash != 0) {
         ray_game_tick(&state->game);
         bw_timer_reset(&state->step_timer, STEP_MS);
         Render(state);
